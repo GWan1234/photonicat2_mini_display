@@ -1,7 +1,7 @@
 package main
 
 import (
-	st7789 "github.com/c2h2/periph.io-st7789"
+	st7789 "photonicat2_display/periph.io-st7789"
 	"image"
 	"image/color"
 	"image/png"
