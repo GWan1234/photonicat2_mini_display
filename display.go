@@ -21,6 +21,13 @@ const (
 	DC_PIN = "GPIO121"
 	CS_PIN = "GPIO13"
 	BL_PIN = "GPIO117"
+	PCAT2_LCD_WIDTH = 172
+	PCAT2_LCD_HEIGHT = 320
+	PCAT2_X_OFFSET = 34
+	PCAT2_L_MARGIN = 10
+	PCAT2_R_MARGIN = 10
+	PCAT2_T_MARGIN = 10
+	PCAT2_B_MARGIN = 10
 )
 
 type ImageBuffer struct {
@@ -31,15 +38,12 @@ type ImageBuffer struct {
 }
 
 var cachedImage ImageBuffer
-const (
-	PCAT2_LCD_WIDTH = 172
-	PCAT2_LCD_HEIGHT = 320
-	PCAT2_X_OFFSET = 34
-	PCAT2_L_MARGIN = 10
-	PCAT2_R_MARGIN = 10
-	PCAT2_T_MARGIN = 10
-	PCAT2_B_MARGIN = 10
-)
+var framebuffers [][]color.RGBA
+
+func writeFrame(display st7789.Device, frame []color.RGBA) {
+	display.FillRectangleWithBuffer(PCAT2_L_MARGIN, PCAT2_T_MARGIN, PCAT2_LCD_WIDTH-PCAT2_L_MARGIN-PCAT2_R_MARGIN, PCAT2_LCD_HEIGHT-PCAT2_T_MARGIN-PCAT2_B_MARGIN, frame)
+}
+
 
 func main() {
 	// setup board
@@ -89,14 +93,17 @@ func main() {
 	startTime := time.Now()
 
 	//make 2 framebuffers
-	framebuffers := make([][]color.RGBA, 2)
+	framebuffers = make([][]color.RGBA, 2)
 	framebuffers[0] = make([]color.RGBA, (PCAT2_LCD_WIDTH-PCAT2_L_MARGIN-PCAT2_R_MARGIN)*(PCAT2_LCD_HEIGHT-PCAT2_T_MARGIN-PCAT2_B_MARGIN))
 	framebuffers[1] = make([]color.RGBA, (PCAT2_LCD_WIDTH-PCAT2_L_MARGIN-PCAT2_R_MARGIN)*(PCAT2_LCD_HEIGHT-PCAT2_T_MARGIN-PCAT2_B_MARGIN))
-
+	currFrame := framebuffers[0]
 	for {
 		//displayClock(display, 0, 0)
 		//displayPNG(display, 0, 0, "example.png")
-		display.FillRectangleWithBuffer(PCAT2_L_MARGIN, PCAT2_T_MARGIN, PCAT2_LCD_WIDTH-PCAT2_L_MARGIN-PCAT2_R_MARGIN, PCAT2_LCD_HEIGHT-PCAT2_T_MARGIN-PCAT2_B_MARGIN, framebuffers[0])
+		//pointer to current framebuffer
+		currFrame = framebuffers[frames % 2]
+		writeFrame(display, currFrame)
+
 		frames++
 		//calc fps
 		if frames % 10 == 0 {
