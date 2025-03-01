@@ -23,6 +23,23 @@ const (
 	BL_PIN = "GPIO117"
 )
 
+type ImageBuffer struct {
+    buffer []color.RGBA
+    width  int
+    height int
+    loaded bool
+}
+
+var cachedImage ImageBuffer
+const (
+	PCAT2_LCD_WIDTH = 172
+	PCAT2_LCD_HEIGHT = 320
+	PCAT2_X_OFFSET = 34
+	PCAT2_L_MARGIN = 10
+	PCAT2_R_MARGIN = 10
+	PCAT2_T_MARGIN = 10
+	PCAT2_B_MARGIN = 10
+)
 
 func main() {
 	// setup board
@@ -39,7 +56,7 @@ func main() {
 
 	defer spiPort.Close()
 
-	conn, err := spiPort.Connect(80000*physic.KiloHertz, spi.Mode0, 8)
+	conn, err := spiPort.Connect(100000*physic.KiloHertz, spi.Mode0, 8)
 
 	if err != nil {
 		log.Fatal(err)
@@ -55,13 +72,14 @@ func main() {
 		gpioreg.ByName(BL_PIN))
 
 	display.Configure(st7789.Config{
-		Width:        172,
-		Height:       320,
+		Width:        PCAT2_LCD_WIDTH,
+		Height:       PCAT2_LCD_HEIGHT,
 		Rotation:     st7789.ROTATION_180,
 		RowOffset:    0,
-		ColumnOffset: 34,
+		ColumnOffset: PCAT2_X_OFFSET,
 		FrameRate:    st7789.FRAMERATE_60,
 		VSyncLines:   st7789.MAX_VSYNC_SCANLINES,
+		UseCS:        false,
 	})
 
 	// test display
@@ -70,17 +88,27 @@ func main() {
 	frames := 0
 	startTime := time.Now()
 
+	//make 2 framebuffers
+	framebuffers := make([][]color.RGBA, 2)
+	framebuffers[0] = make([]color.RGBA, (PCAT2_LCD_WIDTH-PCAT2_L_MARGIN-PCAT2_R_MARGIN)*(PCAT2_LCD_HEIGHT-PCAT2_T_MARGIN-PCAT2_B_MARGIN))
+	framebuffers[1] = make([]color.RGBA, (PCAT2_LCD_WIDTH-PCAT2_L_MARGIN-PCAT2_R_MARGIN)*(PCAT2_LCD_HEIGHT-PCAT2_T_MARGIN-PCAT2_B_MARGIN))
+
 	for {
-		
-		displayClock(display, 0, 0)
-		displayPNG(display, 0, 0, "example.png")
+		//displayClock(display, 0, 0)
+		//displayPNG(display, 0, 0, "example.png")
+		display.FillRectangleWithBuffer(PCAT2_L_MARGIN, PCAT2_T_MARGIN, PCAT2_LCD_WIDTH-PCAT2_L_MARGIN-PCAT2_R_MARGIN, PCAT2_LCD_HEIGHT-PCAT2_T_MARGIN-PCAT2_B_MARGIN, framebuffers[0])
 		frames++
 		//calc fps
-		elapsedTime := time.Since(startTime)
-		fps = int(float64(frames) / elapsedTime.Seconds())
-		fmt.Println("FPS:", fps)
+		if frames % 10 == 0 {
+			elapsedTime := time.Since(startTime)
+			fps = int(float64(frames) / elapsedTime.Seconds())
+			fmt.Printf("FPS: %d, FRAMES: %d\n", fps, frames)
+		}
 	}
 }
+
+
+
 
 func displayClock(display st7789.Device, x int16, y int16) {
 	display.FillRectangle(x, y, 172, 320, color.RGBA{R: 132, G: 22, B: 0, A: 255})
@@ -88,33 +116,38 @@ func displayClock(display st7789.Device, x int16, y int16) {
 
 func displayPNG(display st7789.Device, x int, y int, filePath string) {
 	// read and parse image file
-	image.RegisterFormat("png", "png", png.Decode, png.DecodeConfig)
-	imgFile, err := os.Open(filePath)
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer imgFile.Close()
+	if !cachedImage.loaded {
+        // Register format once (could be moved to init())
+        image.RegisterFormat("png", "png", png.Decode, png.DecodeConfig)
+        
+        imgFile, err := os.Open(filePath)
+        if err != nil {
+            log.Fatal(err)
+        }
+        defer imgFile.Close()
 
-	img, _, err := image.Decode(imgFile)
-	if err != nil {
-		log.Fatal(err)
-	}
+        img, _, err := image.Decode(imgFile)
+        if err != nil {
+            log.Fatal(err)
+        }
 
-	// convert image to slice of colors
-	bounds := img.Bounds()
-	width, height := bounds.Max.X, bounds.Max.Y
-	buffer := make([]color.RGBA, height*width)
+        bounds := img.Bounds()
+        cachedImage.width, cachedImage.height = bounds.Max.X, bounds.Max.Y
+        cachedImage.buffer = make([]color.RGBA, cachedImage.height*cachedImage.width)
 
-	for y := 0; y < height; y++ {
-		for x := 0; x < width; x++ {
-			// get pixel color and convert channels from int32 to int8
-			r, g, b, a := img.At(x, y).RGBA()
-			buffer[y*width+x] = color.RGBA{R: uint8(r / 0x100), G: uint8(g / 0x100), B: uint8(b / 0x100), A: uint8(a / 0x100)}
-		}
-	}
+        for y := 0; y < cachedImage.height; y++ {
+            for x := 0; x < cachedImage.width; x++ {
+                r, g, b, a := img.At(x, y).RGBA()
+                cachedImage.buffer[y*cachedImage.width+x] = color.RGBA{
+                    R: uint8(r / 0x100), G: uint8(g / 0x100), B: uint8(b / 0x100), A: uint8(a / 0x100),
+                }
+            }
+        }
+        cachedImage.loaded = true
+    }
 
 	// send image buffer to display
-	err = display.FillRectangleWithBuffer(int16(x), int16(y), int16(width), int16(height), buffer)
+	err := display.FillRectangleWithBuffer(int16(x), int16(y), int16(cachedImage.width), int16(cachedImage.height), cachedImage.buffer)
 	if err != nil {
 		fmt.Println(err)
 	}
