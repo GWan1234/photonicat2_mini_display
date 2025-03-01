@@ -1,0 +1,7 @@
+github.com/c2h2/periph.io-st7789 v0.0.0-20250227081724-cd34475d6389 h1:zLWYVxJijzWBpx5v0GtvZ3nHCvKZ9+ypfFRCTAaSuDo=
+github.com/c2h2/periph.io-st7789 v0.0.0-20250227081724-cd34475d6389/go.mod h1:wxIymBe54+/3S27CMjj+hMlG8bVzL9NcYlxs1vVBomk=
+github.com/jonboulle/clockwork v0.4.0 h1:p4Cf1aMWXnXAUh8lVfewRBx1zaTSYKrKMF2g3ST4RZ4=
+periph.io/x/conn/v3 v3.7.2 h1:qt9dE6XGP5ljbFnCKRJ9OOCoiOyBGlw7JZgoi72zZ1s=
+periph.io/x/conn/v3 v3.7.2/go.mod h1:Ao0b4sFRo4QOx6c1tROJU1fLJN1hUIYggjOrkIVnpGg=
+periph.io/x/host/v3 v3.8.3 h1:v90ozCFDWgEyfNElZ+JnOvq0jAdW0vmgjCUy8dYXDds=
+periph.io/x/host/v3 v3.8.3/go.mod h1:uKrIpfXjELwHkwGBNe6aos//XiQ/3uxDa1P2BmLV6Ok=
