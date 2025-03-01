@@ -59,7 +59,7 @@ func main() {
 		Height:       320,
 		Rotation:     st7789.ROTATION_180,
 		RowOffset:    0,
-		ColumnOffset: 20,
+		ColumnOffset: 34,
 		FrameRate:    st7789.FRAMERATE_60,
 		VSyncLines:   st7789.MAX_VSYNC_SCANLINES,
 	})
