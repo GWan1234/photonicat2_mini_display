@@ -33,10 +33,10 @@ const (
 	PCAT2_LCD_WIDTH  = 172
 	PCAT2_LCD_HEIGHT = 320
 	PCAT2_X_OFFSET   = 34
-	PCAT2_L_MARGIN   = 10
-	PCAT2_R_MARGIN   = 10
-	PCAT2_T_MARGIN   = 10
-	PCAT2_B_MARGIN   = 10
+	PCAT2_L_MARGIN   = 8
+	PCAT2_R_MARGIN   = 8
+	PCAT2_T_MARGIN   = 8
+	PCAT2_B_MARGIN   = 8
 	
 )
 
@@ -163,6 +163,7 @@ func clearFrame(frame *image.RGBA) {
 	}
 }
 
+
 //---------------- Main ----------------
 
 func main() {
@@ -288,6 +289,7 @@ func main() {
 
 		drawTopBar(currFrame)
 		sendFrameImage(display, currFrame)
+		//saveFrameToPng(currFrame, "frame.png")
 		
 
 		frames++

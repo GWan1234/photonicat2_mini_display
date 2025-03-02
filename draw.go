@@ -382,18 +382,8 @@ func drawBattery(w, h int, soc float64, onBattery bool) *image.RGBA {
 		img.SetRGBA(coord.X, coord.Y, newColor)
 	}
 
-	
-	//save png
-	/*outFile, err := os.Create("rounded_rectangle.png")
-	if err != nil {
-		panic(err)
-	}
-	defer outFile.Close()
-	png.Encode(outFile, img)*/
-
 	return img
 }
-
 
 func drawTopBar(frame *image.RGBA) {
 	var timeStr string
@@ -416,13 +406,24 @@ func drawTopBar(frame *image.RGBA) {
 	}
 	networkStr := "5G"
 
-	drawTextOnFrame(frame, timeStr, 0, 0, faceBig, PCAT_WHITE, 0, 0)
+	drawTextOnFrame(frame, timeStr, 3, 0, faceBig, PCAT_WHITE, 0, 0)
 
 	//draw network
-	drawTextOnFrame(frame, networkStr, 100, 0, faceBig, PCAT_WHITE, 0, 0)
+	drawTextOnFrame(frame, networkStr, 88, 0, faceBig, PCAT_WHITE, 0, 0)
 
 	//draw Battery
-	img := drawBattery(33, 16, 5, false)
-	copyImageToImageAt(frame, img, 120, 0)
+	img := drawBattery(35, 16, 5, false)
+	copyImageToImageAt(frame, img, 119, 0)
 	
+}
+
+
+func saveFrameToPng(frame *image.RGBA, filename string) {
+	outFile, err := os.Create(filename)
+	if err != nil {
+		panic(err)
+	}
+	defer outFile.Close()
+	png.Encode(outFile, frame)
+	fmt.Println("Frame saved to", filename)
 }
