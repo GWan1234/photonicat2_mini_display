@@ -42,9 +42,13 @@ const (
 
 var PCAT_YELLOW      = color.RGBA{255, 229, 0, 255}
 var PCAT_WHITE       = color.RGBA{255, 255, 255, 255}
+var PCAT_WHITE_60A   = color.RGBA{255, 255, 255, 153}
 var PCAT_RED         = color.RGBA{226, 72, 38, 255}
+var PCAT_RED_60A     = color.RGBA{226, 72, 38, 153}
 var PCAT_GREY        = color.RGBA{98, 116, 130, 255}
 var PCAT_GREEN       = color.RGBA{70, 235, 145, 255}
+var PCAT_GREEN_60A   = color.RGBA{70, 235, 145, 153}
+
 
 var svgCache = make(map[string]*image.RGBA)
 

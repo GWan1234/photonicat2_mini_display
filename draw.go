@@ -11,6 +11,7 @@ import (
 	"os"
 	"time"
 	"bytes"
+	"math"
 	"math/rand"
 
 	st7789 "photonicat2_display/periph.io-st7789"
@@ -20,6 +21,8 @@ import (
 
 	"github.com/srwiley/oksvg"
 	"github.com/srwiley/rasterx"
+
+	"github.com/llgcode/draw2d/draw2dimg"
 )
 
 //---------------- Drawing Functions ----------------
@@ -295,8 +298,105 @@ func copyImageToImageAt(frame *image.RGBA, img *image.RGBA, x0, y0 int) error {
     return nil
 }
 
+func drawRoundedRect(gc *draw2dimg.GraphicContext, x, y, w, h, r float64) {
+	// Start at the top-left corner, offset by the radius.
+	gc.MoveTo(x+r, y)
+	// Draw top edge.
+	gc.LineTo(x+w-r, y)
+	// Top-right arc.
+	gc.ArcTo(x+w-r, y+r, r, r, -90, 90)
+	// Right edge.
+	gc.LineTo(x+w, y+h-r)
+	// Bottom-right arc.
+	gc.ArcTo(x+w-r, y+h-r, r, r, 0, 90)
+	// Bottom edge.
+	gc.LineTo(x+r, y+h)
+	// Bottom-left arc.
+	gc.ArcTo(x+r, y+h-r, r, r, 90, 90)
+	// Left edge.
+	gc.LineTo(x, y+r)
+	// Top-left arc.
+	gc.ArcTo(x+r, y+r, r, r, 180, 90)
+	gc.Close()
+}
+
+func drawBattery(w, h int, soc float64, onBattery bool) *image.RGBA {
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	var colorMain, colorShaded color.RGBA
+	if soc < 20 {
+		colorMain = PCAT_RED
+	}else{
+		if onBattery {
+			colorMain = PCAT_WHITE
+		}else{
+			colorMain = PCAT_GREEN
+		}
+	}
+	colorShaded = PCAT_GREY
+		
+	gc := draw2dimg.NewGraphicContext(img)
+	gc.SetLineWidth(0)
+	gc.SetStrokeColor(colorMain)
+	gc.SetFillColor(colorMain)
+	drawRoundedRect(gc, 0, 0, float64(w-3), float64(h), 0)
+	gc.FillStroke()
+
+	drawRoundedRect(gc, float64(w-3), float64(h/2-3), 3, 6, 0)
+	gc.FillStroke()
+	
+	//do soc shade
+	startShadeX := int(math.Round((soc / 100.0) * float64(w)))
+	if startShadeX < w {
+		for x := startShadeX; x < w-3; x++ { 
+			for y := 0; y < h; y++ { //set all pixels in the shade alpha to 60%
+				img.SetRGBA(x, y, colorShaded)
+			}
+		}
+		var terminalX int
+		if startShadeX > w-3{
+			terminalX = startShadeX
+		}else{
+			terminalX = w-3
+		}
+		for x := terminalX; x < w; x++ { 
+			for y := h/2-3; y < h/2+3; y++ { //set all pixels in the shade alpha to 60%
+				img.SetRGBA(x, y, colorShaded)
+			}
+		}
+	}
+
+	cornerCroods := []struct {
+		X, Y int // Center of the corner circle
+	}{
+		{0, 0},
+		{w-3-1, 0},
+		{0, h-1},
+		{w-3-1, h-1},
+		{w-1, h/2-3},
+		{w-1, h/2+3-1},
+	}
+	
+	for _, coord := range cornerCroods {
+		origColor := img.RGBAAt(coord.X, coord.Y)
+		newColor := color.RGBA{origColor.R - 20, origColor.G - 15, origColor.B - 15, 255}
+		img.SetRGBA(coord.X, coord.Y, newColor)
+	}
+
+	
+	//save png
+	/*outFile, err := os.Create("rounded_rectangle.png")
+	if err != nil {
+		panic(err)
+	}
+	defer outFile.Close()
+	png.Encode(outFile, img)*/
+
+	return img
+}
+
 
 func drawTopBar(frame *image.RGBA) {
+	var timeStr string
 	faceBig, err := getFontFace("small")
 	if err != nil {
 		fmt.Println("Error loading font:", err)
@@ -307,8 +407,13 @@ func drawTopBar(frame *image.RGBA) {
 	currDateTime := time.Now()
     currHour := currDateTime.Hour()
     currMinute := currDateTime.Minute()
+	currYear := currDateTime.Year()
 
-    timeStr := fmt.Sprintf("%02d:%02d", currHour, currMinute)
+	if currYear < 2025 {
+		timeStr = "--:--"
+	} else {
+		timeStr = fmt.Sprintf("%02d:%02d", currHour, currMinute)
+	}
 	networkStr := "5G"
 
 	drawTextOnFrame(frame, timeStr, 0, 0, faceBig, PCAT_WHITE, 0, 0)
@@ -317,5 +422,7 @@ func drawTopBar(frame *image.RGBA) {
 	drawTextOnFrame(frame, networkStr, 100, 0, faceBig, PCAT_WHITE, 0, 0)
 
 	//draw Battery
-
+	img := drawBattery(33, 16, 5, false)
+	copyImageToImageAt(frame, img, 120, 0)
+	
 }
