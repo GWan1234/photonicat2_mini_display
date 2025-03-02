@@ -412,7 +412,9 @@ func drawTopBar(frame *image.RGBA) {
 	drawTextOnFrame(frame, networkStr, 88, 0, faceBig, PCAT_WHITE, 0, 0)
 
 	//draw Battery
-	img := drawBattery(35, 16, 5, false)
+	randomSoc := rand.Intn(100)
+	randomChargingBool := rand.Intn(2) == 0
+	img := drawBattery(35, 16, float64(randomSoc), randomChargingBool)
 	copyImageToImageAt(frame, img, 119, 0)
 	
 }

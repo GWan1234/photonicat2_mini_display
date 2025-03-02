@@ -11,7 +11,7 @@ import (
 	"log"
 	"time"
 	"math/rand"
-
+	"strconv"
 	st7789 "photonicat2_display/periph.io-st7789"
 
 	"golang.org/x/image/font"
@@ -250,11 +250,13 @@ func main() {
 	// Copy the drawn page into the first framebuffer.
 	//copyImageToFrameBuffer(pageImg, framebuffers[0])
 
-	fps := 0
+	var fps float64
+	lastUpdate := time.Now()
 	frames := 0
-	startTime := time.Now()
-
-	
+	face, err := getFontFace("huge")
+	if err != nil {
+		log.Fatalf("Failed to load font: %v", err)
+	}
 	// Main loop: you could update dynamic data and re-render pages as needed.
 	for {
 		// Alternate between framebuffers.
@@ -288,15 +290,21 @@ func main() {
 		drawSVG(currFrame, "5G.svg", x, y, 0, 0)*/
 
 		drawTopBar(currFrame)
+		drawTextOnFrame(currFrame, "FPS: " + strconv.FormatFloat(fps, 'f', 1, 64), 0, 50, face, PCAT_YELLOW, 0, 0)
+		drawTextOnFrame(currFrame, "F: " + strconv.Itoa(frames), 0, 80, face, PCAT_YELLOW, 0, 0)
+		
 		sendFrameImage(display, currFrame)
 		//saveFrameToPng(currFrame, "frame.png")
 		
 
 		frames++
-		if frames%10 == 0 {
-			elapsedTime := time.Since(startTime)
-			fps = int(float64(frames) / elapsedTime.Seconds())
-			fmt.Printf("FPS: %d, Frames: %d\n", fps, frames)
+		if frames % 10 == 0 {
+			now := time.Now()
+			// Calculate FPS for the last 10 frames only
+			fps = 10 / now.Sub(lastUpdate).Seconds()
+			fmt.Printf("FPS: %0.1f, Total Frames: %d\n", fps, frames)
+			// Reset the timer for the next interval
+			lastUpdate = now
 		}
 		//time.Sleep(16 * time.Millisecond)
 	}
