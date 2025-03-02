@@ -1,6 +1,5 @@
 package main
 
-
 import (
 	"fmt"
 	"image"
@@ -19,12 +18,9 @@ import (
 	"golang.org/x/image/font"
 	"golang.org/x/image/math/fixed"
 
-
-
 	"github.com/srwiley/oksvg"
 	"github.com/srwiley/rasterx"
 )
-
 
 //---------------- Drawing Functions ----------------
 
@@ -38,6 +34,17 @@ func drawText(img *image.RGBA, text string, x, y int, face font.Face, clr color.
 		Dot: fixed.P(x, y+int(face.Metrics().Ascent.Round())),
 	}
 	d.DrawString(text)
+}
+
+func drawTextOnFrame(frame *image.RGBA, text string, x, y int, face font.Face, clr color.Color, frameWidth, frameHeight int) {
+    d := &font.Drawer{
+        Dst:  frame,
+        Src:  image.NewUniform(clr),
+        Face: face,
+        // Adjust Y by the font's ascent to align the baseline.
+        Dot: fixed.P(x, y+int(face.Metrics().Ascent.Round())),
+    }
+    d.DrawString(text)
 }
 
 // renderPage renders all elements for a given page onto an image.RGBA (which represents our framebuffer).
@@ -137,54 +144,55 @@ func sendFrame(display st7789.Device, frame []color.RGBA) {
 		frame)
 }
 
-// Function to display time on frame buffer
-func testClock(frame []color.RGBA) {
-	frameWidth := PCAT2_LCD_WIDTH - PCAT2_L_MARGIN - PCAT2_R_MARGIN
-	frameHeight := PCAT2_LCD_HEIGHT - PCAT2_T_MARGIN - PCAT2_B_MARGIN
-	// Get current time and format it
-	currDateTime := time.Now()
-	currHour := currDateTime.Hour()
-	currMinute := currDateTime.Minute()
-	currSecond := currDateTime.Second()
-	currMilli := currDateTime.Nanosecond() / 1000000 // Convert nanoseconds to milliseconds
-	currDay := currDateTime.Day()
-	currMonth := currDateTime.Month()
-	currYear := currDateTime.Year()
-
-	// Format the time as hh:mm:ss:SSS
-	timeStr := fmt.Sprintf("%02d:%02d:%02d:%03d", currHour, currMinute, currSecond, currMilli)
-	dateStr := fmt.Sprintf("%04d-%02d-%02d", currYear, currMonth, currDay)
-	// Get font face for big time display
-	face, err := getFontFace("big")
-	if err != nil {
-		fmt.Println("Error loading font:", err)
-		return
-	}
-
-	// Create an image from the frame buffer
-	img := image.NewRGBA(image.Rect(0, 0, frameWidth, frameHeight))
-
-	// Clear the frame to black (optional, or use a background color)
-	draw.Draw(img, img.Bounds(), &image.Uniform{color.Black}, image.Point{}, draw.Src)
-
-	// Set the text color to white
-	textColor := color.RGBA{255, 229, 0, 255}
-	randomColor := color.RGBA{ R: uint8(rand.Intn(256)), G: uint8(rand.Intn(256)), B: uint8(rand.Intn(256)), A: uint8(rand.Intn(256))}
-
-	// Draw the formatted time string onto the image
-	drawText(img, dateStr, 0, 0, face, textColor) 
-	drawText(img, timeStr, 0, 30, face, randomColor) 
-	
-	// Copy the drawn image into the frame buffer (1D slice)
-	for y := 0; y < frameHeight; y++ {
-		for x := 0; x < frameWidth; x++ {
-			idx := y*frameWidth + x
-			frame[idx] = img.RGBAAt(x, y)
-		}
-	}
+func sendFrameImage(display st7789.Device, frame *image.RGBA) {
+	display.FillRectangleWithImage(PCAT2_L_MARGIN, PCAT2_T_MARGIN,
+		PCAT2_LCD_WIDTH-PCAT2_L_MARGIN-PCAT2_R_MARGIN,
+		PCAT2_LCD_HEIGHT-PCAT2_T_MARGIN-PCAT2_B_MARGIN,
+		frame)
 }
 
-func drawSVG(frame []color.RGBA, svgPath string, x0, y0, targetWidth, targetHeight int) error {
+// Function to display time on frame buffer
+func testClock(frame *image.RGBA) {
+    
+    // Get current time and format it
+    currDateTime := time.Now()
+    currHour := currDateTime.Hour()
+    currMinute := currDateTime.Minute()
+    currSecond := currDateTime.Second()
+    currMilli := currDateTime.Nanosecond() / 1000000 // Convert nanoseconds to milliseconds
+    currDay := currDateTime.Day()
+    currMonth := currDateTime.Month()
+    currYear := currDateTime.Year()
+
+    // Format the time as hh:mm:ss:SSS
+    timeStr := fmt.Sprintf("%02d:%02d:%02d:%03d", currHour, currMinute, currSecond, currMilli)
+    dateStr := fmt.Sprintf("%04d-%02d-%02d", currYear, currMonth, currDay)
+    
+    // Get font face for big time display
+    face, err := getFontFace("big")
+    if err != nil {
+        fmt.Println("Error loading font:", err)
+        return
+    }
+
+    // Clear the frame to black (optional, or use a background color)
+    draw.Draw(frame, frame.Bounds(), &image.Uniform{color.Black}, image.Point{}, draw.Src)
+
+    // Set the text color to white
+    textColor := color.RGBA{255, 229, 0, 255}
+    randomColor := color.RGBA{
+        R: uint8(rand.Intn(256)),
+        G: uint8(rand.Intn(256)),
+        B: uint8(rand.Intn(256)),
+        A: uint8(rand.Intn(256)),
+    }
+
+    // Draw the formatted time string onto the image
+    drawText(frame, dateStr, 0, 0, face, textColor)
+    drawText(frame, timeStr, 0, 30, face, randomColor)
+}
+
+func drawSVG(frame *image.RGBA, svgPath string, x0, y0, targetWidth, targetHeight int) error {
 	// If target dimensions are zero, we need to load the SVG to obtain its intrinsic size.
 	if targetWidth == 0 || targetHeight == 0 {
 		svgFile, err := os.Open(svgPath)
@@ -215,7 +223,7 @@ func drawSVG(frame []color.RGBA, svgPath string, x0, y0, targetWidth, targetHeig
 	
 	// Check if we already have a cached rendered image.
 	if cachedImg, ok := svgCache[cacheKey]; ok {
-		copyImageToFrameBufferAt(frame, cachedImg, x0, y0)
+		copyImageToImageAt(frame, cachedImg, x0, y0)
 		return nil
 	}
 
@@ -253,23 +261,36 @@ func drawSVG(frame []color.RGBA, svgPath string, x0, y0, targetWidth, targetHeig
 	svgCache[cacheKey] = img
 
 	// Copy the rendered image into the frame buffer at the specified offset.
-	copyImageToFrameBufferAt(frame, img, x0, y0)
+	copyImageToImageAt(frame, img, x0, y0)
 
 	return nil
 }
 
+func copyImageToImageAt(frame *image.RGBA, img *image.RGBA, x0, y0 int) error {
+    frameBufferWidth := PCAT2_LCD_WIDTH - PCAT2_L_MARGIN - PCAT2_R_MARGIN
+    
+    targetWidth := img.Bounds().Dx()
+    targetHeight := img.Bounds().Dy()
+    
+    // Validate input parameters
+    if frame == nil || img == nil {
+        return fmt.Errorf("nil image provided")
+    }
+    
+    // Check bounds
+    if x0 < 0 || y0 < 0 || 
+       x0+targetWidth > frameBufferWidth || 
+       y0+targetHeight > frame.Bounds().Dy() {
+        return fmt.Errorf("image placement out of bounds: (%d,%d) with size %dx%d exceeds frame %dx%d",
+            x0, y0, targetWidth, targetHeight, frameBufferWidth, frame.Bounds().Dy())
+    }
 
-func copyImageToFrameBufferAt(frame []color.RGBA, img *image.RGBA, x0, y0 int) {
-	frameBufferWidth := PCAT2_LCD_WIDTH - PCAT2_L_MARGIN - PCAT2_R_MARGIN
-	targetWidth := img.Bounds().Dx()
-	targetHeight := img.Bounds().Dy()
-
-	for y := 0; y < targetHeight; y++ {
-		for x := 0; x < targetWidth; x++ {
-			destX := x0 + x
-			destY := y0 + y
-			idx := destY*frameBufferWidth + destX
-			frame[idx] = img.RGBAAt(x, y)
-		}
-	}
+    // Copy pixels
+    for y := 0; y < targetHeight; y++ {
+        for x := 0; x < targetWidth; x++ {
+            frame.SetRGBA(x0+x, y0+y, img.RGBAAt(x, y))
+        }
+    }
+    
+    return nil
 }

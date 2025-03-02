@@ -189,14 +189,14 @@ func main() {
 	frameWidth := PCAT2_LCD_WIDTH - PCAT2_L_MARGIN - PCAT2_R_MARGIN
 	frameHeight := PCAT2_LCD_HEIGHT - PCAT2_T_MARGIN - PCAT2_B_MARGIN
 
-	// Create two framebuffers.
-	framebuffers := make([][]color.RGBA, 2)
-	framebuffers[0] = make([]color.RGBA, frameWidth*frameHeight)
-	framebuffers[1] = make([]color.RGBA, frameWidth*frameHeight)
+	var framebuffers []*image.RGBA
+	framebuffers = append(framebuffers, image.NewRGBA(image.Rect(0, 0, frameWidth, frameHeight)))
+	framebuffers = append(framebuffers, image.NewRGBA(image.Rect(0, 0, frameWidth, frameHeight)))
+
 
 	// Create an image.RGBA to draw our page.
 	pageImg := image.NewRGBA(image.Rect(0, 0, frameWidth, frameHeight))
-	// Optionally, clear it to a background color.
+
 	draw.Draw(pageImg, pageImg.Bounds(), &image.Uniform{color.Black}, image.Point{}, draw.Src)
 
 	log.Println("CFG:", cfg)
@@ -229,22 +229,48 @@ func main() {
 	frames := 0
 	startTime := time.Now()
 
+	face, err := getFontFace("big")
+
+	
 	// Main loop: you could update dynamic data and re-render pages as needed.
 	for {
 		// Alternate between framebuffers.
-		currFrame := framebuffers[frames%2]
+		currFrame := framebuffers[frames%2]	
 		// For simplicity, we re-use the same framebuffer content.
-		testClock(currFrame)
-		x := frames % (PCAT2_LCD_WIDTH - 40)
-		y := frames / (PCAT2_LCD_HEIGHT - 40) + 40
-		drawSVG(currFrame, "5G.svg", x, y, 0, 0)
 		
-		sendFrame(display, currFrame)
+		x := frames % (PCAT2_LCD_WIDTH - 40)
+		y := frames / (PCAT2_LCD_HEIGHT - 40) + 50
+		
 
+		for i := 0; i < len(currFrame.Pix); i += 4 { //clear framebuffer
+			currFrame.Pix[i] = 0       // R
+			currFrame.Pix[i+1] = 0     // G
+			currFrame.Pix[i+2] = 0     // B
+			currFrame.Pix[i+3] = 255   // A (opaque black)
+		} 
+		testClock(currFrame)
+
+		drawTextOnFrame(currFrame, "line1", x, y+30, face, color.RGBA{255, 0, 0, 255}, 0, 0)
+
+		drawTextOnFrame(currFrame, "line2", x, y+55, face, color.RGBA{0, 255, 0, 255}, 0, 0)
+
+		drawTextOnFrame(currFrame, "line3", x, y+80, face, color.RGBA{0, 0, 255, 255}, 0, 0)
+
+		drawTextOnFrame(currFrame, "line4", x, y+105, face, color.RGBA{127, 0, 255, 255}, 0, 0)
+
+		drawTextOnFrame(currFrame, "line5", x, y+130, face, color.RGBA{0, 127, 255, 255}, 0, 0)
+
+		drawTextOnFrame(currFrame, "line6", x, y+155, face, color.RGBA{255, 0, 127, 255}, 0, 0)
+
+		drawTextOnFrame(currFrame, "line7", x, y+180, face, color.RGBA{255, 127, 0, 255}, 0, 0)
+
+		drawTextOnFrame(currFrame, "line8", x, y+205, face, color.RGBA{127, 255, 0, 255}, 0, 0)
+
+		drawSVG(currFrame, "5G.svg", x, y, 0, 0)
+		sendFrameImage(display, currFrame)
 		
 
 		frames++
-		// Calculate and print FPS every 10 frames.
 		if frames%10 == 0 {
 			elapsedTime := time.Since(startTime)
 			fps = int(float64(frames) / elapsedTime.Seconds())
