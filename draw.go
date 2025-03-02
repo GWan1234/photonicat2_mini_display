@@ -294,3 +294,28 @@ func copyImageToImageAt(frame *image.RGBA, img *image.RGBA, x0, y0 int) error {
     
     return nil
 }
+
+
+func drawTopBar(frame *image.RGBA) {
+	faceBig, err := getFontFace("small")
+	if err != nil {
+		fmt.Println("Error loading font:", err)
+		return
+	}
+
+	//clock
+	currDateTime := time.Now()
+    currHour := currDateTime.Hour()
+    currMinute := currDateTime.Minute()
+
+    timeStr := fmt.Sprintf("%02d:%02d", currHour, currMinute)
+	networkStr := "5G"
+
+	drawTextOnFrame(frame, timeStr, 0, 0, faceBig, PCAT_WHITE, 0, 0)
+
+	//draw network
+	drawTextOnFrame(frame, networkStr, 100, 0, faceBig, PCAT_WHITE, 0, 0)
+
+	//draw Battery
+
+}

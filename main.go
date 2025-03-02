@@ -37,7 +37,14 @@ const (
 	PCAT2_R_MARGIN   = 10
 	PCAT2_T_MARGIN   = 10
 	PCAT2_B_MARGIN   = 10
+	
 )
+
+var PCAT_YELLOW      = color.RGBA{255, 229, 0, 255}
+var PCAT_WHITE       = color.RGBA{255, 255, 255, 255}
+var PCAT_RED         = color.RGBA{226, 72, 38, 255}
+var PCAT_GREY        = color.RGBA{98, 116, 130, 255}
+var PCAT_GREEN       = color.RGBA{70, 235, 145, 255}
 
 var svgCache = make(map[string]*image.RGBA)
 
@@ -113,9 +120,12 @@ type FontConfig struct {
 
 // For demonstration, we create a mapping from font names to font configurations.
 var fonts = map[string]FontConfig{
-	"big":       {FontPath: "./big.ttf", FontSize: 24},
-	"small_reg": {FontPath: "./small.ttf", FontSize: 12},
-	"huge":      {FontPath: "./huge.ttf", FontSize: 32},
+	"small_thin": 	 {FontPath: "./big.ttf", FontSize: 16},
+	"small": 	 {FontPath: "./big.ttf", FontSize: 18},
+	"mid":       {FontPath: "./big.ttf", FontSize: 23},
+	"big":       {FontPath: "./big.ttf", FontSize: 28},
+	"huge":      {FontPath: "./big.ttf", FontSize: 33},
+	"gigantic":  {FontPath: "./big.ttf", FontSize: 48},
 }
 
 // getFontFace loads the font based on our mapping.
@@ -140,6 +150,14 @@ func getFontFace(fontName string) (font.Face, error) {
 	return face, err
 }
 
+func clearFrame(frame *image.RGBA) {
+	for i := 0; i < len(frame.Pix); i += 4 { //clear framebuffer
+		frame.Pix[i] = 0       // R
+		frame.Pix[i+1] = 0     // G
+		frame.Pix[i+2] = 0     // B
+		frame.Pix[i+3] = 255   // A (opaque black)
+	}
+}
 
 //---------------- Main ----------------
 
@@ -192,6 +210,8 @@ func main() {
 	var framebuffers []*image.RGBA
 	framebuffers = append(framebuffers, image.NewRGBA(image.Rect(0, 0, frameWidth, frameHeight)))
 	framebuffers = append(framebuffers, image.NewRGBA(image.Rect(0, 0, frameWidth, frameHeight)))
+	clearFrame(framebuffers[0])
+	clearFrame(framebuffers[1])
 
 
 	// Create an image.RGBA to draw our page.
@@ -229,27 +249,21 @@ func main() {
 	frames := 0
 	startTime := time.Now()
 
-	face, err := getFontFace("big")
-
 	
 	// Main loop: you could update dynamic data and re-render pages as needed.
 	for {
 		// Alternate between framebuffers.
 		currFrame := framebuffers[frames%2]	
-		// For simplicity, we re-use the same framebuffer content.
+		//nextFrame := framebuffers[(frames+1)%2]
 		
+		clearFrame(currFrame)
+		//go clearFrame(nextFrame)
+		/*
+		testClock(currFrame)
+
 		x := frames % (PCAT2_LCD_WIDTH - 40)
 		y := frames / (PCAT2_LCD_HEIGHT - 40) + 50
 		
-
-		for i := 0; i < len(currFrame.Pix); i += 4 { //clear framebuffer
-			currFrame.Pix[i] = 0       // R
-			currFrame.Pix[i+1] = 0     // G
-			currFrame.Pix[i+2] = 0     // B
-			currFrame.Pix[i+3] = 255   // A (opaque black)
-		} 
-		testClock(currFrame)
-
 		drawTextOnFrame(currFrame, "line1", x, y+30, face, color.RGBA{255, 0, 0, 255}, 0, 0)
 
 		drawTextOnFrame(currFrame, "line2", x, y+55, face, color.RGBA{0, 255, 0, 255}, 0, 0)
@@ -266,7 +280,9 @@ func main() {
 
 		drawTextOnFrame(currFrame, "line8", x, y+205, face, color.RGBA{127, 255, 0, 255}, 0, 0)
 
-		drawSVG(currFrame, "5G.svg", x, y, 0, 0)
+		drawSVG(currFrame, "5G.svg", x, y, 0, 0)*/
+
+		drawTopBar(currFrame)
 		sendFrameImage(display, currFrame)
 		
 
