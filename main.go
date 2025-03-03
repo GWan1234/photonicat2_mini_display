@@ -6,12 +6,16 @@ import (
 	"image"
 	"image/color"
 	"image/draw"
-	//"image/png"
+	"image/png"
 	"io/ioutil"
 	"log"
 	"time"
 	"math/rand"
 	"strconv"
+	"net/http"
+	"sync"
+	"bytes"
+
 	st7789 "photonicat2_display/periph.io-st7789"
 
 	"golang.org/x/image/font"
@@ -37,17 +41,25 @@ const (
 	PCAT2_R_MARGIN   = 8
 	PCAT2_T_MARGIN   = 8
 	PCAT2_B_MARGIN   = 8
-	
 )
 
-var PCAT_YELLOW      = color.RGBA{255, 229, 0, 255}
-var PCAT_WHITE       = color.RGBA{255, 255, 255, 255}
-var PCAT_RED         = color.RGBA{226, 72, 38, 255}
-var PCAT_GREY        = color.RGBA{98, 116, 130, 255}
-var PCAT_GREEN       = color.RGBA{70, 235, 145, 255}
+var (
+	PCAT_YELLOW     = color.RGBA{255, 229, 0, 255}
+	PCAT_WHITE      = color.RGBA{255, 255, 255, 255}
+	PCAT_RED        = color.RGBA{226, 72, 38, 255}
+	PCAT_GREY       = color.RGBA{98, 116, 130, 255}
+	PCAT_GREEN      = color.RGBA{70, 235, 145, 255}
+
+	svgCache 		= make(map[string]*image.RGBA)
+
+    frameMutex   sync.RWMutex
+    currFrame 	*image.RGBA
+
+    dataMutex    sync.RWMutex
+    dynamicData  map[string]string
+)
 
 
-var svgCache = make(map[string]*image.RGBA)
 
 // ImageBuffer holds a 1D slice of pixels for the display area.
 type ImageBuffer struct {
@@ -162,6 +174,69 @@ func clearFrame(frame *image.RGBA) {
 }
 
 
+func serveFrame(w http.ResponseWriter, r *http.Request) {
+    frameMutex.RLock()
+    defer frameMutex.RUnlock()
+
+    if currFrame == nil {
+        http.Error(w, "No frame available", http.StatusServiceUnavailable)
+        return
+    }
+
+    var buf bytes.Buffer
+    err := png.Encode(&buf, currFrame)
+    if err != nil {
+        http.Error(w, "Failed to encode image", http.StatusInternalServerError)
+        return
+    }
+
+    w.Header().Set("Content-Type", "image/png")
+    w.Header().Set("Content-Length", strconv.Itoa(buf.Len()))
+    buf.WriteTo(w)
+}
+
+func updateData(w http.ResponseWriter, r *http.Request) {
+    if r.Method != http.MethodPost {
+        http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+        return
+    }
+
+    body, err := ioutil.ReadAll(r.Body)
+    if err != nil {
+        http.Error(w, "Failed to read request body", http.StatusBadRequest)
+        return
+    }
+
+    var data map[string]string
+    err = json.Unmarshal(body, &data)
+    if err != nil {
+        http.Error(w, "Invalid JSON", http.StatusBadRequest)
+        return
+    }
+
+    dataMutex.Lock()
+    for k, v := range data {
+        dynamicData[k] = v
+    }
+    dataMutex.Unlock()
+
+    w.WriteHeader(http.StatusOK)
+    fmt.Fprintln(w, "Data updated")
+}
+
+func indexHandler(w http.ResponseWriter, r *http.Request) {
+	http.ServeFile(w, r, "assets/html/index.html")
+}
+
+func httpServer() {
+	http.HandleFunc("/", indexHandler)
+	http.HandleFunc("/frame", serveFrame)
+    http.HandleFunc("/data", updateData)
+    log.Println("Starting HTTP server on :8080")
+    log.Fatal(http.ListenAndServe(":8080", nil))
+}
+
+
 //---------------- Main ----------------
 
 func main() {
@@ -214,6 +289,8 @@ func main() {
 		}
 	}()
 
+
+	go httpServer()
 	// Define frame dimensions (display area excluding margins).
 	frameWidth := PCAT2_LCD_WIDTH - PCAT2_L_MARGIN - PCAT2_R_MARGIN
 	frameHeight := PCAT2_LCD_HEIGHT - PCAT2_T_MARGIN - PCAT2_B_MARGIN
@@ -266,7 +343,7 @@ func main() {
 	// Main loop: you could update dynamic data and re-render pages as needed.
 	for {
 		// Alternate between framebuffers.
-		currFrame := framebuffers[frames%2]	
+		currFrame = framebuffers[frames%2]	
 		//nextFrame := framebuffers[(frames+1)%2]
 		
 		clearFrame(currFrame)

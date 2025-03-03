@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Frame Display</title>
+    <!--link href="https://fonts.googleapis.com/css2?family=Orbitron&display=swap" rel="stylesheet"-->
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            background-color: #000;
+            font-family: 'Orbitron', sans-serif;
+            color: #fff;
+            margin: 0;  
+        }
+        h1 {
+            margin-bottom: 20px;
+        }
+        #frame {
+            border: 1px solid #fff;
+            box-shadow: 0 4px 8px rgba(255,255,255,0.2);
+            max-width: 100%;
+            height: auto;
+        }
+        #server-time, #last-updated {
+            margin-top: 10px;
+            font-size: 18px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Photonicat2 Live LCD Display 2x zoom view</h1>
+    <img id="frame" src="/frame" alt="Current Frame from Display">
+    <div id="last-updated" id="last-updated">Last Updated: Loading...</div>
+
+    <script>
+// Function to pad numbers with leading zeros
+    function pad(number, length) {
+        var str = '' + number;
+        while (str.length < length) {
+            str = '0' + str;
+        }
+        return str;
+    }
+
+    setInterval(function() {
+        var date = new Date();
+        
+        // Date components
+        var year = date.getFullYear(); // Always 4 digits, no padding needed
+        var month = pad(date.getMonth() + 1, 2); // Months are 0-11, add 1 and pad to 2 digits
+        var day = pad(date.getDate(), 2); // Pad to 2 digits
+        
+        // Time components with 12-hour conversion
+        var hours = date.getHours(); // 0-23
+        var ampm = hours >= 12 ? "PM" : "AM"; // Determine AM/PM
+        hours = hours % 12; // Convert to 12-hour base
+        if (hours === 0) hours = 12; // Handle midnight (0 becomes 12 AM) and noon (12 PM)
+        hours = pad(hours, 2); // Pad to 2 digits
+
+        var minutes = pad(date.getMinutes(), 2); // Pad to 2 digits
+        var seconds = pad(date.getSeconds(), 2); // Pad to 2 digits
+        var milliseconds = pad(date.getMilliseconds(), 3); // Pad to 3 digits
+
+        // Construct the formatted date string
+        var formattedDate = year + "-" + month + "-" + day + " " + 
+                            hours + ":" + minutes + ":" + seconds + ":" + milliseconds + " " + ampm;
+        
+        // Update the DOM elements
+        document.getElementById("last-updated").textContent = "Last Updated: " + formattedDate;
+        document.getElementById("frame").src = "/frame?" + new Date().getTime();
+    }, 100);
+    </script>
+</body>
+</html>
