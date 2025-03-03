@@ -42,12 +42,9 @@ const (
 
 var PCAT_YELLOW      = color.RGBA{255, 229, 0, 255}
 var PCAT_WHITE       = color.RGBA{255, 255, 255, 255}
-var PCAT_WHITE_60A   = color.RGBA{255, 255, 255, 153}
 var PCAT_RED         = color.RGBA{226, 72, 38, 255}
-var PCAT_RED_60A     = color.RGBA{226, 72, 38, 153}
 var PCAT_GREY        = color.RGBA{98, 116, 130, 255}
 var PCAT_GREEN       = color.RGBA{70, 235, 145, 255}
-var PCAT_GREEN_60A   = color.RGBA{70, 235, 145, 153}
 
 
 var svgCache = make(map[string]*image.RGBA)
@@ -124,12 +121,13 @@ type FontConfig struct {
 
 // For demonstration, we create a mapping from font names to font configurations.
 var fonts = map[string]FontConfig{
-	"small_thin": 	 {FontPath: "./big.ttf", FontSize: 16},
-	"small": 	 {FontPath: "./big.ttf", FontSize: 18},
-	"mid":       {FontPath: "./big.ttf", FontSize: 23},
-	"big":       {FontPath: "./big.ttf", FontSize: 28},
-	"huge":      {FontPath: "./big.ttf", FontSize: 33},
-	"gigantic":  {FontPath: "./big.ttf", FontSize: 48},
+	"clock": 	     {FontPath: "assets/fonts/Orbitron-Medium.ttf", FontSize: 13},
+	"small_text": 	 {FontPath: "assets/fonts/Orbitron-Medium.ttf", FontSize: 14},
+	"reg_text": 	 {FontPath: "assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 16},
+	"big_text": 	 {FontPath: "assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 24},
+	"unit": 	 {FontPath: "assets/fonts/Orbitron-Medium.ttf", FontSize: 14},
+	"huge":      {FontPath: "assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 33},
+	"gigantic":  {FontPath: "assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 48},
 }
 
 // getFontFace loads the font based on our mapping.
@@ -204,9 +202,17 @@ func main() {
 
 	// Load our configuration file (adjust the path as needed).
 	cfg, err := loadConfig("config.json")
+
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}
+
+	go func() {
+		for {
+			collectData(cfg)
+			time.Sleep(10 * time.Second)
+		}
+	}()
 
 	// Define frame dimensions (display area excluding margins).
 	frameWidth := PCAT2_LCD_WIDTH - PCAT2_L_MARGIN - PCAT2_R_MARGIN
@@ -273,20 +279,6 @@ func main() {
 		
 		drawTextOnFrame(currFrame, "line1", x, y+30, face, color.RGBA{255, 0, 0, 255}, 0, 0)
 
-		drawTextOnFrame(currFrame, "line2", x, y+55, face, color.RGBA{0, 255, 0, 255}, 0, 0)
-
-		drawTextOnFrame(currFrame, "line3", x, y+80, face, color.RGBA{0, 0, 255, 255}, 0, 0)
-
-		drawTextOnFrame(currFrame, "line4", x, y+105, face, color.RGBA{127, 0, 255, 255}, 0, 0)
-
-		drawTextOnFrame(currFrame, "line5", x, y+130, face, color.RGBA{0, 127, 255, 255}, 0, 0)
-
-		drawTextOnFrame(currFrame, "line6", x, y+155, face, color.RGBA{255, 0, 127, 255}, 0, 0)
-
-		drawTextOnFrame(currFrame, "line7", x, y+180, face, color.RGBA{255, 127, 0, 255}, 0, 0)
-
-		drawTextOnFrame(currFrame, "line8", x, y+205, face, color.RGBA{127, 255, 0, 255}, 0, 0)
-
 		drawSVG(currFrame, "5G.svg", x, y, 0, 0)*/
 
 		drawTopBar(currFrame)
@@ -298,10 +290,10 @@ func main() {
 		
 
 		frames++
-		if frames % 10 == 0 {
+		if frames % 100 == 0 {
 			now := time.Now()
 			// Calculate FPS for the last 10 frames only
-			fps = 10 / now.Sub(lastUpdate).Seconds()
+			fps = 100 / now.Sub(lastUpdate).Seconds()
 			fmt.Printf("FPS: %0.1f, Total Frames: %d\n", fps, frames)
 			// Reset the timer for the next interval
 			lastUpdate = now

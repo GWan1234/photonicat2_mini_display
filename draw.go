@@ -387,7 +387,7 @@ func drawBattery(w, h int, soc float64, onBattery bool) *image.RGBA {
 
 func drawTopBar(frame *image.RGBA) {
 	var timeStr string
-	faceBig, err := getFontFace("small")
+	faceBig, err := getFontFace("clock")
 	if err != nil {
 		fmt.Println("Error loading font:", err)
 		return
