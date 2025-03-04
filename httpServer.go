@@ -23,13 +23,25 @@ func serveFrame(w http.ResponseWriter, r *http.Request) {
 		drawRect(webFrame, 0, 0, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT, PCAT_BLACK)
 	}
 
-	if currFrame == nil {
-		http.Error(w, "No frame available", http.StatusServiceUnavailable)
-		return
-	}
-
     frameMutex.RLock()
-	err = copyImageToImageAt(webFrame, lastFrame, PCAT2_L_MARGIN, PCAT2_T_MARGIN)
+    //composite the frames
+    err = copyImageToImageAt(webFrame, topBarFramebuffers[0], 0, 0)
+    if err != nil {
+        http.Error(w, "Failed to copy top bar frame", http.StatusInternalServerError)
+        return
+    }
+
+    err = copyImageToImageAt(webFrame, middleFramebuffers[0], 0, PCAT2_TOP_BAR_HEIGHT)
+    if err != nil {
+        http.Error(w, "Failed to copy middle frame", http.StatusInternalServerError)
+        return
+    }   
+    
+    /*err = copyImageToImageAt(webFrame, footerFramebuffers[frames%2], 0, PCAT2_LCD_HEIGHT - PCAT2_FOOTER_HEIGHT)
+    if err != nil {
+        http.Error(w, "Failed to copy footer frame", http.StatusInternalServerError)
+        return
+    }*/
 	frameMutex.RUnlock()
 
     if webFrame == nil {

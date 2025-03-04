@@ -34,10 +34,12 @@ const (
 	PCAT2_LCD_WIDTH  = 172
 	PCAT2_LCD_HEIGHT = 320
 	PCAT2_X_OFFSET   = 34
-	PCAT2_L_MARGIN   = 8
-	PCAT2_R_MARGIN   = 8
-	PCAT2_T_MARGIN   = 8
-	PCAT2_B_MARGIN   = 8
+	PCAT2_L_MARGIN   = 7
+	PCAT2_R_MARGIN   = 7
+	PCAT2_T_MARGIN   = 7
+	PCAT2_B_MARGIN   = 7
+	PCAT2_TOP_BAR_HEIGHT = 30
+	PCAT2_FOOTER_HEIGHT = 30
 )
 
 var (
@@ -52,6 +54,13 @@ var (
     frameMutex   sync.RWMutex
     currFrame 	*image.RGBA
 	lastFrame 	*image.RGBA
+	topBarFramebuffers 	[]*image.RGBA
+	topBarFrame 		*image.RGBA
+	middleFramebuffers 	[]*image.RGBA
+	middleFrame 		*image.RGBA
+	footerFramebuffers 	[]*image.RGBA
+	footerFrame 		*image.RGBA
+	frames 		int
     dataMutex    sync.RWMutex
     dynamicData  map[string]string
 )
@@ -130,8 +139,8 @@ type FontConfig struct {
 
 // For demonstration, we create a mapping from font names to font configurations.
 var fonts = map[string]FontConfig{
-	"clock": 	     {FontPath: "assets/fonts/Orbitron-Medium.ttf", FontSize: 13},
-	"small_text": 	 {FontPath: "assets/fonts/Orbitron-Medium.ttf", FontSize: 14},
+	"clock": 	     {FontPath: "assets/fonts/Orbitron-Medium.ttf", FontSize: 15},
+	//"small_text": 	 {FontPath: "assets/fonts/Orbitron-Medium.ttf", FontSize: 17},
 	"reg_text": 	 {FontPath: "assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 16},
 	"big_text": 	 {FontPath: "assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 24},
 	"unit": 	 {FontPath: "assets/fonts/Orbitron-Medium.ttf", FontSize: 14},
@@ -161,8 +170,8 @@ func getFontFace(fontName string) (font.Face, error) {
 	return face, err
 }
 
-func clearFrame(frame *image.RGBA) {
-	for i := 0; i < len(frame.Pix); i += 4 { //clear framebuffer
+func clearFrame(frame *image.RGBA, width int, height int) {
+	for i := 0; i < width * height * 4; i += 4 { //clear framebuffer
 		frame.Pix[i] = 0       // R
 		frame.Pix[i+1] = 0     // G
 		frame.Pix[i+2] = 0     // B
@@ -227,18 +236,37 @@ func main() {
 
 	go httpServer()
 	// Define frame dimensions (display area excluding margins).
-	frameWidth := PCAT2_LCD_WIDTH - PCAT2_L_MARGIN - PCAT2_R_MARGIN
-	frameHeight := PCAT2_LCD_HEIGHT - PCAT2_T_MARGIN - PCAT2_B_MARGIN
+	topBarFrameWidth := PCAT2_LCD_WIDTH
+	topBarFrameHeight := PCAT2_TOP_BAR_HEIGHT
+	
+	middleFrameWidth := PCAT2_LCD_WIDTH
+	middleFrameHeight := PCAT2_LCD_HEIGHT - PCAT2_TOP_BAR_HEIGHT - PCAT2_FOOTER_HEIGHT
 
-	var framebuffers []*image.RGBA
-	framebuffers = append(framebuffers, image.NewRGBA(image.Rect(0, 0, frameWidth, frameHeight)))
-	framebuffers = append(framebuffers, image.NewRGBA(image.Rect(0, 0, frameWidth, frameHeight)))
-	clearFrame(framebuffers[0])
-	clearFrame(framebuffers[1])
+	footerFrameWidth := PCAT2_LCD_WIDTH
+	footerFrameHeight := PCAT2_FOOTER_HEIGHT
+
+
+	middleFramebuffers = append(middleFramebuffers, image.NewRGBA(image.Rect(0, 0, middleFrameWidth, middleFrameHeight)))
+	middleFramebuffers = append(middleFramebuffers, image.NewRGBA(image.Rect(0, 0, middleFrameWidth, middleFrameHeight)))
+	clearFrame(middleFramebuffers[0], middleFrameWidth, middleFrameHeight)
+	clearFrame(middleFramebuffers[1], middleFrameWidth, middleFrameHeight)
+
+	
+	topBarFramebuffers = append(topBarFramebuffers, image.NewRGBA(image.Rect(0, 0, topBarFrameWidth, topBarFrameHeight)))
+	topBarFramebuffers = append(topBarFramebuffers, image.NewRGBA(image.Rect(0, 0, topBarFrameWidth, topBarFrameHeight)))
+	clearFrame(topBarFramebuffers[0], topBarFrameWidth, topBarFrameHeight)
+	clearFrame(topBarFramebuffers[1], topBarFrameWidth, topBarFrameHeight)
+
+	footerFramebuffers = append(footerFramebuffers, image.NewRGBA(image.Rect(0, 0, footerFrameWidth, footerFrameHeight)))
+	footerFramebuffers = append(footerFramebuffers, image.NewRGBA(image.Rect(0, 0, footerFrameWidth, footerFrameHeight)))
+	clearFrame(footerFramebuffers[0], footerFrameWidth, footerFrameHeight)
+	clearFrame(footerFramebuffers[1], footerFrameWidth, footerFrameHeight)
+	
+	
 
 
 	// Create an image.RGBA to draw our page.
-	pageImg := image.NewRGBA(image.Rect(0, 0, frameWidth, frameHeight))
+	pageImg := image.NewRGBA(image.Rect(0, 0, middleFrameWidth, middleFrameHeight))
 
 	draw.Draw(pageImg, pageImg.Bounds(), &image.Uniform{color.Black}, image.Point{}, draw.Src)
 
@@ -270,7 +298,9 @@ func main() {
 
 	var fps float64
 	lastUpdate := time.Now()
-	frames := 0
+	topFrames := 0
+	middleFrames := 0
+	//bottomFrames := 0
 	face, err := getFontFace("huge")
 	if err != nil {
 		log.Fatalf("Failed to load font: %v", err)
@@ -278,11 +308,8 @@ func main() {
 	// Main loop: you could update dynamic data and re-render pages as needed.
 	for {
 		// Alternate between framebuffers.
-		currFrame = framebuffers[frames%2]	
-		lastFrame = framebuffers[(frames+1)%2]
-		//nextFrame := framebuffers[(frames+1)%2]
 		
-		clearFrame(currFrame)
+		
 		//go clearFrame(nextFrame)
 		/*
 		testClock(currFrame)
@@ -294,20 +321,28 @@ func main() {
 
 		drawSVG(currFrame, "5G.svg", x, y, 0, 0)*/
 
-		drawTopBar(currFrame)
-		drawTextOnFrame(currFrame, "FPS: " + strconv.FormatFloat(fps, 'f', 1, 64), 0, 50, face, PCAT_YELLOW, 0, 0)
-		drawTextOnFrame(currFrame, "F: " + strconv.Itoa(frames), 0, 80, face, PCAT_YELLOW, 0, 0)
+		if middleFrames % 500 == 0 {	
+			clearFrame(topBarFramebuffers[topFrames%2], topBarFrameWidth, topBarFrameHeight)
+			drawTopBar(topBarFramebuffers[topFrames%2])
+			sendTopBar(display, topBarFramebuffers[topFrames%2])
+		}
 		
-		sendFrameImage(display, currFrame)
+
+
+		clearFrame(middleFramebuffers[middleFrames%2], middleFrameWidth, middleFrameHeight)
+		drawText(middleFramebuffers[middleFrames%2], "FPS: " + strconv.FormatFloat(fps, 'f', 1, 64), 0, 0, face, PCAT_YELLOW)
+		drawText(middleFramebuffers[middleFrames%2], "F: " + strconv.Itoa(middleFrames), 0, 50, face, PCAT_YELLOW)
+		
+		sendMiddle(display, middleFramebuffers[middleFrames%2])
 		//saveFrameToPng(currFrame, "frame.png")
 		
 
-		frames++
-		if frames % 100 == 0 {
+		middleFrames++
+		if middleFrames % 100 == 0 {
 			now := time.Now()
 			// Calculate FPS for the last 10 frames only
 			fps = 100 / now.Sub(lastUpdate).Seconds()
-			fmt.Printf("FPS: %0.1f, Total Frames: %d\n", fps, frames)
+			fmt.Printf("FPS: %0.1f, Total Frames: %d\n", fps, middleFrames)
 			// Reset the timer for the next interval
 			lastUpdate = now
 		}

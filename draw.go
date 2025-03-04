@@ -39,17 +39,6 @@ func drawText(img *image.RGBA, text string, x, y int, face font.Face, clr color.
 	d.DrawString(text)
 }
 
-func drawTextOnFrame(frame *image.RGBA, text string, x, y int, face font.Face, clr color.Color, frameWidth, frameHeight int) {
-    d := &font.Drawer{
-        Dst:  frame,
-        Src:  image.NewUniform(clr),
-        Face: face,
-        // Adjust Y by the font's ascent to align the baseline.
-        Dot: fixed.P(x, y+int(face.Metrics().Ascent.Round())),
-    }
-    d.DrawString(text)
-}
-
 func drawTextOnFrame2(frame *image.RGBA, text string, centerX, centerY int, face font.Face, clr color.Color) {
     d := &font.Drawer{
         Dst:  frame,
@@ -160,19 +149,16 @@ func copyImageToFrameBuffer(img *image.RGBA, frame []color.RGBA) {
 	}
 }
 
-// sendFrame sends a frame (as a 1D slice) to the display.
-func sendFrame(display st7789.Device, frame []color.RGBA) {
-	display.FillRectangleWithBuffer(PCAT2_L_MARGIN, PCAT2_T_MARGIN,
-		PCAT2_LCD_WIDTH-PCAT2_L_MARGIN-PCAT2_R_MARGIN,
-		PCAT2_LCD_HEIGHT-PCAT2_T_MARGIN-PCAT2_B_MARGIN,
-		frame)
+func sendTopBar(display st7789.Device, frame *image.RGBA) {
+	display.FillRectangleWithImage(0, 0, PCAT2_LCD_WIDTH, PCAT2_TOP_BAR_HEIGHT, frame)
 }
 
-func sendFrameImage(display st7789.Device, frame *image.RGBA) {
-	display.FillRectangleWithImage(PCAT2_L_MARGIN, PCAT2_T_MARGIN,
-		PCAT2_LCD_WIDTH-PCAT2_L_MARGIN-PCAT2_R_MARGIN,
-		PCAT2_LCD_HEIGHT-PCAT2_T_MARGIN-PCAT2_B_MARGIN,
-		frame)
+func sendFooter(display st7789.Device, frame *image.RGBA) {
+	display.FillRectangleWithImage(0, PCAT2_LCD_HEIGHT-PCAT2_FOOTER_HEIGHT, PCAT2_LCD_WIDTH, PCAT2_FOOTER_HEIGHT, frame)
+}
+
+func sendMiddle(display st7789.Device, frame *image.RGBA) {
+	display.FillRectangleWithImage(0, PCAT2_TOP_BAR_HEIGHT, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT-PCAT2_TOP_BAR_HEIGHT-PCAT2_FOOTER_HEIGHT, frame)
 }
 
 // Function to display time on frame buffer
@@ -351,8 +337,8 @@ func drawRect(img *image.RGBA, x0, y0, width, height int, c color.Color) {
     }
 }
 
-func drawBattery(w, h int, soc float64, onBattery bool) *image.RGBA {
-	face, err := getFontFace("small_text")
+func drawBattery(w, h int, soc float64, onBattery bool, x0, y0 int) *image.RGBA {
+	face, err := getFontFace("clock")
 	if err != nil {
 		fmt.Println("Error loading font:", err)
 		return nil
@@ -377,7 +363,7 @@ func drawBattery(w, h int, soc float64, onBattery bool) *image.RGBA {
 	startShadeX := int(math.Round((soc / 100.0) * float64(w)))
 	if startShadeX < w {
 		for x := startShadeX; x < w-3; x++ { 
-			for y := 0; y < h; y++ { //set all pixels in the shade alpha to 60%
+			for y := 0; y < h; y++ { 
 				img.SetRGBA(x, y, colorShaded)
 			}
 		}
@@ -388,7 +374,7 @@ func drawBattery(w, h int, soc float64, onBattery bool) *image.RGBA {
 			terminalX = w-3
 		}
 		for x := terminalX; x < w; x++ { 
-			for y := h/2-3; y < h/2+3; y++ { //set all pixels in the shade alpha to 60%
+			for y := h/2-3; y < h/2+3; y++ { 
 				img.SetRGBA(x, y, colorShaded)
 			}
 		}
@@ -412,15 +398,17 @@ func drawBattery(w, h int, soc float64, onBattery bool) *image.RGBA {
 	
 	//draw text
 	if soc == 100 {
-		drawTextOnFrame(img, "100", 2, -1, face, PCAT_BLACK, 0, 0)
+		drawText(img, "100", 2, -2, face, PCAT_BLACK)
 	}else{
-		drawTextOnFrame(img, strconv.Itoa(int(soc)), 4, -1, face, PCAT_BLACK, 0, 0)
+		drawText(img, strconv.Itoa(int(soc)), 4, -2, face, PCAT_BLACK)
 	}
 
 	return img
 }
 
 func drawTopBar(frame *image.RGBA) {
+	x0 := PCAT2_L_MARGIN
+	y0 := PCAT2_T_MARGIN
 	var timeStr string
 	faceBig, err := getFontFace("clock")
 	if err != nil {
@@ -441,16 +429,16 @@ func drawTopBar(frame *image.RGBA) {
 	}
 	networkStr := "5G"
 
-	drawTextOnFrame(frame, timeStr, 3, 0, faceBig, PCAT_WHITE, 0, 0)
+	drawText(frame, timeStr, x0+2, y0-2, faceBig, PCAT_WHITE)	
 
 	//draw network
-	drawTextOnFrame(frame, networkStr, 88, 0, faceBig, PCAT_WHITE, 0, 0)
+	drawText(frame, networkStr, x0+90, y0-2, faceBig, PCAT_WHITE)
 
 	//draw Battery
 	randomSoc := rand.Intn(100)
 	randomChargingBool := rand.Intn(2) == 0
-	img := drawBattery(35, 16, float64(randomSoc), randomChargingBool)
-	copyImageToImageAt(frame, img, 119, 0)
+	img := drawBattery(40, 16, float64(randomSoc), randomChargingBool, x0, y0)
+	copyImageToImageAt(frame, img, x0+118, y0)
 	
 }
 
