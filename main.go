@@ -38,8 +38,8 @@ const (
 	PCAT2_R_MARGIN   = 7
 	PCAT2_T_MARGIN   = 7
 	PCAT2_B_MARGIN   = 7
-	PCAT2_TOP_BAR_HEIGHT = 30
-	PCAT2_FOOTER_HEIGHT = 30
+	PCAT2_TOP_BAR_HEIGHT = 23
+	PCAT2_FOOTER_HEIGHT = 23
 )
 
 var (
@@ -332,7 +332,6 @@ func main() {
 		clearFrame(middleFramebuffers[middleFrames%2], middleFrameWidth, middleFrameHeight)
 		drawText(middleFramebuffers[middleFrames%2], "FPS: " + strconv.FormatFloat(fps, 'f', 1, 64), 0, 0, face, PCAT_YELLOW)
 		drawText(middleFramebuffers[middleFrames%2], "F: " + strconv.Itoa(middleFrames), 0, 50, face, PCAT_YELLOW)
-		
 		sendMiddle(display, middleFramebuffers[middleFrames%2])
 		//saveFrameToPng(currFrame, "frame.png")
 		
