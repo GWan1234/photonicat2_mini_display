@@ -333,7 +333,6 @@ func main() {
 		drawText(middleFramebuffers[middleFrames%2], "FPS: " + strconv.FormatFloat(fps, 'f', 1, 64), 0, 0, face, PCAT_YELLOW)
 		drawText(middleFramebuffers[middleFrames%2], "F: " + strconv.Itoa(middleFrames), 0, 50, face, PCAT_YELLOW)
 		sendMiddle(display, middleFramebuffers[middleFrames%2])
-		//saveFrameToPng(currFrame, "frame.png")
 		
 
 		middleFrames++

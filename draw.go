@@ -157,7 +157,72 @@ func sendFooter(display st7789.Device, frame *image.RGBA) {
 	display.FillRectangleWithImage(0, PCAT2_LCD_HEIGHT-PCAT2_FOOTER_HEIGHT, PCAT2_LCD_WIDTH, PCAT2_FOOTER_HEIGHT, frame)
 }
 
+// cropToContent scans the given frame and returns a sub-image that contains only non-background pixels.
+func cropToContent(frame *image.RGBA, bgColor color.Color) *image.RGBA {
+	bounds := frame.Bounds()
+	minX, minY := bounds.Max.X, bounds.Max.Y
+	maxX, maxY := bounds.Min.X, bounds.Min.Y
+
+	// Loop over all pixels in the image.
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			if !isBackground(frame.At(x, y), bgColor) {
+				if x < minX {
+					minX = x
+				}
+				if x > maxX {
+					maxX = x
+				}
+				if y < minY {
+					minY = y
+				}
+				if y > maxY {
+					maxY = y
+				}
+			}
+		}
+	}
+
+	// No content found? Return an empty image.
+	if minX > maxX || minY > maxY {
+		return image.NewRGBA(image.Rect(0, 0, 0, 0))
+	}
+
+	// Create the cropping rectangle.
+	cropRect := image.Rect(minX, minY, maxX+1, maxY+1)
+	// Use SubImage to create a new image containing only the cropped area.
+	return frame.SubImage(cropRect).(*image.RGBA)
+}
+
+// isBackground compares a pixel to the given background color.
+func isBackground(c color.Color, bg color.Color) bool {
+	_, _, _, a1 := c.RGBA()
+	//r2, g2, b2, a2 := bg.RGBA()
+	return a1 == 0
+}
+
+
+func sendMiddlePartial(display st7789.Device, frame *image.RGBA) {
+	// Crop the frame to the region with content.
+	croppedFrame := cropToContent(frame, color.Black) // assuming black is the background
+	if croppedFrame.Bounds().Empty() {
+		// Nothing to send.
+		return
+	}
+
+	// Send the cropped frame to the display.
+	// Here we use the cropped image's dimensions.
+	display.FillRectangleWithImage(
+		int16(croppedFrame.Bounds().Min.X),
+		int16(croppedFrame.Bounds().Min.Y),
+		int16(croppedFrame.Bounds().Dx()),
+		int16(croppedFrame.Bounds().Dy()),
+		croppedFrame,
+	)
+}
+
 func sendMiddle(display st7789.Device, frame *image.RGBA) {
+	//crop some frame to save data transfer
 	display.FillRectangleWithImage(0, PCAT2_TOP_BAR_HEIGHT, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT-PCAT2_TOP_BAR_HEIGHT-PCAT2_FOOTER_HEIGHT, frame)
 }
 
