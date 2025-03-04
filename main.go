@@ -6,15 +6,12 @@ import (
 	"image"
 	"image/color"
 	"image/draw"
-	"image/png"
 	"io/ioutil"
 	"log"
 	"time"
 	"math/rand"
 	"strconv"
-	"net/http"
 	"sync"
-	"bytes"
 
 	st7789 "photonicat2_display/periph.io-st7789"
 
@@ -49,12 +46,12 @@ var (
 	PCAT_RED        = color.RGBA{226, 72, 38, 255}
 	PCAT_GREY       = color.RGBA{98, 116, 130, 255}
 	PCAT_GREEN      = color.RGBA{70, 235, 145, 255}
-
+	PCAT_BLACK      = color.RGBA{0, 0, 0, 255}
 	svgCache 		= make(map[string]*image.RGBA)
 
     frameMutex   sync.RWMutex
     currFrame 	*image.RGBA
-
+	lastFrame 	*image.RGBA
     dataMutex    sync.RWMutex
     dynamicData  map[string]string
 )
@@ -174,68 +171,6 @@ func clearFrame(frame *image.RGBA) {
 }
 
 
-func serveFrame(w http.ResponseWriter, r *http.Request) {
-    frameMutex.RLock()
-    defer frameMutex.RUnlock()
-
-    if currFrame == nil {
-        http.Error(w, "No frame available", http.StatusServiceUnavailable)
-        return
-    }
-
-    var buf bytes.Buffer
-    err := png.Encode(&buf, currFrame)
-    if err != nil {
-        http.Error(w, "Failed to encode image", http.StatusInternalServerError)
-        return
-    }
-
-    w.Header().Set("Content-Type", "image/png")
-    w.Header().Set("Content-Length", strconv.Itoa(buf.Len()))
-    buf.WriteTo(w)
-}
-
-func updateData(w http.ResponseWriter, r *http.Request) {
-    if r.Method != http.MethodPost {
-        http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-        return
-    }
-
-    body, err := ioutil.ReadAll(r.Body)
-    if err != nil {
-        http.Error(w, "Failed to read request body", http.StatusBadRequest)
-        return
-    }
-
-    var data map[string]string
-    err = json.Unmarshal(body, &data)
-    if err != nil {
-        http.Error(w, "Invalid JSON", http.StatusBadRequest)
-        return
-    }
-
-    dataMutex.Lock()
-    for k, v := range data {
-        dynamicData[k] = v
-    }
-    dataMutex.Unlock()
-
-    w.WriteHeader(http.StatusOK)
-    fmt.Fprintln(w, "Data updated")
-}
-
-func indexHandler(w http.ResponseWriter, r *http.Request) {
-	http.ServeFile(w, r, "assets/html/index.html")
-}
-
-func httpServer() {
-	http.HandleFunc("/", indexHandler)
-	http.HandleFunc("/frame", serveFrame)
-    http.HandleFunc("/data", updateData)
-    log.Println("Starting HTTP server on :8080")
-    log.Fatal(http.ListenAndServe(":8080", nil))
-}
-
 
 //---------------- Main ----------------
 
@@ -344,6 +279,7 @@ func main() {
 	for {
 		// Alternate between framebuffers.
 		currFrame = framebuffers[frames%2]	
+		lastFrame = framebuffers[(frames+1)%2]
 		//nextFrame := framebuffers[(frames+1)%2]
 		
 		clearFrame(currFrame)

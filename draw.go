@@ -13,7 +13,7 @@ import (
 	"bytes"
 	"math"
 	"math/rand"
-
+	"strconv"
 	st7789 "photonicat2_display/periph.io-st7789"
 
 	"golang.org/x/image/font"
@@ -47,6 +47,27 @@ func drawTextOnFrame(frame *image.RGBA, text string, x, y int, face font.Face, c
         // Adjust Y by the font's ascent to align the baseline.
         Dot: fixed.P(x, y+int(face.Metrics().Ascent.Round())),
     }
+    d.DrawString(text)
+}
+
+func drawTextOnFrame2(frame *image.RGBA, text string, centerX, centerY int, face font.Face, clr color.Color) {
+    d := &font.Drawer{
+        Dst:  frame,
+        Src:  image.NewUniform(clr),
+        Face: face,
+    }
+    // Measure the width of the text.
+    textWidth := d.MeasureString(text).Round()
+    // Calculate the starting X position so that the text is horizontally centered.
+    x := centerX - textWidth/2
+
+    // For vertical centering, consider the font's ascent and descent.
+    metrics := face.Metrics()
+    textHeight := (metrics.Ascent + metrics.Descent).Round()
+    // Adjust the Y so that the text's center aligns with centerY.
+    y := centerY - textHeight/2 + metrics.Ascent.Round()
+
+    d.Dot = fixed.P(x, y)
     d.DrawString(text)
 }
 
@@ -268,10 +289,9 @@ func drawSVG(frame *image.RGBA, svgPath string, x0, y0, targetWidth, targetHeigh
 
 	return nil
 }
-
+//copyImageToImageAt copies an image to an image at a specified offset. frame is the destination image, img is the source image. 
+//x0, y0 is the offset.
 func copyImageToImageAt(frame *image.RGBA, img *image.RGBA, x0, y0 int) error {
-    frameBufferWidth := PCAT2_LCD_WIDTH - PCAT2_L_MARGIN - PCAT2_R_MARGIN
-    
     targetWidth := img.Bounds().Dx()
     targetHeight := img.Bounds().Dy()
     
@@ -281,12 +301,9 @@ func copyImageToImageAt(frame *image.RGBA, img *image.RGBA, x0, y0 int) error {
     }
     
     // Check bounds
-    if x0 < 0 || y0 < 0 || 
-       x0+targetWidth > frameBufferWidth || 
-       y0+targetHeight > frame.Bounds().Dy() {
-        return fmt.Errorf("image placement out of bounds: (%d,%d) with size %dx%d exceeds frame %dx%d",
-            x0, y0, targetWidth, targetHeight, frameBufferWidth, frame.Bounds().Dy())
-    }
+    if x0 < 0 || y0 < 0 {
+		return fmt.Errorf("x, y is negative: %d,%d", x0, y0)
+	}
 
     // Copy pixels
     for y := 0; y < targetHeight; y++ {
@@ -320,7 +337,26 @@ func drawRoundedRect(gc *draw2dimg.GraphicContext, x, y, w, h, r float64) {
 	gc.Close()
 }
 
+func drawRect(img *image.RGBA, x0, y0, width, height int, c color.Color) {
+    // Convert the color.Color to a color.RGBA.
+    r, g, b, a := c.RGBA()
+    // The RGBA() method returns values in the range [0, 65535],
+    // so we need to shift them to [0, 255].
+    col := color.RGBA{R: uint8(r >> 8), G: uint8(g >> 8), B: uint8(b >> 8), A: uint8(a >> 8)}
+
+    for x := x0; x < x0+width; x++ {
+        for y := y0; y < y0+height; y++ {
+            img.SetRGBA(x, y, col)
+        }
+    }
+}
+
 func drawBattery(w, h int, soc float64, onBattery bool) *image.RGBA {
+	face, err := getFontFace("small_text")
+	if err != nil {
+		fmt.Println("Error loading font:", err)
+		return nil
+	}
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
 	var colorMain, colorShaded color.RGBA
 	if soc < 20 {
@@ -333,18 +369,11 @@ func drawBattery(w, h int, soc float64, onBattery bool) *image.RGBA {
 		}
 	}
 	colorShaded = PCAT_GREY
-		
-	gc := draw2dimg.NewGraphicContext(img)
-	gc.SetLineWidth(0)
-	gc.SetStrokeColor(colorMain)
-	gc.SetFillColor(colorMain)
-	drawRoundedRect(gc, 0, 0, float64(w-3), float64(h), 0)
-	gc.FillStroke()
-
-	drawRoundedRect(gc, float64(w-3), float64(h/2-3), 3, 6, 0)
-	gc.FillStroke()
 	
-	//do soc shade
+	drawRect(img, 0, 0, w-3, h, colorMain) //main battery part
+	drawRect(img, w-3, h/2-3, 3, 6, colorMain) //terminal part
+	
+	//soc shade
 	startShadeX := int(math.Round((soc / 100.0) * float64(w)))
 	if startShadeX < w {
 		for x := startShadeX; x < w-3; x++ { 
@@ -365,9 +394,8 @@ func drawBattery(w, h int, soc float64, onBattery bool) *image.RGBA {
 		}
 	}
 
-	cornerCroods := []struct {
-		X, Y int // Center of the corner circle
-	}{
+	//draw corners
+	cornerCroods := []struct {X, Y int}{
 		{0, 0},
 		{w-3-1, 0},
 		{0, h-1},
@@ -378,8 +406,15 @@ func drawBattery(w, h int, soc float64, onBattery bool) *image.RGBA {
 	
 	for _, coord := range cornerCroods {
 		origColor := img.RGBAAt(coord.X, coord.Y)
-		newColor := color.RGBA{origColor.R - 20, origColor.G - 15, origColor.B - 15, 255}
+		newColor := color.RGBA{uint8(float64(origColor.R) *0.6), uint8(float64(origColor.G) * 0.6), uint8(float64(origColor.B) *0.6), 255}
 		img.SetRGBA(coord.X, coord.Y, newColor)
+	}
+	
+	//draw text
+	if soc == 100 {
+		drawTextOnFrame(img, "100", 2, -1, face, PCAT_BLACK, 0, 0)
+	}else{
+		drawTextOnFrame(img, strconv.Itoa(int(soc)), 4, -1, face, PCAT_BLACK, 0, 0)
 	}
 
 	return img
