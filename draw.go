@@ -32,52 +32,51 @@ import (
 //---------------- Drawing Functions ----------------
 
 // drawText draws a string onto an *image.RGBA at (x,y) using the specified font face and color.
-func drawText(img *image.RGBA, text string, x, y int, face font.Face, clr color.Color) (finishX, finishY int) {
-	d := &font.Drawer{
-		Dst:  img,
-		Src:  image.NewUniform(clr),
-		Face: face,
-		// Adjust Y by ascent so that text draws at the baseline.
-		Dot: fixed.P(x, y+int(face.Metrics().Ascent.Round())),
-	}
-	d.DrawString(text)
-	
-	// Measure the text width.
-	textWidth := d.MeasureString(text).Round()
-	// Calculate the total text height using ascent and descent.
-	textHeight := face.Metrics().Ascent.Round() + face.Metrics().Descent.Round()
-	
-	// Determine finishing coordinates.
-	finishX = x + textWidth
-	finishY = y + textHeight
-	return
-}
-
-func drawTextOnFrame2(frame *image.RGBA, text string, centerX, centerY int, face font.Face, clr color.Color) {
+func drawText(img *image.RGBA, text string, posX, posY int, face font.Face, clr color.Color, center bool) (finishX, finishY int) {
     d := &font.Drawer{
-        Dst:  frame,
+        Dst:  img,
         Src:  image.NewUniform(clr),
         Face: face,
     }
-    // Measure the width of the text.
-    textWidth := d.MeasureString(text).Round()
-    // Calculate the starting X position so that the text is horizontally centered.
-    x := centerX - textWidth/2
-
-    // For vertical centering, consider the font's ascent and descent.
+    
+    // Get font metrics once.
     metrics := face.Metrics()
-    textHeight := (metrics.Ascent + metrics.Descent).Round()
-    // Adjust the Y so that the text's center aligns with centerY.
-    y := centerY - textHeight/2 + metrics.Ascent.Round()
-
+    
+    var x, y int
+    if center {
+        // Measure the width and height.
+        textWidth := d.MeasureString(text).Round()
+        //textHeight := (metrics.Ascent + metrics.Descent).Round()
+        // Calculate starting position so text is centered.
+        x = posX - textWidth/2
+    } else {
+        x = posX
+    }
+	y = posY + metrics.Ascent.Round()
+    
     d.Dot = fixed.P(x, y)
     d.DrawString(text)
+    
+    // Recalculate dimensions for finishing coordinates.
+    textWidth := d.MeasureString(text).Round()
+    textHeight := metrics.Ascent.Round() + metrics.Descent.Round()
+    
+    finishX = x + textWidth
+    // For finishing Y, if centered we subtract the ascent offset to align with the original posY
+    if center {
+        finishY = (y - metrics.Ascent.Round()) + textHeight
+    } else {
+        finishY = posY + textHeight
+    }
+    
+    return
 }
 
-func loadImage(filePath string) (*image.RGBA, error) {
+func loadImage(filePath string) (*image.RGBA, int, int, error) {
 	// Check if image is in cache.
 	if cachedImg, ok := imageCache[filePath]; ok {
-		return cachedImg, nil
+		bounds := cachedImg.Bounds()
+		return cachedImg, bounds.Dx(), bounds.Dy(), nil
 	}
 
 	ext := strings.ToLower(filepath.Ext(filePath))
@@ -85,7 +84,7 @@ func loadImage(filePath string) (*image.RGBA, error) {
 	// Open the file.
 	f, err := os.Open(filePath)
 	if err != nil {
-		return nil, err
+		return nil, 0, 0, err
 	}
 	defer f.Close()
 
@@ -95,34 +94,36 @@ func loadImage(filePath string) (*image.RGBA, error) {
 	case ".png":
 		img, err = png.Decode(f)
 		if err != nil {
-			return nil, err
+			return nil, 0, 0, err
 		}
 	case ".jpg", ".jpeg":
 		img, err = jpeg.Decode(f)
 		if err != nil {
-			return nil, err
+			return nil, 0, 0, err
 		}
 	case ".gif":
 		img, err = gif.Decode(f)
 		if err != nil {
-			return nil, err
+			return nil, 0, 0, err
 		}
 	case ".svg":
 		// Read the entire SVG file.
 		svgData, err := ioutil.ReadAll(f)
 		if err != nil {
-			return nil, err
+			return nil, 0, 0, err
 		}
 		// Decode the SVG using oksvg.
 		icon, err := oksvg.ReadIconStream(bytes.NewReader(svgData))
 		if err != nil {
-			return nil, err
+			return nil, 0, 0, err
 		}
 		// Determine intrinsic dimensions.
 		w := int(icon.ViewBox.W)
 		h := int(icon.ViewBox.H)
 		// Create an RGBA image to serve as the rendering canvas.
 		rgba := image.NewRGBA(image.Rect(0, 0, w, h))
+		// Clear the canvas with a fully transparent color.
+		draw.Draw(rgba, rgba.Bounds(), image.NewUniform(color.RGBA{0, 0, 0, 0}), image.Point{}, draw.Src)
 		// Set the target dimensions.
 		icon.SetTarget(0, 0, float64(w), float64(h))
 		// Create a scanner and dasher for rendering.
@@ -132,9 +133,9 @@ func loadImage(filePath string) (*image.RGBA, error) {
 		icon.Draw(dasher, 1.0)
 		// Cache and return the rendered image.
 		imageCache[filePath] = rgba
-		return rgba, nil
+		return rgba, w, h, nil
 	default:
-		return nil, fmt.Errorf("unsupported image format: %s", ext)
+		return nil, 0, 0, fmt.Errorf("unsupported image format: %s", ext)
 	}
 
 	// Convert the decoded image to RGBA if needed.
@@ -143,8 +144,9 @@ func loadImage(filePath string) (*image.RGBA, error) {
 	draw.Draw(rgba, bounds, img, bounds.Min, draw.Src)
 	// Cache the image.
 	imageCache[filePath] = rgba
-	return rgba, nil
+	return rgba, bounds.Dx(), bounds.Dy(), nil
 }
+
 
 // copyImageToFrameBuffer converts an image.RGBA to a 1D []color.RGBA slice.
 func copyImageToFrameBuffer(img *image.RGBA, frame []color.RGBA) {
@@ -273,8 +275,8 @@ func testClock(frame *image.RGBA) {
     }
 
     // Draw the formatted time string onto the image
-    drawText(frame, dateStr, 0, 0, face, textColor)
-    drawText(frame, timeStr, 0, 30, face, randomColor)
+    drawText(frame, dateStr, 0, 0, face, textColor, false)
+    drawText(frame, timeStr, 0, 30, face, randomColor, false)
 }
 
 func drawSVG(frame *image.RGBA, svgPath string, x0, y0, targetWidth, targetHeight int) error {
@@ -353,28 +355,56 @@ func drawSVG(frame *image.RGBA, svgPath string, x0, y0, targetWidth, targetHeigh
 //copyImageToImageAt copies an image to an image at a specified offset. frame is the destination image, img is the source image. 
 //x0, y0 is the offset.
 func copyImageToImageAt(frame *image.RGBA, img *image.RGBA, x0, y0 int) error {
-    targetWidth := img.Bounds().Dx()
-    targetHeight := img.Bounds().Dy()
-    
-    // Validate input parameters
-    if frame == nil || img == nil {
-        return fmt.Errorf("nil image provided")
-    }
-    
-    // Check bounds
-    if x0 < 0 || y0 < 0 {
+	targetWidth := img.Bounds().Dx()
+	targetHeight := img.Bounds().Dy()
+
+	// Validate input parameters.
+	if frame == nil || img == nil {
+		return fmt.Errorf("nil image provided")
+	}
+
+	// Check bounds.
+	if x0 < 0 || y0 < 0 {
 		return fmt.Errorf("x, y is negative: %d,%d", x0, y0)
 	}
 
-    // Copy pixels
-    for y := 0; y < targetHeight; y++ {
-        for x := 0; x < targetWidth; x++ {
-            frame.SetRGBA(x0+x, y0+y, img.RGBAAt(x, y))
-        }
-    }
-    
-    return nil
+	// Iterate over each pixel.
+	for y := 0; y < targetHeight; y++ {
+		for x := 0; x < targetWidth; x++ {
+			sample := img.RGBAAt(x, y)
+			// Skip fully transparent pixels.
+			if sample.A == 0 {
+				continue
+			}
+
+			// Get the destination pixel.
+			dst := frame.RGBAAt(x0+x, y0+y)
+			if sample.A == 255 {
+				// Fully opaque: copy sample pixel directly.
+				frame.SetRGBA(x0+x, y0+y, sample)
+			} else {
+				// Mix sample and destination pixels.
+				a := uint16(sample.A)
+				invA := uint16(255 - sample.A)
+				outR := (uint16(sample.R)*a + uint16(dst.R)*invA) / 255
+				outG := (uint16(sample.G)*a + uint16(dst.G)*invA) / 255
+				outB := (uint16(sample.B)*a + uint16(dst.B)*invA) / 255
+				// For the alpha channel, use the over operator:
+				// outA = sample.A + dst.A*(255-sample.A)/255
+				outA := uint8(uint16(sample.A) + (uint16(dst.A)*invA)/255)
+				frame.SetRGBA(x0+x, y0+y, color.RGBA{
+					R: uint8(outR),
+					G: uint8(outG),
+					B: uint8(outB),
+					A: outA,
+				})
+			}
+		}
+	}
+
+	return nil
 }
+
 
 func drawRoundedRect(gc *draw2dimg.GraphicContext, x, y, w, h, r float64) {
 	// Start at the top-left corner, offset by the radius.
@@ -415,7 +445,7 @@ func drawRect(img *image.RGBA, x0, y0, width, height int, c color.Color) {
 func drawSignalStrength(frame *image.RGBA, x0, y0 int, strength float64) {
 	xBarSize := 5
 	yBarSize := 12
-	barSpace := 2
+	barSpace := 1
 	numBars := 4
 	yMinHeight := 4
 	gc := draw2dimg.NewGraphicContext(frame)
@@ -437,6 +467,7 @@ func drawSignalStrength(frame *image.RGBA, x0, y0 int, strength float64) {
 }
 
 func drawBattery(w, h int, soc float64, onBattery bool, x0, y0 int) *image.RGBA {
+	terminalWidth := 3
 	face, _, err := getFontFace("clock")
 	if err != nil {
 		fmt.Println("Error loading font:", err)
@@ -455,8 +486,8 @@ func drawBattery(w, h int, soc float64, onBattery bool, x0, y0 int) *image.RGBA 
 	}
 	colorShaded = PCAT_GREY
 	
-	drawRect(img, 0, 0, w-3, h, colorMain) //main battery part
-	drawRect(img, w-3, h/2-3, 3, 6, colorMain) //terminal part
+	drawRect(img, 0, 0, w-terminalWidth, h, colorMain) //main battery part
+	drawRect(img, w-terminalWidth, h/2-3, terminalWidth, 6, colorMain) //terminal part
 	
 	//soc shade
 	startShadeX := int(math.Round((soc / 100.0) * float64(w)))
@@ -482,9 +513,9 @@ func drawBattery(w, h int, soc float64, onBattery bool, x0, y0 int) *image.RGBA 
 	//draw corners
 	cornerCroods := []struct {X, Y int}{
 		{0, 0},
-		{w-3-1, 0},
+		{w-terminalWidth-1, 0},
 		{0, h-1},
-		{w-3-1, h-1},
+		{w-terminalWidth-1, h-1},
 		{w-1, h/2-3},
 		{w-1, h/2+3-1},
 	}
@@ -495,13 +526,37 @@ func drawBattery(w, h int, soc float64, onBattery bool, x0, y0 int) *image.RGBA 
 		img.SetRGBA(coord.X, coord.Y, newColor)
 	}
 	
+	textColor := PCAT_BLACK
+	chargingBlotWidth := 10
 	//draw text
 	if soc == 100 {
-		drawText(img, "100", 2, -2, face, PCAT_BLACK)
+		drawText(img, "100", 2, -3, face, textColor, true)
+	}else if soc < 20 {
+		textColor = PCAT_WHITE
 	}else{
-		drawText(img, strconv.Itoa(int(soc)), 4, -2, face, PCAT_BLACK)
+		textColor = PCAT_BLACK
 	}
-
+	batteryText := strconv.Itoa(int(soc))
+	if onBattery {
+		chargingBlotWidth = 0
+		
+	}
+	//drawText(img, batteryText, (w-terminalWidth)/2, -3, face, textColor, true)
+	x, _ := drawText(img, batteryText, (w-terminalWidth-chargingBlotWidth)/2+1, -3, face, textColor, true)
+	if !onBattery {
+		var chargingBolt *image.RGBA
+		var err error
+		if soc < 20 {
+			chargingBolt, _, _, err = loadImage("assets/svg/blot_white.svg")
+		}else{
+			chargingBolt, _, _, err = loadImage("assets/svg/blot_black.svg")
+		}
+		if err != nil {
+			fmt.Println("Error loading charging bolt:", err)
+			return nil
+		}
+		copyImageToImageAt(img, chargingBolt, x, 0)
+	}
 	return img
 }
 
@@ -530,13 +585,13 @@ func drawTopBar(frame *image.RGBA) {
 	networkStr := "5G"
 
 	//draw time
-	drawText(frame, timeStr, x0+2, y0-2, faceClock, PCAT_WHITE)	
+	drawText(frame, timeStr, x0+2, y0-3, faceClock, PCAT_WHITE, false)	
 
 	//draw signal strength
-	drawSignalStrength(frame, x0+55, y0-2, 0.1)
+	drawSignalStrength(frame, x0+61, y0-2, 0.1)
 
 	//draw network
-	drawText(frame, networkStr, x0+87, y0-2, faceClockBold, PCAT_WHITE)
+	drawText(frame, networkStr, x0+87, y0-3, faceClockBold, PCAT_WHITE, false)
 
 	//draw Battery
 	randomSoc := rand.Intn(100)
@@ -620,19 +675,19 @@ func renderMiddle(frame *image.RGBA, cfg *Config) {
 			mainAscent := face.Metrics().Ascent.Round()
 			// element.Position.Y acts as the top of the text area.
 			mainBaseline := element.Position.Y + mainAscent
-			xMain, _ := drawText(frame, textToDisplay, element.Position.X, element.Position.Y, face, clr)
+			xMain, _ := drawText(frame, textToDisplay, element.Position.X, element.Position.Y, face, clr, false)
 
 			// Calculate the y position for the units text so that its baseline aligns with the main text.
 			unitAscent := unitFace.Metrics().Ascent.Round()
 			unitY := mainBaseline - unitAscent
 
 			// Draw the units text slightly to the right of the main text.
-			drawText(frame, element.Units, xMain+1, unitY, unitFace, clr)
+			drawText(frame, element.Units, xMain+1, unitY, unitFace, clr, false)
 		
 		case "icon":
 			var iconImg *image.RGBA
 			var err error
-			iconImg, err = loadImage(element.IconPath)
+			iconImg, _, _, err = loadImage(element.IconPath)
 			if err != nil {
 				log.Printf("Error loading icon from %s: %v", element.IconPath, err)
 				continue
@@ -661,12 +716,12 @@ func renderMiddle(frame *image.RGBA, cfg *Config) {
 
 func drawFooter(frame *image.RGBA, currPage int, numOfPages int) {
 	log.Println("numOfPages:", numOfPages)
-	cir, err := loadImage("assets/svg/circle_dot.svg")
+	cir, _, _, err := loadImage("assets/svg/circle_dot.svg")
 	if err != nil {
 		log.Printf("Error loading circle_dot from %s: %v", "assets/svg/circle_dot.svg", err)
 		return
 	}
-	dot, err := loadImage("assets/svg/dot.svg")
+	dot, _, _, err := loadImage("assets/svg/dot.svg")
 	if err != nil {
 		log.Printf("Error loading dot from %s: %v", "assets/svg/dot.svg", err)
 		return

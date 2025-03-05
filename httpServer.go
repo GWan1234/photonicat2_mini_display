@@ -98,6 +98,6 @@ func httpServer() {
 	http.HandleFunc("/", indexHandler)
 	http.HandleFunc("/frame", serveFrame)
     http.HandleFunc("/data", updateData)
-    log.Println("Starting HTTP server on :8080")
-    log.Fatal(http.ListenAndServe(":8080", nil))
+    log.Println("Starting HTTP server on :8081")
+    log.Fatal(http.ListenAndServe(":8081", nil))
 }
