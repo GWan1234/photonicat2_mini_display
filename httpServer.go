@@ -37,11 +37,11 @@ func serveFrame(w http.ResponseWriter, r *http.Request) {
         return
     }   
     
-    /*err = copyImageToImageAt(webFrame, footerFramebuffers[frames%2], 0, PCAT2_LCD_HEIGHT - PCAT2_FOOTER_HEIGHT)
+    err = copyImageToImageAt(webFrame, footerFramebuffers[frames%2], 0, PCAT2_LCD_HEIGHT - PCAT2_FOOTER_HEIGHT)
     if err != nil {
         http.Error(w, "Failed to copy footer frame", http.StatusInternalServerError)
         return
-    }*/
+    }
 	frameMutex.RUnlock()
 
     if webFrame == nil {

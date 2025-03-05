@@ -39,7 +39,7 @@ const (
 	PCAT2_T_MARGIN   = 10
 	PCAT2_B_MARGIN   = 7
 	PCAT2_TOP_BAR_HEIGHT = 26
-	PCAT2_FOOTER_HEIGHT = 23
+	PCAT2_FOOTER_HEIGHT = 22
 )
 
 var (
@@ -64,6 +64,8 @@ var (
     dataMutex    sync.RWMutex
     dynamicData  map[string]string
 	imageCache 	map[string]*image.RGBA
+	cfg 			Config	
+	currPage 	int
 )
 
 // ImageBuffer holds a 1D slice of pixels for the display area.
@@ -123,7 +125,6 @@ func loadConfig(path string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	var cfg Config
 	err = json.Unmarshal(data, &cfg)
 	return cfg, err
 }
@@ -138,8 +139,8 @@ type FontConfig struct {
 
 // For demonstration, we create a mapping from font names to font configurations.
 var fonts = map[string]FontConfig{
-	"clock": 	     {FontPath: "assets/fonts/Orbitron-Medium.ttf", FontSize: 15},
-	"clockBold": 	     {FontPath: "assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 15},
+	"clock": 	     {FontPath: "assets/fonts/Orbitron-Medium.ttf", FontSize: 16},
+	"clockBold": 	     {FontPath: "assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 16},
 	//"small_text": 	 {FontPath: "assets/fonts/Orbitron-Medium.ttf", FontSize: 17},
 	"reg": 	 {FontPath: "assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 17},
 	"big": 	 {FontPath: "assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 25},
@@ -335,13 +336,17 @@ func main() {
 			clearFrame(topBarFramebuffers[topFrames%2], topBarFrameWidth, topBarFrameHeight)
 			drawTopBar(topBarFramebuffers[topFrames%2])
 			sendTopBar(display, topBarFramebuffers[topFrames%2])
+			
+			clearFrame(footerFramebuffers[middleFrames%2], footerFrameWidth, footerFrameHeight)
+			drawFooter(footerFramebuffers[middleFrames%2], 2, cfg.NumPages)
+			sendFooter(display, footerFramebuffers[middleFrames%2])
 		}
 		
 
 
 		clearFrame(middleFramebuffers[middleFrames%2], middleFrameWidth, middleFrameHeight)
 		renderMiddle(middleFramebuffers[middleFrames%2], &cfg)
-		drawText(middleFramebuffers[middleFrames%2], "FPS: " + strconv.FormatFloat(fps, 'f', 1, 64) + ", " + strconv.Itoa(middleFrames), 10, 250, face, PCAT_YELLOW)
+		drawText(middleFramebuffers[middleFrames%2], "FPS: " + strconv.FormatFloat(fps, 'f', 1, 64) + ", " + strconv.Itoa(middleFrames), 10, 235, face, PCAT_YELLOW)
 		sendMiddle(display, middleFramebuffers[middleFrames%2])
 		
 

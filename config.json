@@ -1,5 +1,5 @@
 {
-    "num_pages": 3,
+    "num_pages": 4,
     "site0": "baidu.com",
     "site1": "g77k.com",
     "display_template": {
@@ -76,19 +76,19 @@
                 {
                     "type": "icon",
                     "icon_path": "assets/svg/hline.svg",
-                    "position": {"x": 10, "y": 186},
+                    "position": {"x": 10, "y": 187},
                     "enable": 1
                 },
                 {
                     "type": "icon",
                     "icon_path": "assets/svg/batt.svg",
-                    "position": {"x": 10, "y": 196},
+                    "position": {"x": 10, "y": 197},
                     "enable": 1
                 },
                 {
                     "type": "text",
                     "label": "Batt",
-                    "position": {"x": 100, "y": 190},
+                    "position": {"x": 100, "y": 191},
                     "font": "reg",
                     "color": [255, 229, 0],
                     "units": "W",
@@ -99,7 +99,7 @@
                 {
                     "type": "text",
                     "label": "Batt_v",
-                    "position": {"x": 35, "y": 190},
+                    "position": {"x": 35, "y": 191},
                     "font": "reg",
                     "color": [255, 229, 0],
                     "units": "v",
@@ -110,13 +110,13 @@
                 {
                     "type": "icon",
                     "icon_path": "assets/svg/charge.svg",
-                    "position": {"x": 10, "y": 212},
+                    "position": {"x": 10, "y": 215},
                     "enable": 1
                 },
                 {
                     "type": "text",
                     "label": "dc",
-                    "position": {"x": 35, "y": 212},
+                    "position": {"x": 35, "y": 215},
                     "font": "reg",
                     "color": [255, 229, 0],
                     "units": "v",

@@ -658,3 +658,32 @@ func renderMiddle(frame *image.RGBA, cfg *Config) {
 		}
 	}
 }
+
+func drawFooter(frame *image.RGBA, currPage int, numOfPages int) {
+	log.Println("numOfPages:", numOfPages)
+	cir, err := loadImage("assets/svg/circle_dot.svg")
+	if err != nil {
+		log.Printf("Error loading circle_dot from %s: %v", "assets/svg/circle_dot.svg", err)
+		return
+	}
+	dot, err := loadImage("assets/svg/dot.svg")
+	if err != nil {
+		log.Printf("Error loading dot from %s: %v", "assets/svg/dot.svg", err)
+		return
+	}
+
+	whiteDotRadius := 8
+	greyDotRadius := 4
+	xPart := 10 + whiteDotRadius * 2
+	yOffset := 2
+	x0 := (PCAT2_LCD_WIDTH - (numOfPages-1)*xPart) / 2  - whiteDotRadius
+
+	for i := 0; i < numOfPages; i++ {
+		if i == currPage {
+			copyImageToImageAt(frame, cir, x0+i*xPart, yOffset)
+		}else{
+			copyImageToImageAt(frame, dot, x0+i*xPart + greyDotRadius, yOffset + greyDotRadius)
+		}
+	}
+
+}

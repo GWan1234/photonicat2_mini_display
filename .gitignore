@@ -1,3 +1,6 @@
 display
 *.png
 *.jpg
+*.bmp
+photonicat2_display
+periph.io-st7789
