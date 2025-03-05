@@ -38,7 +38,7 @@ const (
 	PCAT2_R_MARGIN   = 7
 	PCAT2_T_MARGIN   = 7
 	PCAT2_B_MARGIN   = 7
-	PCAT2_TOP_BAR_HEIGHT = 23
+	PCAT2_TOP_BAR_HEIGHT = 25
 	PCAT2_FOOTER_HEIGHT = 23
 )
 
@@ -140,34 +140,43 @@ type FontConfig struct {
 // For demonstration, we create a mapping from font names to font configurations.
 var fonts = map[string]FontConfig{
 	"clock": 	     {FontPath: "assets/fonts/Orbitron-Medium.ttf", FontSize: 15},
+	"clockBold": 	     {FontPath: "assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 15},
 	//"small_text": 	 {FontPath: "assets/fonts/Orbitron-Medium.ttf", FontSize: 17},
-	"reg_text": 	 {FontPath: "assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 16},
-	"big_text": 	 {FontPath: "assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 24},
-	"unit": 	 {FontPath: "assets/fonts/Orbitron-Medium.ttf", FontSize: 14},
-	"huge":      {FontPath: "assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 33},
+	"reg": 	 {FontPath: "assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 17},
+	"big": 	 {FontPath: "assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 25},
+	"unit": 	 {FontPath: "assets/fonts/Orbitron-Medium.ttf", FontSize: 15},
+	"huge":      {FontPath: "assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 34},
 	"gigantic":  {FontPath: "assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 48},
 }
 
 // getFontFace loads the font based on our mapping.
-func getFontFace(fontName string) (font.Face, error) {
+func getFontFace(fontName string) (font.Face, int, error) {
 	cfg, ok := fonts[fontName]
 	if !ok {
-		return nil, fmt.Errorf("font %s not found in mapping", fontName)
+		return nil, 0, fmt.Errorf("font %s not found in mapping", fontName)
 	}
 	fontBytes, err := ioutil.ReadFile(cfg.FontPath)
 	if err != nil {
-		return nil, fmt.Errorf("error reading font file: %v", err)
+		return nil, 0, fmt.Errorf("error reading font file: %v", err)
 	}
 	ttfFont, err := opentype.Parse(fontBytes)
 	if err != nil {
-		return nil, fmt.Errorf("error parsing font: %v", err)
+		return nil, 0, fmt.Errorf("error parsing font: %v", err)
 	}
 	face, err := opentype.NewFace(ttfFont, &opentype.FaceOptions{
 		Size:    cfg.FontSize,
 		DPI:     72,
 		Hinting: font.HintingFull,
 	})
-	return face, err
+	if err != nil {
+		return nil, 0, err
+	}
+	
+	// Calculate font height using the ascent and descent metrics.
+	metrics := face.Metrics()
+	fontHeight := metrics.Ascent.Round() + metrics.Descent.Round()
+	
+	return face, fontHeight, nil
 }
 
 func clearFrame(frame *image.RGBA, width int, height int) {
@@ -301,7 +310,7 @@ func main() {
 	topFrames := 0
 	middleFrames := 0
 	//bottomFrames := 0
-	face, err := getFontFace("huge")
+	face, _, err := getFontFace("clock")
 	if err != nil {
 		log.Fatalf("Failed to load font: %v", err)
 	}
@@ -330,8 +339,8 @@ func main() {
 
 
 		clearFrame(middleFramebuffers[middleFrames%2], middleFrameWidth, middleFrameHeight)
-		drawText(middleFramebuffers[middleFrames%2], "FPS: " + strconv.FormatFloat(fps, 'f', 1, 64), 0, 0, face, PCAT_YELLOW)
-		drawText(middleFramebuffers[middleFrames%2], "F: " + strconv.Itoa(middleFrames), 0, 50, face, PCAT_YELLOW)
+		renderMiddle(middleFramebuffers[middleFrames%2], &cfg)
+		drawText(middleFramebuffers[middleFrames%2], "FPS: " + strconv.FormatFloat(fps, 'f', 1, 64) + ", " + strconv.Itoa(middleFrames), 10, 250, face, PCAT_YELLOW)
 		sendMiddle(display, middleFramebuffers[middleFrames%2])
 		
 
