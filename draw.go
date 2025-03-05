@@ -75,8 +75,13 @@ func drawTextOnFrame2(frame *image.RGBA, text string, centerX, centerY int, face
 }
 
 func loadImage(filePath string) (*image.RGBA, error) {
+	// Check if image is in cache.
+	if cachedImg, ok := imageCache[filePath]; ok {
+		return cachedImg, nil
+	}
+
 	ext := strings.ToLower(filepath.Ext(filePath))
-	
+
 	// Open the file.
 	f, err := os.Open(filePath)
 	if err != nil {
@@ -125,6 +130,8 @@ func loadImage(filePath string) (*image.RGBA, error) {
 		dasher := rasterx.NewDasher(w, h, scanner)
 		// Render the SVG onto the RGBA image.
 		icon.Draw(dasher, 1.0)
+		// Cache and return the rendered image.
+		imageCache[filePath] = rgba
 		return rgba, nil
 	default:
 		return nil, fmt.Errorf("unsupported image format: %s", ext)
@@ -134,6 +141,8 @@ func loadImage(filePath string) (*image.RGBA, error) {
 	bounds := img.Bounds()
 	rgba := image.NewRGBA(bounds)
 	draw.Draw(rgba, bounds, img, bounds.Min, draw.Src)
+	// Cache the image.
+	imageCache[filePath] = rgba
 	return rgba, nil
 }
 
@@ -403,6 +412,30 @@ func drawRect(img *image.RGBA, x0, y0, width, height int, c color.Color) {
     }
 }
 
+func drawSignalStrength(frame *image.RGBA, x0, y0 int, strength float64) {
+	xBarSize := 5
+	yBarSize := 12
+	barSpace := 2
+	numBars := 4
+	yMinHeight := 4
+	gc := draw2dimg.NewGraphicContext(frame)
+	gc.SetFillColor(color.RGBA{255, 255, 255, 255})
+	gc.SetStrokeColor(color.RGBA{255, 255, 255, 255})
+	gc.SetLineWidth(1)
+	strengthInt := int(math.Ceil(strength * 4))
+	strengthInt = 3
+	
+	for i := 0; i < numBars; i++ {
+		if i < strengthInt {
+			drawRect(frame, x0+i*xBarSize+i*barSpace, y0+yBarSize/4*(4-i), xBarSize, yBarSize/4*i+yMinHeight, PCAT_WHITE)
+		}else{
+			drawRect(frame, x0+i*xBarSize+i*barSpace, y0+yBarSize/4*(4-i), xBarSize, yBarSize/4*i+yMinHeight, PCAT_GREY)
+		}
+	}
+
+	
+}
+
 func drawBattery(w, h int, soc float64, onBattery bool, x0, y0 int) *image.RGBA {
 	face, _, err := getFontFace("clock")
 	if err != nil {
@@ -496,10 +529,14 @@ func drawTopBar(frame *image.RGBA) {
 	}
 	networkStr := "5G"
 
+	//draw time
 	drawText(frame, timeStr, x0+2, y0-2, faceClock, PCAT_WHITE)	
 
+	//draw signal strength
+	drawSignalStrength(frame, x0+55, y0-2, 0.1)
+
 	//draw network
-	drawText(frame, networkStr, x0+78, y0-2, faceClockBold, PCAT_WHITE)
+	drawText(frame, networkStr, x0+87, y0-2, faceClockBold, PCAT_WHITE)
 
 	//draw Battery
 	randomSoc := rand.Intn(100)
@@ -535,6 +572,8 @@ func renderMiddle(frame *image.RGBA, cfg *Config) {
 		"batt_volt":          "8.12",
 		"hour_left":          "15",
 		"dc_v":               "20",
+		"session_data_usage": "1.2",
+		"monthly_data_usage": "100",
 	}
 
 	// Process each element.

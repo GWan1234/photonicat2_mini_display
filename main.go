@@ -34,11 +34,11 @@ const (
 	PCAT2_LCD_WIDTH  = 172
 	PCAT2_LCD_HEIGHT = 320
 	PCAT2_X_OFFSET   = 34
-	PCAT2_L_MARGIN   = 7
+	PCAT2_L_MARGIN   = 8
 	PCAT2_R_MARGIN   = 7
-	PCAT2_T_MARGIN   = 7
+	PCAT2_T_MARGIN   = 10
 	PCAT2_B_MARGIN   = 7
-	PCAT2_TOP_BAR_HEIGHT = 25
+	PCAT2_TOP_BAR_HEIGHT = 26
 	PCAT2_FOOTER_HEIGHT = 23
 )
 
@@ -63,9 +63,8 @@ var (
 	frames 		int
     dataMutex    sync.RWMutex
     dynamicData  map[string]string
+	imageCache 	map[string]*image.RGBA
 )
-
-
 
 // ImageBuffer holds a 1D slice of pixels for the display area.
 type ImageBuffer struct {
@@ -209,6 +208,8 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+
+	imageCache = make(map[string]*image.RGBA)
 
 	// Setup display.
 	display := st7789.New(conn,

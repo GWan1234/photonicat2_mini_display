@@ -1,0 +1,179 @@
+{
+    "num_pages": 3,
+    "site0": "baidu.com",
+    "site1": "g77k.com",
+    "display_template": {
+        "elements": {
+            "page0": [ 
+                {
+                    "type": "text",
+                    "label": "Network Speed Up",
+                    "position": {"x": 10, "y": 6},
+                    "font": "huge",
+                    "color": [255, 229, 0],
+                    "units": "Mbps",
+                    "data_key": "network_speed_up",
+                    "units_font": "unit",
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "Network Speed Down",
+                    "position": {"x": 10, "y": 40},
+                    "font": "huge",
+                    "color": [255, 229, 0],
+                    "units": "Mbps",
+                    "data_key": "network_speed_down",
+                    "units_font": "unit",
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "Ping",
+                    "position": {"x": 10, "y": 76},
+                    "font": "huge",
+                    "color": [255, 229, 0],
+                    "units": "GB",
+                    "data_key": "session_data_usage",
+                    "units_font": "unit",
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "Ping",
+                    "position": {"x": 10, "y": 110},
+                    "font": "huge",
+                    "color": [255, 229, 0],
+                    "units": "GB",
+                    "data_key": "monthly_data_usage",
+                    "units_font": "unit",
+                    "enable": 1
+                },
+                {
+                    "type": "icon",
+                    "icon_path": "assets/svg/hline.svg",
+                    "position": {"x": 10, "y": 151},
+                    "enable": 1
+                },
+                {
+                    "type": "icon",
+                    "icon_path": "assets/svg/temp.svg",
+                    "position": {"x": 10, "y": 158},
+                    "size": {"width": 14, "height": 22},
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "Temperature",
+                    "position": {"x": 35, "y": 154},
+                    "font": "big",
+                    "color": [255, 229, 0],
+                    "units": "°C",
+                    "data_key": "mobo_temp",
+                    "units_font": "unit",
+                    "enable": 1
+                },
+                {
+                    "type": "icon",
+                    "icon_path": "assets/svg/hline.svg",
+                    "position": {"x": 10, "y": 186},
+                    "enable": 1
+                },
+                {
+                    "type": "icon",
+                    "icon_path": "assets/svg/batt.svg",
+                    "position": {"x": 10, "y": 196},
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "Batt",
+                    "position": {"x": 100, "y": 190},
+                    "font": "reg",
+                    "color": [255, 229, 0],
+                    "units": "W",
+                    "data_key": "batt_watt",
+                    "units_font": "unit",
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "Batt_v",
+                    "position": {"x": 35, "y": 190},
+                    "font": "reg",
+                    "color": [255, 229, 0],
+                    "units": "v",
+                    "data_key": "batt_volt",
+                    "units_font": "unit",
+                    "enable": 1
+                },
+                {
+                    "type": "icon",
+                    "icon_path": "assets/svg/charge.svg",
+                    "position": {"x": 10, "y": 212},
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "dc",
+                    "position": {"x": 35, "y": 212},
+                    "font": "reg",
+                    "color": [255, 229, 0],
+                    "units": "v",
+                    "data_key": "dc_v",
+                    "units_font": "unit",
+                    "enable": 1
+                }
+            ],
+            "page1": [
+                {
+                    "type": "text",
+                    "label": "Network Speed",
+                    "position": {"x": 10, "y": 46},
+                    "font": "big",
+                    "color": [255, 229, 0],
+                    "units": "M/s",
+                    "data_key": "network_speed_up",
+                    "units_font": "unit"
+                },
+                {
+                    "type": "text",
+                    "label": "Ping",
+                    "position": {"x": 10, "y": 90},
+                    "font": "huge",
+                    "color": [255, 229, 0],
+                    "units": "ms",
+                    "data_key": "ping1",
+                    "units_font": "unit",
+                    "enable": 1
+                }
+            ],
+            "page2": [
+                {
+                    "type": "text",
+                    "label": "LAN IP",
+                    "position": {"x": 10, "y": 46},
+                    "font": "unit",
+                    "color": [255, 255, 255],
+                    "data_key": "lan_ip"
+                },
+                {
+                    "type": "text",
+                    "label": "Public IP",
+                    "position": {"x": 10, "y": 71},
+                    "font": "unit",
+                    "color": [255, 255, 255],
+                    "data_key": "public_ip"
+                },
+                {
+                    "type": "text",
+                    "label": "Wifi IP",
+                    "position": {"x": 10, "y": 96},
+                    "font": "unit",
+                    "color": [255, 255, 255],
+                    "data_key": "wifi_ip"
+                }
+            ]
+        }
+    }
+}
