@@ -479,7 +479,7 @@ func drawSignalStrength(frame *image.RGBA, x0, y0 int, strength float64) {
 		}
 		svgFile.Close()
 	}
-	
+
 	img, _, _, err := loadImage(fn)
 	if err != nil {
 		panic(err)
@@ -737,14 +737,14 @@ func renderMiddle(frame *image.RGBA, cfg *Config) {
 
 func drawFooter(frame *image.RGBA, currPage int, numOfPages int) {
 	log.Println("numOfPages:", numOfPages)
-	cir, _, _, err := loadImage("assets/svg/circle_dot.svg")
+	cir, _, _, err := loadImage("assets/svg/dotCircle.svg")
 	if err != nil {
-		log.Printf("Error loading circle_dot from %s: %v", "assets/svg/circle_dot.svg", err)
+		log.Printf("Error loading circle_dot from %s: %v", "assets/svg/dotCircle.svg", err)
 		return
 	}
-	dot, _, _, err := loadImage("assets/svg/dot.svg")
+	dot, _, _, err := loadImage("assets/svg/dotSolid.svg")
 	if err != nil {
-		log.Printf("Error loading dot from %s: %v", "assets/svg/dot.svg", err)
+		log.Printf("Error loading dot from %s: %v", "assets/svg/dotSolid.svg", err)
 		return
 	}
 

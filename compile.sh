@@ -22,7 +22,7 @@ fi
 # Create package directory structure
 PACKAGE_DIR="pcat2_display_package"
 rm -rf "$PACKAGE_DIR"
-mkdir -p "$PACKAGE_DIR/bin"
+mkdir -p "$PACKAGE_DIR"
 
 echo "Git version: $GIT_VERSION" > "$PACKAGE_DIR/VERSION.txt"
 
@@ -38,3 +38,8 @@ tar cvfJ photonicat2_display_package_$(date +%Y%m%d-%H%M)_${GIT_VERSION}.tar.xz 
 
 # Clean up
 rm -rf "$PACKAGE_DIR"
+
+#if deploy.sh exists, run it
+if [ -f deploy.sh ]; then
+    ./deploy.sh
+fi

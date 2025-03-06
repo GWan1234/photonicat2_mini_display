@@ -3,6 +3,7 @@ display
 *.jpg
 *.bmp
 *.xz
+deploy.sh
 photonicat2_display
 periph.io-st7789
 photonicat2_display_openwrt
