@@ -295,17 +295,7 @@ func main() {
 		"lan_ip":             "192.168.1.2",
 		"public_ip":          "8.8.8.8",
 		"wifi_ip":            "192.168.1.3",
-	}
-
-	// For demonstration, render page0.
-	pageElements, ok := cfg.DisplayTemplate.Elements["page0"]
-	if !ok {
-		log.Fatalf("Page0 not found in config")
 	}*/
-	//renderPage(pageElements, pageImg, dynamicData)
-
-	// Copy the drawn page into the first framebuffer.
-	//copyImageToFrameBuffer(pageImg, framebuffers[0])
 
 	var fps float64
 	lastUpdate := time.Now()
@@ -318,30 +308,9 @@ func main() {
 	}
 	// Main loop: you could update dynamic data and re-render pages as needed.
 	for {
-		// Alternate between framebuffers.
-		
-		
-		//go clearFrame(nextFrame)
-		/*
-		testClock(currFrame)
-
-		x := frames % (PCAT2_LCD_WIDTH - 40)
-		y := frames / (PCAT2_LCD_HEIGHT - 40) + 50
-		
-		drawTextOnFrame(currFrame, "line1", x, y+30, face, color.RGBA{255, 0, 0, 255}, 0, 0)
-
-		drawSVG(currFrame, "5G.svg", x, y, 0, 0)*/
-
-		if middleFrames % 500 == 0 {	
-			clearFrame(topBarFramebuffers[topFrames%2], topBarFrameWidth, topBarFrameHeight)
-			drawTopBar(topBarFramebuffers[topFrames%2])
-			sendTopBar(display, topBarFramebuffers[topFrames%2])
-			
-			clearFrame(footerFramebuffers[middleFrames%2], footerFrameWidth, footerFrameHeight)
-			drawFooter(footerFramebuffers[middleFrames%2], 2, cfg.NumPages)
-			sendFooter(display, footerFramebuffers[middleFrames%2])
-		}
-		
+	
+		drawTopBar(display, topBarFramebuffers[topFrames%2])
+		drawFooter(display, footerFramebuffers[middleFrames%2], 1, cfg.NumPages)
 
 
 		clearFrame(middleFramebuffers[middleFrames%2], middleFrameWidth, middleFrameHeight)
@@ -353,10 +322,8 @@ func main() {
 		middleFrames++
 		if middleFrames % 100 == 0 {
 			now := time.Now()
-			// Calculate FPS for the last 10 frames only
 			fps = 100 / now.Sub(lastUpdate).Seconds()
 			fmt.Printf("FPS: %0.1f, Total Frames: %d\n", fps, middleFrames)
-			// Reset the timer for the next interval
 			lastUpdate = now
 		}
 		//time.Sleep(16 * time.Millisecond)

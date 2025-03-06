@@ -29,6 +29,13 @@ import (
 	"github.com/llgcode/draw2d/draw2dimg"
 )
 
+var (
+	cacheTopBarStr string
+	cacheTopBar *image.RGBA
+	cacheFooterStr string
+	cacheFooter *image.RGBA
+)
+
 //---------------- Drawing Functions ----------------
 
 // drawText draws a string onto an *image.RGBA at (x,y) using the specified font face and color.
@@ -352,8 +359,8 @@ func drawSVG(frame *image.RGBA, svgPath string, x0, y0, targetWidth, targetHeigh
 
 	return nil
 }
-//copyImageToImageAt copies an image to an image at a specified offset. frame is the destination image, img is the source image. 
-//x0, y0 is the offset.
+
+//copyImageToImageAt copies an image to an image at a specified offset. frame is the destination image, img is the source image. x0, y0 is the offset.
 func copyImageToImageAt(frame *image.RGBA, img *image.RGBA, x0, y0 int) error {
 	targetWidth := img.Bounds().Dx()
 	targetHeight := img.Bounds().Dy()
@@ -405,7 +412,6 @@ func copyImageToImageAt(frame *image.RGBA, img *image.RGBA, x0, y0 int) error {
 	return nil
 }
 
-
 func drawRoundedRect(gc *draw2dimg.GraphicContext, x, y, w, h, r float64) {
 	// Start at the top-left corner, offset by the radius.
 	gc.MoveTo(x+r, y)
@@ -447,9 +453,8 @@ func drawSignalStrength(frame *image.RGBA, x0, y0 int, strength float64) {
 	yBarSize := 12
 	barSpace := 1
 	numBars := 4
-	yMinHeight := 4
+	yMinHeight := 3
 	strengthInt := int(math.Ceil(strength * 4))
-	strengthInt = 0 // deleteme, testing
 	fn := "/tmp/strength-"+strconv.Itoa(strengthInt)+".svg"
 
 	if _, err := os.Stat(fn); err == nil {	//if file exists, serve the file from disk
@@ -581,10 +586,30 @@ func drawBattery(w, h int, soc float64, onBattery bool, x0, y0 int) *image.RGBA 
 	return img
 }
 
-func drawTopBar(frame *image.RGBA) {
-	x0 := PCAT2_L_MARGIN
-	y0 := PCAT2_T_MARGIN
+
+func drawTopBar(display st7789.Device, frame *image.RGBA) {
 	var timeStr string
+	currDateTime := time.Now()
+
+	if currDateTime.Year() < 2025 {
+		timeStr = "--:--"
+	} else {
+		timeStr = fmt.Sprintf("%02d:%02d", currDateTime.Hour(), currDateTime.Minute())
+	}
+
+	networkStr := "5G"
+	signalStrength := 0.43
+	magicStr := timeStr + " " + strconv.Itoa(int(signalStrength*100)) + " " + networkStr
+
+	if cacheTopBarStr == magicStr {
+		return //no need to refresh
+	}
+
+	topBarFrameWidth := PCAT2_LCD_WIDTH
+	topBarFrameHeight := PCAT2_TOP_BAR_HEIGHT
+
+	clearFrame(frame, topBarFrameWidth, topBarFrameHeight)
+	
 	faceClock, _, err := getFontFace("clock")
 	faceClockBold, _, err := getFontFace("clockBold")
 	if err != nil {
@@ -592,24 +617,14 @@ func drawTopBar(frame *image.RGBA) {
 		return
 	}
 
-	//clock
-	currDateTime := time.Now()
-    currHour := currDateTime.Hour()
-    currMinute := currDateTime.Minute()
-	currYear := currDateTime.Year()
-
-	if currYear < 2025 {
-		timeStr = "--:--"
-	} else {
-		timeStr = fmt.Sprintf("%02d:%02d", currHour, currMinute)
-	}
-	networkStr := "5G"
+	x0 := PCAT2_L_MARGIN
+	y0 := PCAT2_T_MARGIN
 
 	//draw time
 	drawText(frame, timeStr, x0+2, y0-3, faceClock, PCAT_WHITE, false)	
 
 	//draw signal strength
-	drawSignalStrength(frame, x0+61, y0-2, 0.1)
+	drawSignalStrength(frame, x0+60, y0-1, signalStrength)
 
 	//draw network
 	drawText(frame, networkStr, x0+87, y0-3, faceClockBold, PCAT_WHITE, false)
@@ -619,9 +634,10 @@ func drawTopBar(frame *image.RGBA) {
 	randomChargingBool := rand.Intn(2) == 0
 	img := drawBattery(40, 16, float64(randomSoc), randomChargingBool, x0, y0)
 	copyImageToImageAt(frame, img, x0+118, y0)
-	
+	cacheTopBar = frame
+	cacheTopBarStr = magicStr
+	sendTopBar(display, frame)
 }
-
 
 func saveFrameToPng(frame *image.RGBA, filename string) {
 	outFile, err := os.Create(filename)
@@ -735,8 +751,15 @@ func renderMiddle(frame *image.RGBA, cfg *Config) {
 	}
 }
 
-func drawFooter(frame *image.RGBA, currPage int, numOfPages int) {
-	log.Println("numOfPages:", numOfPages)
+func drawFooter(display st7789.Device, frame *image.RGBA, currPage int, numOfPages int) {
+	magicStr:= strconv.Itoa(currPage) + " " + strconv.Itoa(numOfPages)
+	if cacheFooterStr == magicStr {
+		return //no need to refresh
+	}
+	footerFrameWidth := PCAT2_LCD_WIDTH
+	footerFrameHeight := PCAT2_FOOTER_HEIGHT
+	clearFrame(frame, footerFrameWidth, footerFrameHeight)
+
 	cir, _, _, err := loadImage("assets/svg/dotCircle.svg")
 	if err != nil {
 		log.Printf("Error loading circle_dot from %s: %v", "assets/svg/dotCircle.svg", err)
@@ -761,5 +784,8 @@ func drawFooter(frame *image.RGBA, currPage int, numOfPages int) {
 			copyImageToImageAt(frame, dot, x0+i*xPart + greyDotRadius, yOffset + greyDotRadius)
 		}
 	}
-
+	//make a frame cache
+	cacheFooter = frame
+	cacheFooterStr = magicStr
+	sendFooter(display, frame)
 }
