@@ -25,7 +25,7 @@ import (
 
 	"github.com/srwiley/oksvg"
 	"github.com/srwiley/rasterx"
-
+	"github.com/ajstarks/svgo"
 	"github.com/llgcode/draw2d/draw2dimg"
 )
 
@@ -448,22 +448,43 @@ func drawSignalStrength(frame *image.RGBA, x0, y0 int, strength float64) {
 	barSpace := 1
 	numBars := 4
 	yMinHeight := 4
-	gc := draw2dimg.NewGraphicContext(frame)
-	gc.SetFillColor(color.RGBA{255, 255, 255, 255})
-	gc.SetStrokeColor(color.RGBA{255, 255, 255, 255})
-	gc.SetLineWidth(1)
 	strengthInt := int(math.Ceil(strength * 4))
-	strengthInt = 3
-	
-	for i := 0; i < numBars; i++ {
-		if i < strengthInt {
-			drawRect(frame, x0+i*xBarSize+i*barSpace, y0+yBarSize/4*(4-i), xBarSize, yBarSize/4*i+yMinHeight, PCAT_WHITE)
-		}else{
-			drawRect(frame, x0+i*xBarSize+i*barSpace, y0+yBarSize/4*(4-i), xBarSize, yBarSize/4*i+yMinHeight, PCAT_GREY)
-		}
-	}
+	strengthInt = 0 // deleteme, testing
+	fn := "/tmp/strength-"+strconv.Itoa(strengthInt)+".svg"
 
+	if _, err := os.Stat(fn); err == nil {	//if file exists, serve the file from disk
+		//do nothing
+	}else{
+		var buf bytes.Buffer
+		canvas := svg.New(&buf)
+		canvas.Start(xBarSize*numBars+barSpace*(numBars-1), yBarSize+yMinHeight)
+
+		for i := 0; i < numBars; i++ {
+			if i < strengthInt {
+				canvas.Roundrect(i*xBarSize+i*barSpace, yBarSize/4*(4-i), xBarSize, yBarSize/4*i+yMinHeight, 2, 2, "fill:white")
+			}else{
+				fillColorHex := fmt.Sprintf("#%02X%02X%02X", PCAT_GREY.R, PCAT_GREY.G, PCAT_GREY.B)
+				canvas.Roundrect(i*xBarSize+i*barSpace, yBarSize/4*(4-i), xBarSize, yBarSize/4*i+yMinHeight, 2, 2, "fill:" + fillColorHex)
+			}
+		}
+		canvas.End()
+		
+		svgFile, err := os.Create(fn)
+		if err != nil {
+			panic(err)
+		}
+		_, err = svgFile.Write(buf.Bytes())
+		if err != nil {
+			panic(err)
+		}
+		svgFile.Close()
+	}
 	
+	img, _, _, err := loadImage(fn)
+	if err != nil {
+		panic(err)
+	}
+	copyImageToImageAt(frame, img, x0, y0)
 }
 
 func drawBattery(w, h int, soc float64, onBattery bool, x0, y0 int) *image.RGBA {
@@ -547,9 +568,9 @@ func drawBattery(w, h int, soc float64, onBattery bool, x0, y0 int) *image.RGBA 
 		var chargingBolt *image.RGBA
 		var err error
 		if soc < 20 {
-			chargingBolt, _, _, err = loadImage("assets/svg/blot_white.svg")
+			chargingBolt, _, _, err = loadImage("assets/svg/blotWhite.svg")
 		}else{
-			chargingBolt, _, _, err = loadImage("assets/svg/blot_black.svg")
+			chargingBolt, _, _, err = loadImage("assets/svg/blotBlack.svg")
 		}
 		if err != nil {
 			fmt.Println("Error loading charging bolt:", err)

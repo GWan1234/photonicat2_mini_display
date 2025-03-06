@@ -3,6 +3,7 @@ module photonicat2_display
 go 1.19
 
 require (
+	github.com/ajstarks/svgo v0.0.0-20211024235047-1546f124cd8b
 	github.com/go-ping/ping v1.2.0
 	github.com/llgcode/draw2d v0.0.0-20240627062922-0ed1ff131195
 	github.com/srwiley/oksvg v0.0.0-20221011165216-be6e8873101c
