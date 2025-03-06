@@ -315,7 +315,7 @@ func main() {
 
 		clearFrame(middleFramebuffers[middleFrames%2], middleFrameWidth, middleFrameHeight)
 		renderMiddle(middleFramebuffers[middleFrames%2], &cfg)
-		drawText(middleFramebuffers[middleFrames%2], "FPS: " + strconv.FormatFloat(fps, 'f', 1, 64) + ", " + strconv.Itoa(middleFrames), 0, 235, face, PCAT_YELLOW, false)
+		drawText(middleFramebuffers[middleFrames%2], "FPS:" + strconv.Itoa(int(fps)) + ", " + strconv.Itoa(middleFrames), 10, 240, face, PCAT_YELLOW, false)
 		sendMiddle(display, middleFramebuffers[middleFrames%2])
 		
 
