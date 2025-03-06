@@ -2,5 +2,8 @@ display
 *.png
 *.jpg
 *.bmp
+*.xz
 photonicat2_display
 periph.io-st7789
+photonicat2_display_openwrt
+photonicat2_display_debian
