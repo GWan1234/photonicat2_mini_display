@@ -128,13 +128,14 @@
             "page1": [
                 {
                     "type": "text",
-                    "label": "Network Speed",
-                    "position": {"x": 10, "y": 46},
-                    "font": "big",
+                    "label": "Network Speed Down",
+                    "position": {"x": 10, "y": 40},
+                    "font": "huge",
                     "color": [255, 229, 0],
-                    "units": "M/s",
-                    "data_key": "network_speed_up",
-                    "units_font": "unit"
+                    "units": "Mbps",
+                    "data_key": "network_speed_down",
+                    "units_font": "unit",
+                    "enable": 1
                 },
                 {
                     "type": "text",
@@ -152,26 +153,34 @@
                 {
                     "type": "text",
                     "label": "LAN IP",
-                    "position": {"x": 10, "y": 46},
-                    "font": "unit",
-                    "color": [255, 255, 255],
-                    "data_key": "lan_ip"
-                },
-                {
-                    "type": "text",
-                    "label": "Public IP",
-                    "position": {"x": 10, "y": 71},
-                    "font": "unit",
-                    "color": [255, 255, 255],
-                    "data_key": "public_ip"
+                    "position": {"x": 10, "y": 40},
+                    "font": "clock",
+                    "color": [255, 229, 0],
+                    "units": "",
+                    "data_key": "lan_ip",
+                    "units_font": "unit",
+                    "enable": 1
                 },
                 {
                     "type": "text",
                     "label": "Wifi IP",
                     "position": {"x": 10, "y": 96},
                     "font": "unit",
-                    "color": [255, 255, 255],
+                    "color": [255, 229, 255],
                     "data_key": "wifi_ip"
+                }
+            ],
+            "page3": [
+                {
+                    "type": "text",
+                    "label": "Public IP",
+                    "position": {"x": 10, "y": 40},
+                    "font": "clock",
+                    "color": [255, 229, 0],
+                    "units": "",
+                    "data_key": "public_ip",
+                    "units_font": "unit",
+                    "enable": 1
                 }
             ]
         }

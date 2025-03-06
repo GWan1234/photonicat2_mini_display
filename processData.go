@@ -130,7 +130,7 @@ func collectData(cfg Config) {
 	}
 
 	log.Println("Collected global data:")
-	log.Println(globalData)
+	//log.Println(globalData)
 }
 
 // pingICMP uses github.com/go-ping/ping to perform an ICMP ping.

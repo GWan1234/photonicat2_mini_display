@@ -360,6 +360,33 @@ func drawSVG(frame *image.RGBA, svgPath string, x0, y0, targetWidth, targetHeigh
 	return nil
 }
 
+// cropImageAt crops the given src image starting at (x0, y0) with the specified width and height.
+// It returns a new *image.RGBA whose bounds begin at (0,0).
+func cropImageAt(src *image.RGBA, x0, y0, width, height int) *image.RGBA {
+	// Get source image bounds.
+	srcBounds := src.Bounds()
+	// Optionally, clamp the cropping rectangle if it exceeds src bounds.
+	if x0 < srcBounds.Min.X {
+		x0 = srcBounds.Min.X
+	}
+	if y0 < srcBounds.Min.Y {
+		y0 = srcBounds.Min.Y
+	}
+	if x0+width > srcBounds.Max.X {
+		width = srcBounds.Max.X - x0
+	}
+	if y0+height > srcBounds.Max.Y {
+		height = srcBounds.Max.Y - y0
+	}
+	// Define the source rectangle to crop.
+	srcRect := image.Rect(x0, y0, x0+width, y0+height)
+	// Create a new RGBA image with bounds starting at (0,0).
+	cropped := image.NewRGBA(image.Rect(0, 0, width, height))
+	// Copy the source rectangle into the new image.
+	draw.Draw(cropped, cropped.Bounds(), src, srcRect.Min, draw.Src)
+	return cropped
+}
+
 //copyImageToImageAt copies an image to an image at a specified offset. frame is the destination image, img is the source image. x0, y0 is the offset.
 func copyImageToImageAt(frame *image.RGBA, img *image.RGBA, x0, y0 int) error {
 	targetWidth := img.Bounds().Dx()
@@ -649,9 +676,9 @@ func saveFrameToPng(frame *image.RGBA, filename string) {
 	fmt.Println("Frame saved to", filename)
 }
 
-func renderMiddle(frame *image.RGBA, cfg *Config) {
+func renderMiddle(frame *image.RGBA, cfg *Config, currPage int) {
 	// Get the elements for page0 from the configuration.
-	page := cfg.DisplayTemplate.Elements["page0"]
+	page := cfg.DisplayTemplate.Elements["page"+strconv.Itoa(currPage)]
 
 	// Simulated dynamic data for rendering.
 	data := map[string]string{
@@ -666,6 +693,13 @@ func renderMiddle(frame *image.RGBA, cfg *Config) {
 		"dc_v":               "20",
 		"session_data_usage": "1.2",
 		"monthly_data_usage": "100",
+		"lan_ip":             "192.168.1.1",
+		"public_ip":          "1.2.3.4",
+		"wifi_ip":            "1.2.3.5",
+		"wifi_ssid":          "MyWifi",
+		"wifi_rssi":          "80",
+		"wifi_channel":       "6",
+		"wifi_bssid":         "00:11:22:33:44:55",
 	}
 
 	// Process each element.
