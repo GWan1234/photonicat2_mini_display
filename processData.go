@@ -81,14 +81,6 @@ func collectData(cfg Config) {
 		globalData["PublicIP"] = publicIP
 	}
 
-	// Get battery data (SOC, voltage, current, dc current, dc voltage).
-	if batteryData, err := getBatteryData(); err != nil {
-		fmt.Printf("Could not get battery data: %v\n", err)
-		globalData["BatteryData"] = nil
-	} else {
-		globalData["BatteryData"] = batteryData
-	}
-
 	// Get IPv6 public IP.
 	if ipv6, err := getIPv6Public(); err != nil {
 		fmt.Printf("Could not get IPv6 public IP: %v\n", err)
@@ -145,19 +137,26 @@ func collectData(cfg Config) {
 		globalData["WifiClients"] = wifiClients
 	}
 
-	if voltage, err := getBatteryVoltage(); err != nil {
+	voltage, err := getBatteryVoltage(); 
+	if err != nil {
 		fmt.Printf("Could not get battery voltage: %v\n", err)
-		globalData["BatteryVoltage"] = -9999
+		globalData["BatteryVoltage"] = "N/A"
 	} else {
-		globalData["BatteryVoltage"] = voltage
+		voltage_2digit := fmt.Sprintf("%0.2f", voltage/1000/1000)
+		globalData["BatteryVoltage"] = voltage_2digit
 	}
 
-	if current, err := getBatteryCurrent(); err != nil {
+	current, err := getBatteryCurrent();
+	if err != nil {
 		fmt.Printf("Could not get battery current: %v\n", err)
 		globalData["BatteryCurrent"] = -9999
 	} else {
-		globalData["BatteryCurrent"] = current
+		current_2digit := fmt.Sprintf("%0.2f", current/1000/1000)
+		globalData["BatteryCurrent"] = current_2digit
 	}	
+
+	wattage := float64(voltage) * float64(current) / 1000 / 1000 / 1000 / 1000
+	globalData["BatteryWattage"] = fmt.Sprintf("%0.1f", wattage)
 
 	log.Println("Collected global data:")
 	//log.Println(globalData)
@@ -290,18 +289,6 @@ func getPublicIP() (string, error) {
 	return string(ip), nil
 }
 
-// getBatteryData returns dummy battery data.
-// In a real implementation, you would access system sensors or appropriate APIs.
-func getBatteryData() (map[string]interface{}, error) {
-	data := map[string]interface{}{
-		"BatterySOC": 90,    // State of Charge (%)
-		"Voltage":    12.5,  // in Volts
-		"Current":    2.3,   // in Amperes
-		"DCCurrent":  2.1,   // in Amperes
-		"DCVoltage":  12.0,  // in Volts
-	}
-	return data, nil
-}
 
 // getIPv6Public fetches the public IPv6 address.
 func getIPv6Public() (string, error) {

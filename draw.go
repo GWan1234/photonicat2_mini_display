@@ -689,28 +689,6 @@ func renderMiddle(frame *image.RGBA, cfg *Config, currPage int) {
 	// Get the elements for page0 from the configuration.
 	page := cfg.DisplayTemplate.Elements["page"+strconv.Itoa(currPage)]
 
-	// Simulated dynamic data for rendering.
-	data := map[string]string{
-		"network_speed_up":   "50.8",
-		"network_speed_down": "30.3",
-		"ping0":              "10",
-		"ping1":              "1200",
-		"mobo_temp":          "50",
-		"batt_watt":          "+45",
-		"batt_volt":          "8.12",
-		"hour_left":          "15",
-		"dc_v":               "20",
-		"session_data_usage": "1.2",
-		"monthly_data_usage": "100",
-		"lan_ip":             "192.168.1.1",
-		"public_ip":          "1.2.3.4",
-		"wifi_ip":            "1.2.3.5",
-		"wifi_ssid":          "MyWifi",
-		"wifi_rssi":          "80",
-		"wifi_channel":       "6",
-		"wifi_bssid":         "00:11:22:33:44:55",
-	}
-
 	// Process each element.
 	for _, element := range page {
 		// Check if the element is enabled.
@@ -734,7 +712,13 @@ func renderMiddle(frame *image.RGBA, cfg *Config, currPage int) {
 			}
 
 			// Determine the text to display.
-			textToDisplay, _ := data[element.DataKey]
+			textValue, exists := globalData[element.DataKey]
+			var textToDisplay string
+			if exists {
+				textToDisplay = fmt.Sprintf("%v", textValue)
+			} else {
+				textToDisplay = "" // or any default value you prefer
+			}
 
 			// Convert the color array (assumed to be [R,G,B]) to a color.RGBA.
 			var clr color.RGBA
