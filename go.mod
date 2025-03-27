@@ -1,4 +1,4 @@
-module photonicat2_display
+module github.com/photonicat/pcat2_mini_display
 
 go 1.19
 
