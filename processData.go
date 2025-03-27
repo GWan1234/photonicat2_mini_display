@@ -16,6 +16,8 @@ import (
 	"github.com/go-ping/ping"
 	"bytes"
 	"os/exec"
+	"regexp"
+	"math"
 )
 
 // NetworkSpeed represents upload/download in bytes per second
@@ -131,12 +133,24 @@ func collectData(cfg Config) {
 		globalData["CpuTemp"] = cpuTemp_1digit
 	}
 
-	// Get memory usage.
-	if memData, err := getMemoryUsage(); err != nil {
-		fmt.Printf("Could not get memory usage: %v\n", err)
-		globalData["MemoryData"] = nil
+	cpuUsage, err := getCPUUsage()
+	if err != nil {
+		fmt.Printf("Could not get CPU usage: %v\n", err)
+		globalData["CpuUsage"] = 0
 	} else {
-		globalData["MemoryData"] = memData
+		cpuUsageInt := int(cpuUsage)
+		globalData["CpuUsage"] = cpuUsageInt
+	}
+
+	// Get memory usage.
+	if memUsed, memTotal, err := getMemUsedAndTotalGB(); err != nil {
+		fmt.Printf("Could not get memory usage: %v\n", err)
+		globalData["MemUsage"] = nil
+	} else {
+		memUsed_1digit := fmt.Sprintf("%0.1f", memUsed)
+		memTotal_ceilInt := int(math.Ceil(memTotal))
+		memString := fmt.Sprintf("%s/%d", memUsed_1digit, memTotal_ceilInt)
+		globalData["MemUsage"] = memString
 	}
 
 	// Get disk usage.
@@ -147,12 +161,27 @@ func collectData(cfg Config) {
 		globalData["DiskData"] = diskData
 	}
 
-	// Get network usage (tx, rx data).
-	if netData, err := getCurrNetworkSpeedMbps(); err != nil {
-		fmt.Printf("Could not get network usage: %v\n", err)
-		globalData["NetworkData"] = nil
+	// Get local IP address.
+	if localIP, err := getLocalIPv4(); err != nil {
+		fmt.Printf("Could not get local IP: %v\n", err)
+		globalData["LAN_IP"] = "N/A"
 	} else {
-		globalData["NetworkData"] = netData
+		globalData["LAN_IP"] = localIP
+	}
+
+	// Get public IP address.
+	if publicIP, err := getPublicIPv4(); err != nil {
+		fmt.Printf("Could not get public IP: %v\n", err)
+		globalData["WAN_IP"] = "N/A"
+	} else {
+		globalData["WAN_IP"] = publicIP
+	}
+
+	if ssid, err := getSSID(); err != nil {
+		fmt.Printf("Could not get SSID: %v\n", err)
+		globalData["SSID"] = "N/A"
+	} else {
+		globalData["SSID"] = ssid
 	}
 
 	// Get DHCP clients if OpenWRT.
@@ -195,21 +224,7 @@ func collectData(cfg Config) {
 		globalData["Country"] = country
 	}
 
-	// Get local IP address.
-	if localIP, err := getLocalIP(); err != nil {
-		fmt.Printf("Could not get local IP: %v\n", err)
-		globalData["LocalIP"] = "0.0.0.0"
-	} else {
-		globalData["LocalIP"] = localIP
-	}
 
-	// Get public IP address.
-	if publicIP, err := getPublicIP(); err != nil {
-		fmt.Printf("Could not get public IP: %v\n", err)
-		globalData["PublicIP"] = "0.0.0.0"
-	} else {
-		globalData["PublicIP"] = publicIP
-	}
 
 	// Get IPv6 public IP.
 	if ipv6, err := getIPv6Public(); err != nil {
@@ -263,6 +278,52 @@ func getInterfaceBytes(iface string) (rxBytes, txBytes uint64, err error) {
 	return
 }
 
+// getSSID returns connected SSID on Debian or broadcasting SSID on OpenWrt.
+func getSSID() (string, error) {
+	// OpenWrt detection
+	if _, err := os.Stat("/etc/openwrt_release"); err == nil {
+		// OpenWrt: Use uci command
+		out, err := exec.Command("uci", "get", "wireless.@wifi-iface[0].ssid").Output()
+		if err != nil {
+			return "", fmt.Errorf("failed to get OpenWrt SSID: %v", err)
+		}
+		return strings.TrimSpace(string(out)), nil
+	}
+
+	// Debian/Ubuntu: Try iwgetid first
+	if out, err := exec.Command("iwgetid", "-r").Output(); err == nil {
+		ssid := strings.TrimSpace(string(out))
+		if ssid != "" {
+			return ssid, nil
+		}
+	}
+
+	// Fallback 1: iwconfig
+	if out, err := exec.Command("iwconfig").Output(); err == nil {
+		re := regexp.MustCompile(`ESSID:"(.*?)"`)
+		matches := re.FindSubmatch(out)
+		if len(matches) >= 2 {
+			ssid := string(matches[1])
+			if ssid != "" && ssid != "off/any" {
+				return ssid, nil
+			}
+		}
+	}
+
+	// Fallback 2: nmcli (NetworkManager)
+	if out, err := exec.Command("nmcli", "-t", "-f", "active,ssid", "dev", "wifi").Output(); err == nil {
+		lines := strings.Split(string(out), "\n")
+		for _, line := range lines {
+			fields := strings.Split(line, ":")
+			if len(fields) == 2 && fields[0] == "yes" && fields[1] != "" {
+				return fields[1], nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("SSID could not be determined")
+}
+
 // getNetworkSpeed calculates instant network speed for the specified interface
 func getNetworkSpeed(iface string) (NetworkSpeed, error) {
 	rx1, tx1, err := getInterfaceBytes(iface)
@@ -285,6 +346,93 @@ func getNetworkSpeed(iface string) (NetworkSpeed, error) {
 		UploadMbps:   uploadMbps,
 		DownloadMbps: downloadMbps,
 	}, nil
+}
+
+// CPUStats represents CPU usage snapshot
+type CPUStats struct {
+	User, Nice, System, Idle, Iowait, Irq, Softirq, Steal uint64
+}
+
+func readCPUStats() ([]CPUStats, error) {
+	data, err := os.ReadFile("/proc/stat")
+	if err != nil {
+		return nil, err
+	}
+
+	var stats []CPUStats
+	lines := strings.Split(string(data), "\n")
+
+	for _, line := range lines {
+		if strings.HasPrefix(line, "cpu") && len(line) > 3 && line[3] >= '0' && line[3] <= '9' {
+			fields := strings.Fields(line)
+			if len(fields) < 8 {
+				continue
+			}
+			var stat CPUStats
+			stat.User, _ = strconv.ParseUint(fields[1], 10, 64)
+			stat.Nice, _ = strconv.ParseUint(fields[2], 10, 64)
+			stat.System, _ = strconv.ParseUint(fields[3], 10, 64)
+			stat.Idle, _ = strconv.ParseUint(fields[4], 10, 64)
+			stat.Iowait, _ = strconv.ParseUint(fields[5], 10, 64)
+			stat.Irq, _ = strconv.ParseUint(fields[6], 10, 64)
+			stat.Softirq, _ = strconv.ParseUint(fields[7], 10, 64)
+			if len(fields) > 8 {
+				stat.Steal, _ = strconv.ParseUint(fields[8], 10, 64)
+			}
+			stats = append(stats, stat)
+		}
+	}
+
+	return stats, nil
+}
+
+func getCPUUsage() (float64, error) {
+	cpus, err := getCpuUsages()
+	if err != nil {
+		return 0, err
+	}
+	total := 0.0
+	for _, cpu := range cpus {
+		total += cpu
+	}
+	return total / float64(len(cpus)), nil
+}
+
+func getCpuUsages() ([]float64, error) {
+	stats1, err := readCPUStats()
+	if err != nil {
+		return nil, err
+	}
+
+	time.Sleep(500 * time.Millisecond)
+
+	stats2, err := readCPUStats()
+	if err != nil {
+		return nil, err
+	}
+
+	var usages []float64
+	for i := 0; i < len(stats1) && i < len(stats2); i++ {
+		idle1 := stats1[i].Idle + stats1[i].Iowait
+		idle2 := stats2[i].Idle + stats2[i].Iowait
+
+		nonIdle1 := stats1[i].User + stats1[i].Nice + stats1[i].System +
+			stats1[i].Irq + stats1[i].Softirq + stats1[i].Steal
+
+		nonIdle2 := stats2[i].User + stats2[i].Nice + stats2[i].System +
+			stats2[i].Irq + stats2[i].Softirq + stats2[i].Steal
+
+		total1 := idle1 + nonIdle1
+		total2 := idle2 + nonIdle2
+
+		totalDelta := float64(total2 - total1)
+		idleDelta := float64(idle2 - idle1)
+
+		cpuPercentage := (totalDelta - idleDelta) / totalDelta * 100
+		usages = append(usages, cpuPercentage)
+	}
+
+	return usages, nil
 }
 
 // pingICMP uses github.com/go-ping/ping to perform an ICMP ping.
@@ -384,25 +532,64 @@ func getCountry() (string, error) {
 	return result.Country, nil
 }
 
-// getLocalIP returns the first non-loopback IPv4 address found on the system.
-func getLocalIP() (string, error) {
-	addrs, err := net.InterfaceAddrs()
+// getLocalIP returns eth0 IP on OpenWrt or WAN IP (default route) on Debian.
+func getLocalIPv4() (string, error) {
+	// Check if running on OpenWrt by existence of "/etc/openwrt_release"
+	if _, err := os.Stat("/etc/openwrt_release"); err == nil {
+		// OpenWrt: return eth0 IP explicitly
+		iface, err := net.InterfaceByName("eth0")
+		if err != nil {
+			return "", fmt.Errorf("eth0 not found: %v", err)
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			return "", err
+		}
+		for _, addr := range addrs {
+			if ipnet, ok := addr.(*net.IPNet); ok && ipnet.IP.To4() != nil {
+				return ipnet.IP.String(), nil
+			}
+		}
+		return "", fmt.Errorf("eth0 has no IPv4 address")
+	}
+
+	// Debian/Ubuntu: Find WAN interface from default route
+	cmd := exec.Command("ip", "route", "show", "default")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
+		return "", err
+	}
+	fields := strings.Fields(out.String())
+	var ifaceName string
+	for i, field := range fields {
+		if field == "dev" && (i+1) < len(fields) {
+			ifaceName = fields[i+1]
+			break
+		}
+	}
+	if ifaceName == "" {
+		return "", fmt.Errorf("WAN interface not found")
+	}
+	iface, err := net.InterfaceByName(ifaceName)
+	if err != nil {
+		return "", err
+	}
+	addrs, err := iface.Addrs()
 	if err != nil {
 		return "", err
 	}
 	for _, addr := range addrs {
-		if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() {
-			if ip4 := ipnet.IP.To4(); ip4 != nil {
-				return ip4.String(), nil
-			}
+		if ipnet, ok := addr.(*net.IPNet); ok && ipnet.IP.To4() != nil {
+			return ipnet.IP.String(), nil
 		}
 	}
-	return "", fmt.Errorf("no local IP found")
+	return "", fmt.Errorf("WAN interface (%s) has no IPv4 address", ifaceName)
 }
 
 // getPublicIP makes an HTTP request to a public API to fetch the external IPv4 address.
-func getPublicIP() (string, error) {
-	resp, err := http.Get("https://api.ipify.org?format=text")
+func getPublicIPv4() (string, error) {
+	resp, err := http.Get("https://4.photonicat.com/ip.php")
 	if err != nil {
 		return "", err
 	}
@@ -417,7 +604,7 @@ func getPublicIP() (string, error) {
 
 // getIPv6Public fetches the public IPv6 address.
 func getIPv6Public() (string, error) {
-	resp, err := http.Get("https://api6.ipify.org?format=text")
+	resp, err := http.Get("https://6.photonicat.com/ip.php")
 	if err != nil {
 		return "", err
 	}
@@ -448,60 +635,47 @@ func getCpuTemp() (float64, error) { // /sys/class/thermal/thermal_zone0/temp
 	return strconv.ParseFloat(strings.TrimSpace(string(content)), 64)
 }
 
-
-func getMemoryUsage() (map[string]interface{}, error) {
-	// Open /proc/meminfo
-	file, err := os.Open("/proc/meminfo")
+func getMemUsedAndTotalGB() (usedGB float64, totalGB float64, err error) {
+	data, err := os.ReadFile("/proc/meminfo")
 	if err != nil {
-		return nil, fmt.Errorf("failed to open /proc/meminfo: %v", err)
+		return 0, 0, err
 	}
-	defer file.Close()
 
-	// Initialize result map
-	data := make(map[string]interface{})
+	var memTotal, memAvailable float64
 
-	// Scan the file line by line
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := scanner.Text()
+	lines := strings.Split(string(data), "\n")
+	for _, line := range lines {
 		fields := strings.Fields(line)
 		if len(fields) < 2 {
 			continue
 		}
-
-		// Extract key and value
-		key := strings.TrimSuffix(fields[0], ":")
-		value, err := strconv.ParseUint(fields[1], 10, 64)
-		if err != nil {
-			continue // Skip if value isn't a number
-		}
-
-		// Convert from kB (default unit in /proc/meminfo) to MB
-		valueMB := value / 1024
-
-		// Store relevant fields
+		key, value := fields[0], fields[1]
 		switch key {
-		case "MemTotal":
-			data["Total"] = valueMB
-		case "MemFree":
-			data["Free"] = valueMB
-		case "MemAvailable":
-			data["Available"] = valueMB
+		case "MemTotal:":
+			memTotal, err = strconv.ParseFloat(value, 64)
+			if err != nil {
+				return 0, 0, err
+			}
+		case "MemAvailable:":
+			memAvailable, err = strconv.ParseFloat(value, 64)
+			if err != nil {
+				return 0, 0, err
+			}
+		}
+		if memTotal > 0 && memAvailable > 0 {
+			break
 		}
 	}
 
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("error reading /proc/meminfo: %v", err)
+	if memTotal == 0 {
+		return 0, 0, fmt.Errorf("failed to read MemTotal")
 	}
 
-	// Calculate Used memory (Total - Available)
-	if total, ok := data["Total"].(uint64); ok {
-		if available, ok := data["Available"].(uint64); ok {
-			data["Used"] = total - available
-		}
-	}
+	usedKB := memTotal - memAvailable
+	usedGB = usedKB / 1024 / 1024
+	totalGB = memTotal / 1024 / 1024
 
-	return data, nil
+	return usedGB, totalGB, nil
 }
 
 // getDiskUsage returns dummy disk usage data.

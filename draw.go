@@ -717,7 +717,7 @@ func renderMiddle(frame *image.RGBA, cfg *Config, currPage int) {
 			if exists {
 				textToDisplay = fmt.Sprintf("%v", textValue)
 			} else {
-				textToDisplay = "" // or any default value you prefer
+				textToDisplay = "-" // or any default value you prefer
 			}
 
 			// Convert the color array (assumed to be [R,G,B]) to a color.RGBA.

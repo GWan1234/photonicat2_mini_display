@@ -301,9 +301,7 @@ func main() {
 
 	draw.Draw(pageImg, pageImg.Bounds(), &image.Uniform{color.Black}, image.Point{}, draw.Src)
 
-	log.Println("CFG:", cfg)
-	// Simulated dynamic data (you could update this periodically).
-
+	log.Println("CFG: READ SUCCESS")
 
 	var fps float64
 	lastUpdate := time.Now()
@@ -379,7 +377,7 @@ func main() {
 			changePageTriggered = true
 			now := time.Now()
 			fps = 100 / now.Sub(lastUpdate).Seconds()
-			fmt.Printf("FPS: %0.1f, Total Frames: %d\n", fps, middleFrames)
+			log.Printf("FPS: %0.1f, Total Frames: %d\n", fps, middleFrames)
 			lastUpdate = now
 		}
 		//time.Sleep(16 * time.Millisecond)
