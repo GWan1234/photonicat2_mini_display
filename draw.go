@@ -18,7 +18,7 @@ import (
 	"strings"
 	"strconv"
 	"path/filepath"
-	st7789 "photonicat2_display/periph.io-st7789"
+	gc9307 "github.com/photonicat/periph.io-gc9307"
 
 	"golang.org/x/image/font"
 	"golang.org/x/image/math/fixed"
@@ -168,11 +168,11 @@ func copyImageToFrameBuffer(img *image.RGBA, frame []color.RGBA) {
 	}
 }
 
-func sendTopBar(display st7789.Device, frame *image.RGBA) {
+func sendTopBar(display gc9307.Device, frame *image.RGBA) {
 	display.FillRectangleWithImage(0, 0, PCAT2_LCD_WIDTH, PCAT2_TOP_BAR_HEIGHT, frame)
 }
 
-func sendFooter(display st7789.Device, frame *image.RGBA) {
+func sendFooter(display gc9307.Device, frame *image.RGBA) {
 	display.FillRectangleWithImage(0, PCAT2_LCD_HEIGHT-PCAT2_FOOTER_HEIGHT, PCAT2_LCD_WIDTH, PCAT2_FOOTER_HEIGHT, frame)
 }
 
@@ -221,7 +221,7 @@ func isBackground(c color.Color, bg color.Color) bool {
 }
 
 
-func sendMiddlePartial(display st7789.Device, frame *image.RGBA) {
+func sendMiddlePartial(display gc9307.Device, frame *image.RGBA) {
 	// Crop the frame to the region with content.
 	croppedFrame := cropToContent(frame, color.Black) // assuming black is the background
 	if croppedFrame.Bounds().Empty() {
@@ -240,7 +240,7 @@ func sendMiddlePartial(display st7789.Device, frame *image.RGBA) {
 	)
 }
 
-func sendMiddle(display st7789.Device, frame *image.RGBA) {
+func sendMiddle(display gc9307.Device, frame *image.RGBA) {
 	//crop some frame to save data transfer
 	display.FillRectangleWithImage(0, PCAT2_TOP_BAR_HEIGHT, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT-PCAT2_TOP_BAR_HEIGHT-PCAT2_FOOTER_HEIGHT, frame)
 }
@@ -614,7 +614,7 @@ func drawBattery(w, h int, soc float64, onBattery bool, x0, y0 int) *image.RGBA 
 }
 
 
-func drawTopBar(display st7789.Device, frame *image.RGBA) {
+func drawTopBar(display gc9307.Device, frame *image.RGBA) {
 	var timeStr string
 	currDateTime := time.Now()
 
@@ -785,7 +785,7 @@ func renderMiddle(frame *image.RGBA, cfg *Config, currPage int) {
 	}
 }
 
-func drawFooter(display st7789.Device, frame *image.RGBA, currPage int, numOfPages int) {
+func drawFooter(display gc9307.Device, frame *image.RGBA, currPage int, numOfPages int) {
 	magicStr:= strconv.Itoa(currPage) + " " + strconv.Itoa(numOfPages)
 	if cacheFooterStr == magicStr {
 		return //no need to refresh

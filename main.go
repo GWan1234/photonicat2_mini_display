@@ -14,7 +14,7 @@ import (
 	"sync"
 	"math"
 
-	st7789 "photonicat2_display/periph.io-st7789"
+	gc9307 "github.com/photonicat/periph.io-gc9307"
 
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/opentype"
@@ -66,7 +66,7 @@ var (
     dynamicData  map[string]string
 	imageCache 	map[string]*image.RGBA
 	cfg 			Config	
-	currPage 	int
+	currPageIdx	 	int
 )
 
 // ImageBuffer holds a 1D slice of pixels for the display area.
@@ -214,19 +214,19 @@ func main() {
 	imageCache = make(map[string]*image.RGBA)
 
 	// Setup display.
-	display := st7789.New(conn,
+	display := gc9307.New(conn,
 		gpioreg.ByName(RST_PIN),
 		gpioreg.ByName(DC_PIN),
 		gpioreg.ByName("GPIO0"), // placeholder for CS if unused
 		gpioreg.ByName(BL_PIN))
-	display.Configure(st7789.Config{
+	display.Configure(gc9307.Config{
 		Width:        PCAT2_LCD_WIDTH,
 		Height:       PCAT2_LCD_HEIGHT,
-		Rotation:     st7789.ROTATION_180,
+		Rotation:     gc9307.ROTATION_180,
 		RowOffset:    0,
 		ColumnOffset: PCAT2_X_OFFSET,
-		FrameRate:    st7789.FRAMERATE_60,
-		VSyncLines:   st7789.MAX_VSYNC_SCANLINES,
+		FrameRate:    gc9307.FRAMERATE_60,
+		VSyncLines:   gc9307.MAX_VSYNC_SCANLINES,
 		UseCS:        false,
 	})
 	display.EnableBacklight(false)
@@ -303,48 +303,42 @@ func main() {
 	topFrames := 0
 	middleFrames := 0
 	stitchedFrames := 0
-	//bottomFrames := 0
+
 	face, _, err := getFontFace("clock")
 	if err != nil {
 		log.Fatalf("Failed to load font: %v", err)
 	}
 	// Main loop: you could update dynamic data and re-render pages as needed.
-	var changePage bool
-	var nextPageFrameBuffer *image.RGBA
-	changePage = false
-	currPage = 0
+	var changePageTriggered bool
+	var 
+	nextPageIdxFrameBuffer *image.RGBA
+	changePageTriggered = false
+	currPageIdx = 0
 	stitchedFrame := image.NewRGBA(image.Rect(0, 0, middleFrameWidth * 2, middleFrameHeight))
 	for {
-		if !changePage {
-			drawTopBar(display, topBarFramebuffers[topFrames%2])
-			drawFooter(display, footerFramebuffers[middleFrames%2], currPage, cfg.NumPages)
-
-			clearFrame(middleFramebuffers[middleFrames%2], middleFrameWidth, middleFrameHeight)
-			renderMiddle(middleFramebuffers[middleFrames%2], &cfg, currPage)
-			drawText(middleFramebuffers[middleFrames%2], "FPS:" + strconv.Itoa(int(fps)) + ", " + strconv.Itoa(middleFrames), 10, 240, face, PCAT_YELLOW, false)
-			sendMiddle(display, middleFramebuffers[middleFrames%2])
-			middleFrames++
-		}else{
-			nextPage := (currPage + 1) % cfg.NumPages
-			log.Println("Change Page!: Current Page:", currPage, "Next Page:", nextPage)
-			nextPageFrameBuffer = image.NewRGBA(image.Rect(0, 0, middleFrameWidth, middleFrameHeight))
-			//clearFrame(middleFramebuffers[middleFrames%2], middleFrameWidth, middleFrameHeight)
-			clearFrame(nextPageFrameBuffer, middleFrameWidth, middleFrameHeight)
-			//renderMiddle(middleFramebuffers[middleFrames%2], &cfg, currPage) //optional
-			renderMiddle(nextPageFrameBuffer, &cfg, nextPage)
+		if changePageTriggered {
 			
+			nextPageIdx := (currPageIdx + 1) % cfg.NumPages
+			log.Println("Change Page!: Current Page:", currPageIdx, "Next Page:", nextPageIdx)
+			
+			
+			nextPageIdxFrameBuffer = image.NewRGBA(image.Rect(0, 0, middleFrameWidth, middleFrameHeight))
+			clearFrame(nextPageIdxFrameBuffer, middleFrameWidth, middleFrameHeight)
+			renderMiddle(nextPageIdxFrameBuffer, &cfg, nextPageIdx)
+			
+			clearFrame(middleFramebuffers[(middleFrames+1)%2], middleFrameWidth, middleFrameHeight)
+			renderMiddle(middleFramebuffers[(middleFrames+1)%2], &cfg, currPageIdx)
 			copyImageToImageAt(stitchedFrame, middleFramebuffers[(middleFrames+1)%2], 0, 0)
-			copyImageToImageAt(stitchedFrame, nextPageFrameBuffer, middleFrameWidth, 0)
-			numIntermediatePages := 39
+			copyImageToImageAt(stitchedFrame, nextPageIdxFrameBuffer, middleFrameWidth, 0)
+			numIntermediatePages := 20
 
 			for i := 0; i < numIntermediatePages; i++ {
 				if i <= numIntermediatePages / 2 {
-					currPage = nextPage
+					currPageIdx = nextPageIdx
 				}
 
-				//drawTopBar(display, topBarFramebuffers[topFrames%2])
-				drawFooter(display, footerFramebuffers[middleFrames%2], currPage, cfg.NumPages)
-				//xPos := int(float64(middleFrameWidth) * float64(i) / float64(numIntermediatePages))
+				drawFooter(display, footerFramebuffers[middleFrames%2], currPageIdx, cfg.NumPages)
+				
 				t := float64(i) / float64(numIntermediatePages)      // t goes from 0 to 1
 				easeT := 0.5 * (1 - math.Cos(math.Pi * t))            // easeInOut: starts slow, speeds up, then slows down
 				xPos := int(easeT * float64(middleFrameWidth))
@@ -353,7 +347,6 @@ func main() {
 
 				now := time.Now()
 				fps = 1 / now.Sub(lastUpdate).Seconds()
-				//fmt.Printf("FPS: %0.1f, Total Frames: %d\n", fps, middleFrames)
 				lastUpdate = now
 
 				drawText(croppedFrame, "FPS:" + strconv.Itoa(int(fps)) + ", " + strconv.Itoa(middleFrames), 10, 240, face, PCAT_YELLOW, false)
@@ -361,12 +354,22 @@ func main() {
 				middleFrames++
 				stitchedFrames++
 			}
-			changePage = false
+			changePageTriggered = false
+		}else{
+			drawTopBar(display, topBarFramebuffers[topFrames%2])
+			drawFooter(display, footerFramebuffers[middleFrames%2], currPageIdx, cfg.NumPages)
+			//draw middle
+			clearFrame(middleFramebuffers[middleFrames%2], middleFrameWidth, middleFrameHeight)
+			renderMiddle(middleFramebuffers[middleFrames%2], &cfg, currPageIdx)
+			//draw fps
+			drawText(middleFramebuffers[middleFrames%2], "FPS:" + strconv.Itoa(int(fps)) + ", " + strconv.Itoa(middleFrames), 10, 240, face, PCAT_YELLOW, false)
+			sendMiddle(display, middleFramebuffers[middleFrames%2])
+			middleFrames++	
 		}
 
 
 		if middleFrames % 100 == 0 {
-			changePage = true
+			changePageTriggered = true
 			now := time.Now()
 			fps = 100 / now.Sub(lastUpdate).Seconds()
 			fmt.Printf("FPS: %0.1f, Total Frames: %d\n", fps, middleFrames)
