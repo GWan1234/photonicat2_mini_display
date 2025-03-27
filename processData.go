@@ -39,7 +39,75 @@ func collectTopBarData() {
 // collectData gathers several pieces of system and network information and stores them in globalData.
 func collectData(cfg Config) {
 	// Initialize the global hashtable.
+	voltage, err := getBatteryVoltage(); 
+	if err != nil {
+		fmt.Printf("Could not get battery voltage: %v\n", err)
+		globalData["BatteryVoltage"] = "N/A"
+	} else {
+		voltage_2digit := fmt.Sprintf("%0.2f", voltage/1000/1000)
+		globalData["BatteryVoltage"] = voltage_2digit
+	}
 
+	current, err := getBatteryCurrent();
+	if err != nil {
+		fmt.Printf("Could not get battery current: %v\n", err)
+		globalData["BatteryCurrent"] = -9999
+	} else {
+		current_2digit := fmt.Sprintf("%0.2f", current/1000/1000)
+		globalData["BatteryCurrent"] = current_2digit
+	}	
+
+	wattage := float64(voltage) * float64(current) / 1000 / 1000 / 1000 / 1000
+	globalData["BatteryWattage"] = fmt.Sprintf("%0.1f", wattage)
+
+	// Get CPU usage and temperature.
+	if cpuTemp, err := getCpuTemp(); err != nil {
+		fmt.Printf("Could not get CPU temperature: %v\n", err)
+		globalData["CpuTemp"] = -9999
+	} else {
+		cpuTemp_1digit := fmt.Sprintf("%0.1f", cpuTemp/1000)
+		globalData["CpuTemp"] = cpuTemp_1digit
+	}
+
+	// Get memory usage.
+	if memData, err := getMemoryUsage(); err != nil {
+		fmt.Printf("Could not get memory usage: %v\n", err)
+		globalData["MemoryData"] = nil
+	} else {
+		globalData["MemoryData"] = memData
+	}
+
+	// Get disk usage.
+	if diskData, err := getDiskUsage(); err != nil {
+		fmt.Printf("Could not get disk usage: %v\n", err)
+		globalData["DiskData"] = nil
+	} else {
+		globalData["DiskData"] = diskData
+	}
+
+	// Get network usage (tx, rx data).
+	if netData, err := getCurrNetworkSpeedMbps(); err != nil {
+		fmt.Printf("Could not get network usage: %v\n", err)
+		globalData["NetworkData"] = nil
+	} else {
+		globalData["NetworkData"] = netData
+	}
+
+	// Get DHCP clients if OpenWRT.
+	if dhcpClients, err := getDHCPClients(); err != nil {
+		fmt.Printf("Could not get DHCP clients: %v\n", err)
+		globalData["DHCPClients"] = nil
+	} else {
+		globalData["DHCPClients"] = dhcpClients
+	}
+
+	// Get WiFi clients if OpenWRT.
+	if wifiClients, err := getWifiClients(); err != nil {
+		fmt.Printf("Could not get WiFi clients: %v\n", err)
+		globalData["WifiClients"] = nil
+	} else {
+		globalData["WifiClients"] = wifiClients
+	}
 
 	// Ping Site0 using ICMP.
 	if ping0, err := pingICMP(cfg.Site0); err != nil {
@@ -88,75 +156,6 @@ func collectData(cfg Config) {
 	} else {
 		globalData["PublicIPv6"] = ipv6
 	}
-
-	// Get CPU usage and temperature.
-	if cpuData, err := getCpuUsage(); err != nil {
-		fmt.Printf("Could not get CPU usage: %v\n", err)
-		globalData["CPUData"] = nil
-	} else {
-		globalData["CPUData"] = cpuData
-	}
-
-	// Get memory usage.
-	if memData, err := getMemoryUsage(); err != nil {
-		fmt.Printf("Could not get memory usage: %v\n", err)
-		globalData["MemoryData"] = nil
-	} else {
-		globalData["MemoryData"] = memData
-	}
-
-	// Get disk usage.
-	if diskData, err := getDiskUsage(); err != nil {
-		fmt.Printf("Could not get disk usage: %v\n", err)
-		globalData["DiskData"] = nil
-	} else {
-		globalData["DiskData"] = diskData
-	}
-
-	// Get network usage (tx, rx data).
-	if netData, err := getCurrNetworkSpeedMbps(); err != nil {
-		fmt.Printf("Could not get network usage: %v\n", err)
-		globalData["NetworkData"] = nil
-	} else {
-		globalData["NetworkData"] = netData
-	}
-
-	// Get DHCP clients if OpenWRT.
-	if dhcpClients, err := getDHCPClients(); err != nil {
-		fmt.Printf("Could not get DHCP clients: %v\n", err)
-		globalData["DHCPClients"] = nil
-	} else {
-		globalData["DHCPClients"] = dhcpClients
-	}
-
-	// Get WiFi clients if OpenWRT.
-	if wifiClients, err := getWifiClients(); err != nil {
-		fmt.Printf("Could not get WiFi clients: %v\n", err)
-		globalData["WifiClients"] = nil
-	} else {
-		globalData["WifiClients"] = wifiClients
-	}
-
-	voltage, err := getBatteryVoltage(); 
-	if err != nil {
-		fmt.Printf("Could not get battery voltage: %v\n", err)
-		globalData["BatteryVoltage"] = "N/A"
-	} else {
-		voltage_2digit := fmt.Sprintf("%0.2f", voltage/1000/1000)
-		globalData["BatteryVoltage"] = voltage_2digit
-	}
-
-	current, err := getBatteryCurrent();
-	if err != nil {
-		fmt.Printf("Could not get battery current: %v\n", err)
-		globalData["BatteryCurrent"] = -9999
-	} else {
-		current_2digit := fmt.Sprintf("%0.2f", current/1000/1000)
-		globalData["BatteryCurrent"] = current_2digit
-	}	
-
-	wattage := float64(voltage) * float64(current) / 1000 / 1000 / 1000 / 1000
-	globalData["BatteryWattage"] = fmt.Sprintf("%0.1f", wattage)
 
 	log.Println("Collected global data:")
 	//log.Println(globalData)
@@ -306,15 +305,24 @@ func getIPv6Public() (string, error) {
 
 // getCpuUsage returns dummy CPU usage and temperature data.
 func getCpuUsage() (map[string]interface{}, error) {
-	data := map[string]interface{}{
-		"Usage": 20.5, // CPU usage in percentage
-		"Temp":  45.0, // CPU temperature in Celsius
-	}
-
-	return data, nil
+	
+	return nil, nil
 }
 
-// getMemoryUsage returns memory usage data from /proc/meminfo in MB.
+func getCpuTemp() (float64, error) { // /sys/class/thermal/thermal_zone0/temp
+	file, err := os.Open("/sys/class/thermal/thermal_zone0/temp")
+	if err != nil {
+		return 0, err
+	}
+	defer file.Close()
+	content, err := ioutil.ReadAll(file)
+	if err != nil {
+		return 0, err
+	}
+	return strconv.ParseFloat(strings.TrimSpace(string(content)), 64)
+}
+
+
 func getMemoryUsage() (map[string]interface{}, error) {
 	// Open /proc/meminfo
 	file, err := os.Open("/proc/meminfo")

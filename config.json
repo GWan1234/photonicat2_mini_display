@@ -69,7 +69,7 @@
                     "font": "big",
                     "color": [255, 229, 0],
                     "units": "°C",
-                    "data_key": "mobo_temp",
+                    "data_key": "CpuTemp",
                     "units_font": "unit",
                     "enable": 1
                 },
@@ -92,7 +92,7 @@
                     "font": "reg",
                     "color": [255, 229, 0],
                     "units": "W",
-                    "data_key": "batt_watt",
+                    "data_key": "BatteryWattage",
                     "units_font": "unit",
                     "enable": 1
                 },
@@ -103,7 +103,7 @@
                     "font": "reg",
                     "color": [255, 229, 0],
                     "units": "v",
-                    "data_key": "batt_volt",
+                    "data_key": "BatteryVoltage",
                     "units_font": "unit",
                     "enable": 1
                 },
