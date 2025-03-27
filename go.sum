@@ -14,6 +14,8 @@ github.com/kisielk/gotool v1.0.0/go.mod h1:XhKaO+MFFWcvkIS/tQcRk01m1F5IRFswLeQ+o
 github.com/llgcode/draw2d v0.0.0-20240627062922-0ed1ff131195 h1:Vdz2cBh5Fw2MYHWi3ED2PraDQaWEUhNCr1XFHrP4N5A=
 github.com/llgcode/draw2d v0.0.0-20240627062922-0ed1ff131195/go.mod h1:1Vk0LDW6jG5cGc2D9RQUxHaE0vYhTvIwSo9mOL6K4/U=
 github.com/llgcode/ps v0.0.0-20210114104736-f4b0c5d1e02e h1:ZAvbj5hI/G/EbAYAcj4yCXUNiFKefEhH0qfImDDD0/8=
+github.com/photonicat/periph.io-gc9307 v0.0.0-20250327024102-e03f39f11c1d h1:gD5epsGk/vxBb6TFPGtTg/pyY+CO42Q+pXcC0j2YcL0=
+github.com/photonicat/periph.io-gc9307 v0.0.0-20250327024102-e03f39f11c1d/go.mod h1:6UUL/rIuiUYySOItZv0Csx1Q8uMJTRBCCKFmeR3CuIk=
 github.com/srwiley/oksvg v0.0.0-20221011165216-be6e8873101c h1:km8GpoQut05eY3GiYWEedbTT0qnSxrCjsVbb7yKY1KE=
 github.com/srwiley/oksvg v0.0.0-20221011165216-be6e8873101c/go.mod h1:cNQ3dwVJtS5Hmnjxy6AgTPd0Inb3pW05ftPSX7NZO7Q=
 github.com/srwiley/rasterx v0.0.0-20220730225603-2ab79fcdd4ef h1:Ch6Q+AZUxDBCVqdkI8FSpFyZDtCVBc2VmejdNrm5rRQ=

@@ -302,6 +302,7 @@ func main() {
 	lastUpdate := time.Now()
 	topFrames := 0
 	middleFrames := 0
+	stitchedFrames := 0
 	//bottomFrames := 0
 	face, _, err := getFontFace("clock")
 	if err != nil {
@@ -310,8 +311,9 @@ func main() {
 	// Main loop: you could update dynamic data and re-render pages as needed.
 	var changePage bool
 	var nextPageFrameBuffer *image.RGBA
-	changePage = true
+	changePage = false
 	currPage = 0
+	stitchedFrame := image.NewRGBA(image.Rect(0, 0, middleFrameWidth * 2, middleFrameHeight))
 	for {
 		if !changePage {
 			drawTopBar(display, topBarFramebuffers[topFrames%2])
@@ -326,21 +328,21 @@ func main() {
 			nextPage := (currPage + 1) % cfg.NumPages
 			log.Println("Change Page!: Current Page:", currPage, "Next Page:", nextPage)
 			nextPageFrameBuffer = image.NewRGBA(image.Rect(0, 0, middleFrameWidth, middleFrameHeight))
-			clearFrame(middleFramebuffers[middleFrames%2], middleFrameWidth, middleFrameHeight)
+			//clearFrame(middleFramebuffers[middleFrames%2], middleFrameWidth, middleFrameHeight)
 			clearFrame(nextPageFrameBuffer, middleFrameWidth, middleFrameHeight)
-			renderMiddle(middleFramebuffers[middleFrames%2], &cfg, currPage)
+			//renderMiddle(middleFramebuffers[middleFrames%2], &cfg, currPage) //optional
 			renderMiddle(nextPageFrameBuffer, &cfg, nextPage)
-			stitchedFrame := image.NewRGBA(image.Rect(0, 0, middleFrameWidth * 2, middleFrameHeight))
-			copyImageToImageAt(stitchedFrame, middleFramebuffers[middleFrames%2], 0, 0)
+			
+			copyImageToImageAt(stitchedFrame, middleFramebuffers[(middleFrames+1)%2], 0, 0)
 			copyImageToImageAt(stitchedFrame, nextPageFrameBuffer, middleFrameWidth, 0)
-			numIntermediatePages := 12
+			numIntermediatePages := 39
 
 			for i := 0; i < numIntermediatePages; i++ {
 				if i <= numIntermediatePages / 2 {
 					currPage = nextPage
 				}
 
-				drawTopBar(display, topBarFramebuffers[topFrames%2])
+				//drawTopBar(display, topBarFramebuffers[topFrames%2])
 				drawFooter(display, footerFramebuffers[middleFrames%2], currPage, cfg.NumPages)
 				//xPos := int(float64(middleFrameWidth) * float64(i) / float64(numIntermediatePages))
 				t := float64(i) / float64(numIntermediatePages)      // t goes from 0 to 1
@@ -357,16 +359,14 @@ func main() {
 				drawText(croppedFrame, "FPS:" + strconv.Itoa(int(fps)) + ", " + strconv.Itoa(middleFrames), 10, 240, face, PCAT_YELLOW, false)
 				sendMiddle(display, croppedFrame)
 				middleFrames++
+				stitchedFrames++
 			}
 			changePage = false
-
 		}
 
-		if middleFrames % 300 == 150 {
-			changePage = true
-		}
-		
+
 		if middleFrames % 100 == 0 {
+			changePage = true
 			now := time.Now()
 			fps = 100 / now.Sub(lastUpdate).Seconds()
 			fmt.Printf("FPS: %0.1f, Total Frames: %d\n", fps, middleFrames)
