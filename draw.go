@@ -519,7 +519,7 @@ func drawSignalStrength(frame *image.RGBA, x0, y0 int, strength float64) {
 	copyImageToImageAt(frame, img, x0, y0)
 }
 
-func drawBattery(w, h int, soc float64, onBattery bool, x0, y0 int) *image.RGBA {
+func drawBattery(w, h int, soc float64, charging bool, x0, y0 int) *image.RGBA {
 	terminalWidth := 3
 	face, _, err := getFontFace("clock")
 	if err != nil {
@@ -531,10 +531,10 @@ func drawBattery(w, h int, soc float64, onBattery bool, x0, y0 int) *image.RGBA 
 	if soc < 20 {
 		colorMain = PCAT_RED
 	}else{
-		if onBattery {
-			colorMain = PCAT_WHITE
-		}else{
+		if charging {
 			colorMain = PCAT_GREEN
+		}else{
+			colorMain = PCAT_WHITE
 		}
 	}
 	colorShaded = PCAT_GREY
@@ -590,13 +590,12 @@ func drawBattery(w, h int, soc float64, onBattery bool, x0, y0 int) *image.RGBA 
 		textColor = PCAT_BLACK
 	}
 	batteryText := strconv.Itoa(int(soc))
-	if onBattery {
+	if !charging {
 		chargingBlotWidth = 0
-		
 	}
 	//drawText(img, batteryText, (w-terminalWidth)/2, -3, face, textColor, true)
 	x, _ := drawText(img, batteryText, (w-terminalWidth-chargingBlotWidth)/2+1, -3, face, textColor, true)
-	if !onBattery {
+	if charging {
 		var chargingBolt *image.RGBA
 		var err error
 		if soc < 20 {
@@ -657,9 +656,19 @@ func drawTopBar(display gc9307.Device, frame *image.RGBA) {
 	drawText(frame, networkStr, x0+87, y0-3, faceClockBold, PCAT_WHITE, false)
 
 	//draw Battery
-	randomSoc := rand.Intn(100)
-	randomChargingBool := rand.Intn(2) == 0
-	img := drawBattery(40, 16, float64(randomSoc), randomChargingBool, x0, y0)
+	// Get BatterySoc from globalData
+	socInt, ok := globalData["BatterySoc"].(int) // first assert as int
+	if !ok {
+		log.Printf("BatterySoc is not int, got type: %T", globalData["BatterySoc"])
+		socInt = 0 // default if assertion fails
+	}
+	socFloat := float64(socInt) // now convert int to float64
+	charging := globalData["BatteryCharging"]
+	chargingBool, ok := charging.(bool) // Type assertion to bool
+	if !ok {
+		chargingBool = false // Default value if assertion fails
+	}
+	img := drawBattery(40, 16, socFloat, chargingBool, x0, y0)
 	copyImageToImageAt(frame, img, x0+118, y0)
 	cacheTopBar = frame
 	cacheTopBarStr = magicStr

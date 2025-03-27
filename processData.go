@@ -17,13 +17,29 @@ import (
 )
 
 
-// globalData is a global hashtable (map) for storing collected data.
-var globalData map[string]interface{}
+
+
+func collectTopBarData() {
+	if soc, err := getBatterySoc(); err != nil {
+		fmt.Printf("Could not get battery soc: %v\n", err)
+		globalData["BatterySoc"] = -9999
+	} else {
+		globalData["BatterySoc"] = soc
+	}
+
+	if charging, err := getBatteryCharging(); err != nil {
+		fmt.Printf("Could not get battery charging: %v\n", err)
+		globalData["BatteryCharging"] = false
+	} else {
+		globalData["BatteryCharging"] = charging
+	}
+}
+
 
 // collectData gathers several pieces of system and network information and stores them in globalData.
 func collectData(cfg Config) {
 	// Initialize the global hashtable.
-	globalData = make(map[string]interface{})
+
 
 	// Ping Site0 using ICMP.
 	if ping0, err := pingICMP(cfg.Site0); err != nil {
@@ -129,6 +145,20 @@ func collectData(cfg Config) {
 		globalData["WifiClients"] = wifiClients
 	}
 
+	if voltage, err := getBatteryVoltage(); err != nil {
+		fmt.Printf("Could not get battery voltage: %v\n", err)
+		globalData["BatteryVoltage"] = -9999
+	} else {
+		globalData["BatteryVoltage"] = voltage
+	}
+
+	if current, err := getBatteryCurrent(); err != nil {
+		fmt.Printf("Could not get battery current: %v\n", err)
+		globalData["BatteryCurrent"] = -9999
+	} else {
+		globalData["BatteryCurrent"] = current
+	}	
+
 	log.Println("Collected global data:")
 	//log.Println(globalData)
 }
@@ -155,7 +185,65 @@ func pingICMP(host string) (int64, error) {
 	return int64(stats.AvgRtt / time.Millisecond), nil
 }
 
-// getCountry uses a free geolocation API to retrieve the country name based on the current public IP.
+// getBatterySoc returns the battery soc from /sys/class/power_supply/battery/capacity
+func getBatterySoc() (int, error) {
+	file, err := os.Open("/sys/class/power_supply/battery/capacity")
+	if err != nil {
+		return -1, err
+	}
+	defer file.Close()
+	content, err := ioutil.ReadAll(file)
+	if err != nil {
+		return -1, err
+	}
+	socInt, err := strconv.Atoi(strings.TrimSpace(string(content)))	
+	if err != nil {
+		return -1, err
+	}
+	return socInt, nil
+}
+
+// getBatteryCharging returns the battery charging status from /sys/class/power_supply/battery/charging
+func getBatteryCharging() (bool, error) {
+	file, err := os.Open("/sys/class/power_supply/battery/status")
+	if err != nil {
+		return false, err
+	}
+	defer file.Close()
+	// if file content is "charging" return true, else false
+	content, err := ioutil.ReadAll(file)
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(string(content)) == "Charging", nil
+}
+
+func getBatteryVoltage() (float64, error) {
+	file, err := os.Open("/sys/class/power_supply/battery/voltage_now")
+	if err != nil {
+		return 0, err
+	}
+	defer file.Close()
+	content, err := ioutil.ReadAll(file)
+	if err != nil {
+		return 0, err
+	}
+	return strconv.ParseFloat(strings.TrimSpace(string(content)), 64)
+}
+
+func getBatteryCurrent() (float64, error) {
+	file, err := os.Open("/sys/class/power_supply/battery/current_now")
+	if err != nil {
+		return 0, err
+	}
+	defer file.Close()
+	content, err := ioutil.ReadAll(file)
+	if err != nil {
+		return 0, err
+	}
+	return strconv.ParseFloat(strings.TrimSpace(string(content)), 64)
+}
+
 func getCountry() (string, error) {
 	resp, err := http.Get("http://ip-api.com/json/")
 	if err != nil {

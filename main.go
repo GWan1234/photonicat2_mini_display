@@ -67,6 +67,7 @@ var (
 	imageCache 	map[string]*image.RGBA
 	cfg 			Config	
 	currPageIdx	 	int
+	globalData 	map[string]interface{}
 )
 
 // ImageBuffer holds a 1D slice of pixels for the display area.
@@ -237,7 +238,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}
+	
+	globalData = make(map[string]interface{})
 
+	collectTopBarData() //essential data for top bar, blocking
+
+
+	//collect data for middle and footer, non-blocking
 	go func() {
 		for {
 			collectData(cfg)
@@ -245,6 +252,12 @@ func main() {
 		}
 	}()
 
+	go func() {
+		for {
+			collectTopBarData()
+			time.Sleep(2 * time.Second)
+		}
+	}()
 
 	go httpServer()
 	// Define frame dimensions (display area excluding margins).
@@ -284,19 +297,7 @@ func main() {
 
 	log.Println("CFG:", cfg)
 	// Simulated dynamic data (you could update this periodically).
-	/*dynamicData := map[string]string{
-		"network_speed_up":   "50",
-		"network_speed_down": "45",
-		"ping0":              "10",
-		"ping1":              "12",
-		"mobo_temp":          "65",
-		"batt_watt":          "120",
-		"batt_volt":          "12",
-		"hour_left":          "3",
-		"lan_ip":             "192.168.1.2",
-		"public_ip":          "8.8.8.8",
-		"wifi_ip":            "192.168.1.3",
-	}*/
+
 
 	var fps float64
 	lastUpdate := time.Now()
