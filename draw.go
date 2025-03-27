@@ -746,7 +746,13 @@ func renderMiddle(frame *image.RGBA, cfg *Config, currPage int) {
 			unitY := mainBaseline - unitAscent
 
 			// Draw the units text slightly to the right of the main text.
-			drawText(frame, element.Units, xMain+1, unitY, unitFace, clr, false)
+			unitText := element.Units
+			//check if there is a override unit
+			theKey := element.DataKey + "_Unit"
+			if _, ok := globalData[theKey]; ok {
+				unitText = globalData[theKey].(string)
+			}
+			drawText(frame, unitText, xMain+1, unitY, unitFace, clr, false)
 		
 		case "icon":
 			var iconImg *image.RGBA
@@ -771,6 +777,26 @@ func renderMiddle(frame *image.RGBA, cfg *Config, currPage int) {
 			pt := image.Pt(element.Position.X, element.Position.Y)
 			rect := image.Rect(pt.X, pt.Y, pt.X+sz.Width, pt.Y+sz.Height)
 			draw.Draw(frame, rect, iconImg, image.Point{}, draw.Over)
+		case "fixed_text":
+			face, _, err := getFontFace(element.Font)
+			if err != nil {
+				log.Printf("Error getting font face for %s: %v", element.Font, err)
+				continue
+			}
+			var clr color.RGBA
+			if len(element.Color) >= 3 {
+				clr = color.RGBA{
+					R: uint8(element.Color[0]),
+					G: uint8(element.Color[1]),
+					B: uint8(element.Color[2]),
+					A: 255,
+				}
+			} else {
+				// Default color: white.
+				clr = color.RGBA{255, 255, 255, 255}
+			}
+
+			drawText(frame, element.Label, element.Position.X, element.Position.Y, face, clr, false)
 
 		default:
 			log.Printf("Unknown element type: %s", element.Type)

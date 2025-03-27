@@ -259,6 +259,12 @@ func main() {
 		}
 	}()
 
+	go func() {
+		for {
+			collectWANNetworkSpeed()
+		}
+	}()
+
 	go httpServer()
 	// Define frame dimensions (display area excluding margins).
 	topBarFrameWidth := PCAT2_LCD_WIDTH

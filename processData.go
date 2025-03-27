@@ -14,10 +14,15 @@ import (
 	"strconv"
 	"syscall"
 	"github.com/go-ping/ping"
+	"bytes"
+	"os/exec"
 )
 
-
-
+// NetworkSpeed represents upload/download in bytes per second
+type NetworkSpeed struct {
+	UploadMbps   float64
+	DownloadMbps float64
+}
 
 func collectTopBarData() {
 	if soc, err := getBatterySoc(); err != nil {
@@ -36,29 +41,86 @@ func collectTopBarData() {
 }
 
 
+// formatSpeed formats speed into value and units as Mbps
+func formatSpeed(mbps float64) (string, string) {
+	if mbps >= 1.0 {
+		// For speeds ≥1 Mbps, use 3 significant digits
+		return fmt.Sprintf("%.3g", mbps), "Mb/s"
+	}
+	// For speeds <1 Mbps, keep up to 3 digits after decimal point
+	return fmt.Sprintf("%.2f", mbps), "Mb/s"
+}
+
+func getWANInterface() (string, error) {
+	cmd := exec.Command("ip", "route", "show", "default")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
+		return "", err
+	}
+
+	fields := strings.Fields(out.String())
+	for i, field := range fields {
+		if field == "dev" && (i+1) < len(fields) {
+			return fields[i+1], nil
+		}
+	}
+
+	return "", fmt.Errorf("WAN interface not found")
+}
+
+func collectWANNetworkSpeed()  {
+	wanInterface, err := getWANInterface()
+	if err != nil {
+		globalData["WanUP"] = "N/A"
+		globalData["WanDOWN"] = "N/A"
+		return 
+	}
+	netData, err := getNetworkSpeed(wanInterface)
+	if err != nil {
+		globalData["WanUP"] = "0"
+		globalData["WanDOWN"] = "0"
+		return
+	}
+	wanUPVal, wanUPUnit := formatSpeed(netData.UploadMbps)
+	wanDOWNVal, wanDOWNUnit := formatSpeed(netData.DownloadMbps)
+	globalData["WanUP"] = wanUPVal 
+	globalData["WanDOWN"] = wanDOWNVal 
+	globalData["WanUP_Unit"] = wanUPUnit
+	globalData["WanDOWN_Unit"] = wanDOWNUnit
+}
+
 // collectData gathers several pieces of system and network information and stores them in globalData.
 func collectData(cfg Config) {
 	// Initialize the global hashtable.
-	voltage, err := getBatteryVoltage(); 
+	voltageUV, err := getBatteryVoltageUV(); 
 	if err != nil {
 		fmt.Printf("Could not get battery voltage: %v\n", err)
 		globalData["BatteryVoltage"] = "N/A"
 	} else {
-		voltage_2digit := fmt.Sprintf("%0.2f", voltage/1000/1000)
+		voltage_2digit := fmt.Sprintf("%0.2f", voltageUV/1000/1000)
 		globalData["BatteryVoltage"] = voltage_2digit
 	}
 
-	current, err := getBatteryCurrent();
+	currentUA, err := getBatteryCurrentUA();
 	if err != nil {
 		fmt.Printf("Could not get battery current: %v\n", err)
 		globalData["BatteryCurrent"] = -9999
 	} else {
-		current_2digit := fmt.Sprintf("%0.2f", current/1000/1000)
+		current_2digit := fmt.Sprintf("%0.2f", currentUA/1000/1000)
 		globalData["BatteryCurrent"] = current_2digit
 	}	
 
-	wattage := float64(voltage) * float64(current) / 1000 / 1000 / 1000 / 1000
+	wattage := float64(voltageUV) * float64(currentUA) / 1000 / 1000 / 1000 / 1000
 	globalData["BatteryWattage"] = fmt.Sprintf("%0.1f", wattage)
+
+	dcVoltageUV, err := getDCVoltageUV()
+	if err != nil {
+		fmt.Printf("Could not get DC voltage: %v\n", err)
+		globalData["DCVoltage"] = -9999
+	} else {
+		globalData["DCVoltage"] = fmt.Sprintf("%0.1f", dcVoltageUV/1000/1000)
+	}
 
 	// Get CPU usage and temperature.
 	if cpuTemp, err := getCpuTemp(); err != nil {
@@ -112,17 +174,17 @@ func collectData(cfg Config) {
 	// Ping Site0 using ICMP.
 	if ping0, err := pingICMP(cfg.Site0); err != nil {
 		fmt.Printf("ICMP ping to %s failed: %v\n", cfg.Site0, err)
-		globalData["PingSite0"] = -1 // using -1 to indicate an error
+		globalData["Ping0"] = -1 // using -1 to indicate an error
 	} else {
-		globalData["PingSite0"] = ping0
+		globalData["Ping0"] = ping0
 	}
 
 	// Ping Site1 using ICMP.
 	if ping1, err := pingICMP(cfg.Site1); err != nil {
 		fmt.Printf("ICMP ping to %s failed: %v\n", cfg.Site1, err)
-		globalData["PingSite1"] = -1
+		globalData["Ping1"] = -1
 	} else {
-		globalData["PingSite1"] = ping1
+		globalData["Ping1"] = ping1
 	}
 
 	// Get country based on public IP geolocation.
@@ -159,6 +221,70 @@ func collectData(cfg Config) {
 
 	log.Println("Collected global data:")
 	//log.Println(globalData)
+}
+
+func getDCVoltageUV() (float64, error) {
+	file, err := os.Open("/sys/class/power_supply/charger/voltage_now")
+	if err != nil {
+		return 0, err
+	}
+	defer file.Close()
+	content, err := ioutil.ReadAll(file)
+	rawUV, err := strconv.ParseFloat(strings.TrimSpace(string(content)), 64)
+	if err != nil {
+		return 0.0, err
+	}
+	if rawUV < 1 * 1000 * 1000 {
+		return 0.0, nil
+	}
+	return rawUV, nil
+}
+
+// getInterfaceBytes reads rx and tx bytes for a given interface
+func getInterfaceBytes(iface string) (rxBytes, txBytes uint64, err error) {
+	basePath := "/sys/class/net/" + iface + "/statistics/"
+	rxPath := basePath + "rx_bytes"
+	txPath := basePath + "tx_bytes"
+
+	readBytes := func(path string) (uint64, error) {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return 0, err
+		}
+		val, err := strconv.ParseUint(strings.TrimSpace(string(data)), 10, 64)
+		return val, err
+	}
+
+	rxBytes, err = readBytes(rxPath)
+	if err != nil {
+		return
+	}
+	txBytes, err = readBytes(txPath)
+	return
+}
+
+// getNetworkSpeed calculates instant network speed for the specified interface
+func getNetworkSpeed(iface string) (NetworkSpeed, error) {
+	rx1, tx1, err := getInterfaceBytes(iface)
+	if err != nil {
+		return NetworkSpeed{}, err
+	}
+
+	// Sampling interval
+	time.Sleep(1 * time.Second)
+
+	rx2, tx2, err := getInterfaceBytes(iface)
+	if err != nil {
+		return NetworkSpeed{}, err
+	}
+
+	downloadMbps := float64(rx2-rx1) / 1024 / 128
+	uploadMbps := float64(tx2-tx1) / 1024 / 128
+
+	return NetworkSpeed{
+		UploadMbps:   uploadMbps,
+		DownloadMbps: downloadMbps,
+	}, nil
 }
 
 // pingICMP uses github.com/go-ping/ping to perform an ICMP ping.
@@ -216,7 +342,7 @@ func getBatteryCharging() (bool, error) {
 	return strings.TrimSpace(string(content)) == "Charging", nil
 }
 
-func getBatteryVoltage() (float64, error) {
+func getBatteryVoltageUV() (float64, error) {
 	file, err := os.Open("/sys/class/power_supply/battery/voltage_now")
 	if err != nil {
 		return 0, err
@@ -229,7 +355,7 @@ func getBatteryVoltage() (float64, error) {
 	return strconv.ParseFloat(strings.TrimSpace(string(content)), 64)
 }
 
-func getBatteryCurrent() (float64, error) {
+func getBatteryCurrentUA() (float64, error) {
 	file, err := os.Open("/sys/class/power_supply/battery/current_now")
 	if err != nil {
 		return 0, err

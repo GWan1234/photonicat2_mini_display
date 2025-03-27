@@ -1,7 +1,7 @@
 {
     "num_pages": 4,
     "site0": "baidu.com",
-    "site1": "g77k.com",
+    "site1": "4.photonicat.com",
     "display_template": {
         "elements": {
             "page0": [ 
@@ -12,7 +12,7 @@
                     "font": "huge",
                     "color": [255, 229, 0],
                     "units": "Mbps",
-                    "data_key": "network_speed_up",
+                    "data_key": "WanUP",
                     "units_font": "unit",
                     "enable": 1
                 },
@@ -23,7 +23,7 @@
                     "font": "huge",
                     "color": [255, 229, 0],
                     "units": "Mbps",
-                    "data_key": "network_speed_down",
+                    "data_key": "WanDOWN",
                     "units_font": "unit",
                     "enable": 1
                 },
@@ -33,7 +33,7 @@
                     "position": {"x": 10, "y": 76},
                     "font": "huge",
                     "color": [255, 229, 0],
-                    "units": "GB",
+                    "units": "MB",
                     "data_key": "session_data_usage",
                     "units_font": "unit",
                     "enable": 1
@@ -120,31 +120,47 @@
                     "font": "reg",
                     "color": [255, 229, 0],
                     "units": "v",
-                    "data_key": "dc_v",
+                    "data_key": "DCVoltage",
                     "units_font": "unit",
                     "enable": 1
                 }
             ],
             "page1": [
                 {
-                    "type": "text",
-                    "label": "Network Speed Down",
-                    "position": {"x": 10, "y": 40},
-                    "font": "huge",
+                    "type": "fixed_text",
+                    "label": "ping - baidu.com",
+                    "position": {"x": 10, "y": 20},
+                    "font": "unit",
                     "color": [255, 229, 0],
-                    "units": "Mbps",
-                    "data_key": "network_speed_down",
-                    "units_font": "unit",
                     "enable": 1
                 },
                 {
                     "type": "text",
-                    "label": "Ping",
-                    "position": {"x": 10, "y": 90},
+                    "label": "Ping0",
+                    "position": {"x": 10, "y": 40},
                     "font": "huge",
                     "color": [255, 229, 0],
                     "units": "ms",
-                    "data_key": "ping1",
+                    "data_key": "Ping0",
+                    "units_font": "unit",
+                    "enable": 1
+                },
+                {
+                    "type": "fixed_text",
+                    "label": "ping - 4.photonicat.com",
+                    "position": {"x": 10, "y": 90},
+                    "font": "unit",
+                    "color": [255, 229, 0],
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "Ping1",
+                    "position": {"x": 10, "y": 110},
+                    "font": "huge",
+                    "color": [255, 229, 0],
+                    "units": "ms",
+                    "data_key": "Ping1",
                     "units_font": "unit",
                     "enable": 1
                 }
