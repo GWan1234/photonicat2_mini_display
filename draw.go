@@ -599,9 +599,9 @@ func drawBattery(w, h int, soc float64, charging bool, x0, y0 int) *image.RGBA {
 		var chargingBolt *image.RGBA
 		var err error
 		if soc < 20 {
-			chargingBolt, _, _, err = loadImage("assets/svg/blotWhite.svg")
+			chargingBolt, _, _, err = loadImage(assetsPrefix+"/assets/svg/blotWhite.svg")
 		}else{
-			chargingBolt, _, _, err = loadImage("assets/svg/blotBlack.svg")
+			chargingBolt, _, _, err = loadImage(assetsPrefix+"/assets/svg/blotBlack.svg")
 		}
 		if err != nil {
 			fmt.Println("Error loading charging bolt:", err)
@@ -757,7 +757,7 @@ func renderMiddle(frame *image.RGBA, cfg *Config, currPage int) {
 		case "icon":
 			var iconImg *image.RGBA
 			var err error
-			iconImg, _, _, err = loadImage(element.IconPath)
+			iconImg, _, _, err = loadImage(assetsPrefix + "/" + element.IconPath)
 			if err != nil {
 				log.Printf("Error loading icon from %s: %v", element.IconPath, err)
 				continue
@@ -813,12 +813,12 @@ func drawFooter(display gc9307.Device, frame *image.RGBA, currPage int, numOfPag
 	footerFrameHeight := PCAT2_FOOTER_HEIGHT
 	clearFrame(frame, footerFrameWidth, footerFrameHeight)
 
-	cir, _, _, err := loadImage("assets/svg/dotCircle.svg")
+	cir, _, _, err := loadImage(assetsPrefix+"/assets/svg/dotCircle.svg")
 	if err != nil {
 		log.Printf("Error loading circle_dot from %s: %v", "assets/svg/dotCircle.svg", err)
 		return
 	}
-	dot, _, _, err := loadImage("assets/svg/dotSolid.svg")
+	dot, _, _, err := loadImage(assetsPrefix+"/assets/svg/dotSolid.svg")
 	if err != nil {
 		log.Printf("Error loading dot from %s: %v", "assets/svg/dotSolid.svg", err)
 		return

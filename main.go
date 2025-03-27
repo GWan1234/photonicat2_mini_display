@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"sync"
 	"math"
+	"os"
 
 	gc9307 "github.com/photonicat/periph.io-gc9307"
 
@@ -68,6 +69,8 @@ var (
 	cfg 			Config	
 	currPageIdx	 	int
 	globalData 	map[string]interface{}
+	fonts 		map[string]FontConfig
+	assetsPrefix ="."
 )
 
 // ImageBuffer holds a 1D slice of pixels for the display area.
@@ -139,18 +142,6 @@ type FontConfig struct {
 	FontSize float64 // in points
 }
 
-// For demonstration, we create a mapping from font names to font configurations.
-var fonts = map[string]FontConfig{
-	"clock": 	     {FontPath: "assets/fonts/Orbitron-Medium.ttf", FontSize: 16},
-	"clockBold": 	     {FontPath: "assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 16},
-	//"small_text": 	 {FontPath: "assets/fonts/Orbitron-Medium.ttf", FontSize: 17},
-	"reg": 	 {FontPath: "assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 17},
-	"big": 	 {FontPath: "assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 25},
-	"unit": 	 {FontPath: "assets/fonts/Orbitron-Medium.ttf", FontSize: 15},
-	"huge":      {FontPath: "assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 34},
-	"gigantic":  {FontPath: "assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 48},
-}
-
 // getFontFace loads the font based on our mapping.
 func getFontFace(fontName string) (font.Face, int, error) {
 	cfg, ok := fonts[fontName]
@@ -212,13 +203,32 @@ func main() {
 		log.Fatal(err)
 	}
 
+	
+	//if assetsFolder not exists, use /usr/local/share/pcat2_mini_display
+	if _, err := os.Stat("assets"); os.IsNotExist(err) {
+		assetsPrefix = "/usr/local/share/pcat2_mini_display"
+	}
+
+
+	// For demonstration, we create a mapping from font names to font configurations.
+	fonts = map[string]FontConfig{
+		"clock": 	     {FontPath: assetsPrefix + "/assets/fonts/Orbitron-Medium.ttf", FontSize: 16},
+		"clockBold": 	     {FontPath: assetsPrefix + "/assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 16},
+		//"small_text": 	 {FontPath: "assets/fonts/Orbitron-Medium.ttf", FontSize: 17},
+		"reg": 	 {FontPath: assetsPrefix + "/assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 17},
+		"big": 	 {FontPath: assetsPrefix + "/assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 25},
+		"unit": 	 {FontPath: assetsPrefix + "/assets/fonts/Orbitron-Medium.ttf", FontSize: 15},
+		"huge":      {FontPath: assetsPrefix + "/assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 34},
+		"gigantic":  {FontPath: assetsPrefix + "/assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 48},
+	}
+
 	imageCache = make(map[string]*image.RGBA)
 
 	// Setup display.
 	display := gc9307.New(conn,
 		gpioreg.ByName(RST_PIN),
 		gpioreg.ByName(DC_PIN),
-		gpioreg.ByName("GPIO0"), // placeholder for CS if unused
+		gpioreg.ByName(CS_PIN), // placeholder for CS if unused
 		gpioreg.ByName(BL_PIN))
 	display.Configure(gc9307.Config{
 		Width:        PCAT2_LCD_WIDTH,
@@ -233,7 +243,17 @@ func main() {
 	display.EnableBacklight(false)
 
 	// Load our configuration file (adjust the path as needed).
-	cfg, err := loadConfig("config.json")
+	// if local no config.json, use check /etc/pcat2_mini_display-config.json
+	var localConfigExists = false
+	if _, err := os.Stat("config.json"); err == nil {
+		localConfigExists = true
+	}
+	var cfg Config
+	if localConfigExists {
+		cfg, err = loadConfig("config.json")
+	}else{
+		cfg, err = loadConfig("/etc/pcat2_mini_display-config.json")
+	}
 
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
