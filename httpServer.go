@@ -1,20 +1,20 @@
 package main
 
 import (
-	"image/png"
-	"io/ioutil"
-	"net/http"
-	"strconv"
-	"fmt"
-	"log"
 	"bytes"
-	"image"
 	"encoding/json"
+	"fmt"
+	"image"
+	"image/png"
+	"log"
+	"strconv"
+
+	"github.com/gofiber/fiber/v2"
 )
 
 var webFrame *image.RGBA
 
-func serveFrame(w http.ResponseWriter, r *http.Request) {
+func serveFrame(c *fiber.Ctx) error {
 	var err error
 	var buf bytes.Buffer
 
@@ -23,83 +23,77 @@ func serveFrame(w http.ResponseWriter, r *http.Request) {
 		drawRect(webFrame, 0, 0, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT, PCAT_BLACK)
 	}
 
-    frameMutex.RLock()
-    //composite the frames
-    err = copyImageToImageAt(webFrame, topBarFramebuffers[0], 0, 0)
-    if err != nil {
-        http.Error(w, "Failed to copy top bar frame", http.StatusInternalServerError)
-        return
-    }
+	frameMutex.RLock()
+	// Composite the frames
+	err = copyImageToImageAt(webFrame, topBarFramebuffers[0], 0, 0)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).SendString("Failed to copy top bar frame")
+	}
 
-    err = copyImageToImageAt(webFrame, middleFramebuffers[0], 0, PCAT2_TOP_BAR_HEIGHT)
-    if err != nil {
-        http.Error(w, "Failed to copy middle frame", http.StatusInternalServerError)
-        return
-    }   
-    
-    err = copyImageToImageAt(webFrame, footerFramebuffers[frames%2], 0, PCAT2_LCD_HEIGHT - PCAT2_FOOTER_HEIGHT)
-    if err != nil {
-        http.Error(w, "Failed to copy footer frame", http.StatusInternalServerError)
-        return
-    }
+	err = copyImageToImageAt(webFrame, middleFramebuffers[0], 0, PCAT2_TOP_BAR_HEIGHT)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).SendString("Failed to copy middle frame")
+	}
+
+	err = copyImageToImageAt(webFrame, footerFramebuffers[frames%2], 0, PCAT2_LCD_HEIGHT-PCAT2_FOOTER_HEIGHT)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).SendString("Failed to copy footer frame")
+	}
 	frameMutex.RUnlock()
 
-    if webFrame == nil {
-        http.Error(w, "No frame available", http.StatusServiceUnavailable)
-        return
-    }
+	if webFrame == nil {
+		return c.Status(fiber.StatusServiceUnavailable).SendString("No frame available")
+	}
 
-   
-    err = png.Encode(&buf, webFrame)
-    if err != nil {
-        http.Error(w, "Failed to encode image", http.StatusInternalServerError)
-        return
-    }
+	err = png.Encode(&buf, webFrame)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).SendString("Failed to encode image")
+	}
 
-    w.Header().Set("Content-Type", "image/png")
-    w.Header().Set("Content-Length", strconv.Itoa(buf.Len()))
-    buf.WriteTo(w)
+	c.Set("Content-Type", "image/png")
+	c.Set("Content-Length", strconv.Itoa(buf.Len()))
+	return c.Send(buf.Bytes())
 }
 
-func updateData(w http.ResponseWriter, r *http.Request) {
-    if r.Method != http.MethodPost {
-        http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-        return
-    }
+func updateData(c *fiber.Ctx) error {
+	if c.Method() != fiber.MethodPost {
+		return c.Status(fiber.StatusMethodNotAllowed).SendString("Method not allowed")
+	}
 
-    body, err := ioutil.ReadAll(r.Body)
-    if err != nil {
-        http.Error(w, "Failed to read request body", http.StatusBadRequest)
-        return
-    }
+	var data map[string]string
+	err := c.BodyParser(&data)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).SendString("Invalid JSON")
+	}
 
-    var data map[string]string
-    err = json.Unmarshal(body, &data)
-    if err != nil {
-        http.Error(w, "Invalid JSON", http.StatusBadRequest)
-        return
-    }
+	dataMutex.Lock()
+	for k, v := range data {
+		dynamicData[k] = v
+	}
+	dataMutex.Unlock()
 
-    dataMutex.Lock()
-    for k, v := range data {
-        dynamicData[k] = v
-    }
-    dataMutex.Unlock()
-
-    w.WriteHeader(http.StatusOK)
-    fmt.Fprintln(w, "Data updated")
+	return c.SendString("Data updated")
 }
 
-func indexHandler(w http.ResponseWriter, r *http.Request) {
-	http.ServeFile(w, r, "assets/html/index.html")
+func indexHandler(c *fiber.Ctx) error {
+	return c.SendFile("assets/html/index.html")
 }
 
 func httpServer() {
-	http.HandleFunc("/", indexHandler)
-	http.HandleFunc("/frame", serveFrame)
-    http.HandleFunc("/data", updateData)
-    
-    port := ":8081"
-    log.Println("Starting HTTP server on", port)
-    log.Fatal(http.ListenAndServe(port, nil))
+	app := fiber.New()
+
+	// Routes
+	app.Get("/", indexHandler)
+	app.Get("/frame", serveFrame)
+	app.Post("/data", updateData)
+
+	// Start server
+	port := ":8081"
+	log.Println("Starting Fiber server on", port)
+	log.Fatal(app.Listen(port))
+}
+
+func main() {
+	// Assuming other setup code exists, just call the server
+	httpServer()
 }
