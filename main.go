@@ -40,7 +40,7 @@ const (
 	PCAT2_R_MARGIN   = 7
 	PCAT2_T_MARGIN   = 10
 	PCAT2_B_MARGIN   = 7
-	PCAT2_TOP_BAR_HEIGHT = 26
+	PCAT2_TOP_BAR_HEIGHT = 32
 	PCAT2_FOOTER_HEIGHT = 22
 )
 
@@ -212,7 +212,7 @@ func main() {
 
 	// For demonstration, we create a mapping from font names to font configurations.
 	fonts = map[string]FontConfig{
-		"clock": 	     {FontPath: assetsPrefix + "/assets/fonts/Orbitron-Medium.ttf", FontSize: 17},
+		"clock": 	     {FontPath: assetsPrefix + "/assets/fonts/Orbitron-Medium.ttf", FontSize: 20},
 		"clockBold": 	     {FontPath: assetsPrefix + "/assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 17},
 		//"small_text": 	 {FontPath: "assets/fonts/Orbitron-Medium.ttf", FontSize: 17},
 		"reg": 	 {FontPath: assetsPrefix + "/assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 18},

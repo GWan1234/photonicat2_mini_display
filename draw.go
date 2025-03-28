@@ -477,10 +477,10 @@ func drawRect(img *image.RGBA, x0, y0, width, height int, c color.Color) {
 
 func drawSignalStrength(frame *image.RGBA, x0, y0 int, strength float64) {
 	xBarSize := 5
-	yBarSize := 12
+	yBarSize := 15
 	barSpace := 1
 	numBars := 4
-	yMinHeight := 3
+	yMinHeight := 6
 	strengthInt := int(math.Ceil(strength * 4))
 	fn := "/tmp/strength-"+strconv.Itoa(strengthInt)+".svg"
 
@@ -594,7 +594,7 @@ func drawBattery(w, h int, soc float64, charging bool, x0, y0 int) *image.RGBA {
 		chargingBlotWidth = 0
 	}
 	//drawText(img, batteryText, (w-terminalWidth)/2, -3, face, textColor, true)
-	x, _ := drawText(img, batteryText, (w-terminalWidth-chargingBlotWidth)/2+1, -3, face, textColor, true)
+	x, _ := drawText(img, batteryText, (w-terminalWidth-chargingBlotWidth)/2+1, -4, face, textColor, true)
 	if charging {
 		var chargingBolt *image.RGBA
 		var err error
@@ -607,7 +607,7 @@ func drawBattery(w, h int, soc float64, charging bool, x0, y0 int) *image.RGBA {
 			fmt.Println("Error loading charging bolt:", err)
 			return nil
 		}
-		copyImageToImageAt(img, chargingBolt, x, 0)
+		copyImageToImageAt(img, chargingBolt, x, 1)
 	}
 	return img
 }
@@ -623,7 +623,7 @@ func drawTopBar(display gc9307.Device, frame *image.RGBA) {
 		timeStr = fmt.Sprintf("%02d:%02d", currDateTime.Hour(), currDateTime.Minute())
 	}
 
-	networkStr := "5G"
+	networkStr := "5"
 	signalStrength := 0.43
 	magicStr := timeStr + " " + strconv.Itoa(int(signalStrength*100)) + " " + networkStr
 
@@ -650,13 +650,12 @@ func drawTopBar(display gc9307.Device, frame *image.RGBA) {
 	drawText(frame, timeStr, x0+2, y0-3, faceClock, PCAT_WHITE, false)	
 
 	//draw signal strength
-	drawSignalStrength(frame, x0+60, y0-1, signalStrength)
+	drawSignalStrength(frame, x0+69, y0, signalStrength)
 
 	//draw network
-	drawText(frame, networkStr, x0+87, y0-3, faceClockBold, PCAT_WHITE, false)
+	drawText(frame, networkStr, x0+95, y0-1, faceClockBold, PCAT_WHITE, false)
 
 	//draw Battery
-	// Get BatterySoc from globalData
 	socInt, ok := globalData["BatterySoc"].(int) // first assert as int
 	if !ok {
 		log.Printf("BatterySoc is not int, got type: %T", globalData["BatterySoc"])
@@ -668,8 +667,8 @@ func drawTopBar(display gc9307.Device, frame *image.RGBA) {
 	if !ok {
 		chargingBool = false // Default value if assertion fails
 	}
-	img := drawBattery(40, 16, socFloat, chargingBool, x0, y0)
-	copyImageToImageAt(frame, img, x0+118, y0)
+	img := drawBattery(45, 18, socFloat, chargingBool, x0, y0)
+	copyImageToImageAt(frame, img, x0+113, y0)
 	cacheTopBar = frame
 	cacheTopBarStr = magicStr
 	sendTopBar(display, frame)
