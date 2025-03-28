@@ -2,8 +2,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
-	"fmt"
 	"image"
 	"image/png"
 	"log"
@@ -91,9 +89,4 @@ func httpServer() {
 	port := ":8081"
 	log.Println("Starting Fiber server on", port)
 	log.Fatal(app.Listen(port))
-}
-
-func main() {
-	// Assuming other setup code exists, just call the server
-	httpServer()
 }

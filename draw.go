@@ -655,14 +655,14 @@ func drawTopBar(display gc9307.Device, frame *image.RGBA) {
 
 	//draw signal strength
 	if fiveGonTop {
-		drawSignalStrength(frame, x0+75, y0, signalStrength)
+		drawSignalStrength(frame, x0+80, y0, signalStrength)
 	}else{
-		drawSignalStrength(frame, x0+69, y0, signalStrength)
+		drawSignalStrength(frame, x0+70, y0, signalStrength)
 	}
 
 	//draw network
 	if fiveGonTop {	
-		drawText(frame, networkStr, x0+72, y0-6, faceTiny, PCAT_WHITE, false)
+		drawText(frame, networkStr, x0+78, y0-6, faceTiny, PCAT_WHITE, false)
 	}else{
 		drawText(frame, networkStr, x0+94, y0-3, faceTiny, PCAT_WHITE, false)
 	}

@@ -1,8 +1,7 @@
 {
     "num_pages": 4,
-    "site0": "baidu.com",
+    "site0": "taobao.com",
     "site1": "4.photonicat.com",
-    "header_lines": 2,
     "display_template": {
         "elements": {
             "page0": [ 
@@ -129,9 +128,9 @@
             "page1": [
                 {
                     "type": "fixed_text",
-                    "label": "ping - baidu.com",
+                    "label": "ping: taobao.com",
                     "position": {"x": 10, "y": 5},
-                    "font": "unit",
+                    "font": "tiny",
                     "color": [255, 229, 0],
                     "enable": 1
                 },
@@ -148,9 +147,9 @@
                 },
                 {
                     "type": "fixed_text",
-                    "label": "ping - 4.photonicat.com",
+                    "label": "ping: 4.photonicat.com",
                     "position": {"x": 10, "y": 70},
-                    "font": "unit",
+                    "font": "tiny",
                     "color": [255, 229, 0],
                     "enable": 1
                 },

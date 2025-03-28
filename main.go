@@ -330,16 +330,17 @@ func main() {
 	middleFrames := 0
 	stitchedFrames := 0
 
-	face, _, err := getFontFace("clock")
+	faceTiny, _, err := getFontFace("tiny")
 	if err != nil {
 		log.Fatalf("Failed to load font: %v", err)
 	}
 	// Main loop: you could update dynamic data and re-render pages as needed.
-	var changePageTriggered bool
-	var 
-	nextPageIdxFrameBuffer *image.RGBA
-	changePageTriggered = false
-	currPageIdx = 0
+	var (
+		changePageTriggered = false
+		nextPageIdxFrameBuffer *image.RGBA
+		currPageIdx = 0
+		showFPS = false
+	)
 	stitchedFrame := image.NewRGBA(image.Rect(0, 0, middleFrameWidth * 2, middleFrameHeight))
 	for {
 		if changePageTriggered {
@@ -370,12 +371,13 @@ func main() {
 				xPos := int(easeT * float64(middleFrameWidth))
 
 				croppedFrame := cropImageAt(stitchedFrame, xPos, 0, middleFrameWidth, middleFrameHeight)
+				if showFPS {	
+					now := time.Now()
+					fps = 1 / now.Sub(lastUpdate).Seconds()
+					lastUpdate = now
 
-				now := time.Now()
-				fps = 1 / now.Sub(lastUpdate).Seconds()
-				lastUpdate = now
-
-				drawText(croppedFrame, "FPS:" + strconv.Itoa(int(fps)) + ", " + strconv.Itoa(middleFrames), 10, 240, face, PCAT_YELLOW, false)
+					drawText(croppedFrame, "FPS:" + strconv.Itoa(int(fps)) + ", " + strconv.Itoa(middleFrames), 10, 240, faceTiny, PCAT_RED, false)
+				}
 				sendMiddle(display, croppedFrame)
 				middleFrames++
 				stitchedFrames++
@@ -388,7 +390,9 @@ func main() {
 			clearFrame(middleFramebuffers[middleFrames%2], middleFrameWidth, middleFrameHeight)
 			renderMiddle(middleFramebuffers[middleFrames%2], &cfg, currPageIdx)
 			//draw fps
-			drawText(middleFramebuffers[middleFrames%2], "FPS:" + strconv.Itoa(int(fps)) + ", " + strconv.Itoa(middleFrames), 10, 240, face, PCAT_YELLOW, false)
+			if showFPS {
+				drawText(middleFramebuffers[middleFrames%2], "FPS:" + strconv.Itoa(int(fps)) + ", " + strconv.Itoa(middleFrames), 10, 240, faceTiny, PCAT_RED, false)
+			}
 			sendMiddle(display, middleFramebuffers[middleFrames%2])
 			middleFrames++	
 		}
