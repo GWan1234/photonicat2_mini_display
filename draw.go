@@ -637,11 +637,15 @@ func drawTopBar(display gc9307.Device, frame *image.RGBA) {
 	clearFrame(frame, topBarFrameWidth, topBarFrameHeight)
 	
 	faceClock, _, err := getFontFace("clock")
-	faceClockBold, _, err := getFontFace("clockBold")
+	//faceClockBold, _, err := getFontFace("clockBold")
+	//faceUnit, _, err := getFontFace("unit")
+	faceTiny, _, err := getFontFace("tiny")
 	if err != nil {
 		fmt.Println("Error loading font:", err)
 		return
 	}
+	fiveGonTop :=true
+
 
 	x0 := PCAT2_L_MARGIN
 	y0 := PCAT2_T_MARGIN
@@ -650,10 +654,18 @@ func drawTopBar(display gc9307.Device, frame *image.RGBA) {
 	drawText(frame, timeStr, x0+2, y0-3, faceClock, PCAT_WHITE, false)	
 
 	//draw signal strength
-	drawSignalStrength(frame, x0+69, y0, signalStrength)
+	if fiveGonTop {
+		drawSignalStrength(frame, x0+75, y0, signalStrength)
+	}else{
+		drawSignalStrength(frame, x0+69, y0, signalStrength)
+	}
 
 	//draw network
-	drawText(frame, networkStr, x0+95, y0-1, faceClockBold, PCAT_WHITE, false)
+	if fiveGonTop {	
+		drawText(frame, networkStr, x0+72, y0-6, faceTiny, PCAT_WHITE, false)
+	}else{
+		drawText(frame, networkStr, x0+94, y0-3, faceTiny, PCAT_WHITE, false)
+	}
 
 	//draw Battery
 	socInt, ok := globalData["BatterySoc"].(int) // first assert as int
@@ -667,8 +679,13 @@ func drawTopBar(display gc9307.Device, frame *image.RGBA) {
 	if !ok {
 		chargingBool = false // Default value if assertion fails
 	}
-	img := drawBattery(45, 18, socFloat, chargingBool, x0, y0)
-	copyImageToImageAt(frame, img, x0+113, y0)
+	if fiveGonTop {
+		img := drawBattery(50, 19, socFloat, chargingBool, x0, y0)
+		copyImageToImageAt(frame, img, x0+108, y0)
+	}else{
+		img := drawBattery(45, 18, socFloat, chargingBool, x0, y0)
+		copyImageToImageAt(frame, img, x0+113, y0)
+	}
 	cacheTopBar = frame
 	cacheTopBarStr = magicStr
 	sendTopBar(display, frame)
