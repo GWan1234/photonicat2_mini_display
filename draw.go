@@ -668,13 +668,10 @@ func drawTopBar(display gc9307.Device, frame *image.RGBA) {
 	}
 
 	//draw Battery
-	socInt, ok := globalData["BatterySoc"].(int) // first assert as int
-	if !ok {
-		log.Printf("BatterySoc is not int, got type: %T", globalData["BatterySoc"])
-		socInt = 0 // default if assertion fails
-	}
+	socValue, _ := globalData.Load("BatterySoc") //it is int
+	socInt, _ := socValue.(int)
 	socFloat := float64(socInt) // now convert int to float64
-	charging := globalData["BatteryCharging"]
+	charging, _ := globalData.Load("BatteryCharging")
 	chargingBool, ok := charging.(bool) // Type assertion to bool
 	if !ok {
 		chargingBool = false // Default value if assertion fails
@@ -728,7 +725,7 @@ func renderMiddle(frame *image.RGBA, cfg *Config, currPage int) {
 			}
 
 			// Determine the text to display.
-			textValue, exists := globalData[element.DataKey]
+			textValue, exists := globalData.Load(element.DataKey)
 			var textToDisplay string
 			if exists {
 				textToDisplay = fmt.Sprintf("%v", textValue)
@@ -765,8 +762,9 @@ func renderMiddle(frame *image.RGBA, cfg *Config, currPage int) {
 			unitText := element.Units
 			//check if there is a override unit
 			theKey := element.DataKey + "_Unit"
-			if _, ok := globalData[theKey]; ok {
-				unitText = globalData[theKey].(string)
+			if _, ok := globalData.Load(theKey); ok {
+				unitTextVal, _ := globalData.Load(theKey)
+				unitText = unitTextVal.(string)
 			}
 			drawText(frame, unitText, xMain+1, unitY, unitFace, clr, false)
 		

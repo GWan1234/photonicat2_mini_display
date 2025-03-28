@@ -68,9 +68,10 @@ var (
 	imageCache 	map[string]*image.RGBA
 	cfg 			Config	
 	currPageIdx	 	int
-	globalData 	map[string]interface{}
+	//globalData 	map[string]interface{}
 	fonts 		map[string]FontConfig
 	assetsPrefix ="."
+	globalData sync.Map
 )
 
 // ImageBuffer holds a 1D slice of pixels for the display area.
@@ -261,8 +262,6 @@ func main() {
 		log.Fatalf("Failed to load config: %v", err)
 	}
 	
-	globalData = make(map[string]interface{})
-
 	collectTopBarData() //essential data for top bar, blocking
 
 

@@ -1,24 +1,25 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
+	"math"
 	"net"
 	"net/http"
-	"time"
 	"os"
-	"bufio"
-	"strings"
-	"strconv"
-	"syscall"
-	"github.com/go-ping/ping"
-	"bytes"
 	"os/exec"
 	"regexp"
-	"math"
-	"io"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/go-ping/ping"
 )
 
 // NetworkSpeed represents upload/download in bytes per second
@@ -30,19 +31,18 @@ type NetworkSpeed struct {
 func collectTopBarData() {
 	if soc, err := getBatterySoc(); err != nil {
 		fmt.Printf("Could not get battery soc: %v\n", err)
-		globalData["BatterySoc"] = -9999
+		globalData.Store("BatterySoc", -9999)
 	} else {
-		globalData["BatterySoc"] = soc
+		globalData.Store("BatterySoc", soc)
 	}
 
 	if charging, err := getBatteryCharging(); err != nil {
 		fmt.Printf("Could not get battery charging: %v\n", err)
-		globalData["BatteryCharging"] = false
+		globalData.Store("BatteryCharging", false)
 	} else {
-		globalData["BatteryCharging"] = charging
+		globalData.Store("BatteryCharging", charging)
 	}
 }
-
 
 // formatSpeed formats speed into value and units as Mbps
 func formatSpeed(mbps float64) (string, string) {
@@ -72,173 +72,177 @@ func getWANInterface() (string, error) {
 	return "", fmt.Errorf("WAN interface not found")
 }
 
-func collectWANNetworkSpeed()  {
+func collectWANNetworkSpeed() {
 	wanInterface, err := getWANInterface()
 	if err != nil {
-		globalData["WanUP"] = "N/A"
-		globalData["WanDOWN"] = "N/A"
-		return 
+		globalData.Store("WanUP", "N/A")
+		globalData.Store("WanDOWN", "N/A")
+		return
 	}
 	netData, err := getNetworkSpeed(wanInterface)
 	if err != nil {
-		globalData["WanUP"] = "0"
-		globalData["WanDOWN"] = "0"
+		globalData.Store("WanUP", "0")
+		globalData.Store("WanDOWN", "0")
 		return
 	}
 	wanUPVal, wanUPUnit := formatSpeed(netData.UploadMbps)
 	wanDOWNVal, wanDOWNUnit := formatSpeed(netData.DownloadMbps)
-	globalData["WanUP"] = wanUPVal 
-	globalData["WanDOWN"] = wanDOWNVal 
-	globalData["WanUP_Unit"] = wanUPUnit
-	globalData["WanDOWN_Unit"] = wanDOWNUnit
+	globalData.Store("WanUP", wanUPVal)
+	globalData.Store("WanDOWN", wanDOWNVal)
+	globalData.Store("WanUP_Unit", wanUPUnit)
+	globalData.Store("WanDOWN_Unit", wanDOWNUnit)
 }
 
 // collectData gathers several pieces of system and network information and stores them in globalData.
 func collectData(cfg Config) {
-	// Initialize the global hashtable.
-	voltageUV, err := getBatteryVoltageUV(); 
+	// Battery voltage.
+	voltageUV, err := getBatteryVoltageUV()
 	if err != nil {
 		fmt.Printf("Could not get battery voltage: %v\n", err)
-		globalData["BatteryVoltage"] = "N/A"
+		globalData.Store("BatteryVoltage", "N/A")
 	} else {
 		voltage_2digit := fmt.Sprintf("%0.2f", voltageUV/1000/1000)
-		globalData["BatteryVoltage"] = voltage_2digit
+		globalData.Store("BatteryVoltage", voltage_2digit)
 	}
 
-	currentUA, err := getBatteryCurrentUA();
+	// Battery current.
+	currentUA, err := getBatteryCurrentUA()
 	if err != nil {
 		fmt.Printf("Could not get battery current: %v\n", err)
-		globalData["BatteryCurrent"] = -9999
+		globalData.Store("BatteryCurrent", -9999)
 	} else {
 		current_2digit := fmt.Sprintf("%0.2f", currentUA/1000/1000)
-		globalData["BatteryCurrent"] = current_2digit
-	}	
+		globalData.Store("BatteryCurrent", current_2digit)
+	}
 
+	// Battery wattage.
 	wattage := float64(voltageUV) * float64(currentUA) / 1000 / 1000 / 1000 / 1000
-	globalData["BatteryWattage"] = fmt.Sprintf("%0.1f", wattage)
+	globalData.Store("BatteryWattage", fmt.Sprintf("%0.1f", wattage))
 
+	// DC voltage.
 	dcVoltageUV, err := getDCVoltageUV()
 	if err != nil {
 		fmt.Printf("Could not get DC voltage: %v\n", err)
-		globalData["DCVoltage"] = -9999
+		globalData.Store("DCVoltage", -9999)
 	} else {
-		globalData["DCVoltage"] = fmt.Sprintf("%0.1f", dcVoltageUV/1000/1000)
+		globalData.Store("DCVoltage", fmt.Sprintf("%0.1f", dcVoltageUV/1000/1000))
 	}
 
-	// Get CPU usage and temperature.
+	// CPU temperature.
 	if cpuTemp, err := getCpuTemp(); err != nil {
 		fmt.Printf("Could not get CPU temperature: %v\n", err)
-		globalData["CpuTemp"] = -9999
+		globalData.Store("CpuTemp", -9999)
 	} else {
 		cpuTemp_1digit := fmt.Sprintf("%0.1f", cpuTemp/1000)
-		globalData["CpuTemp"] = cpuTemp_1digit
+		globalData.Store("CpuTemp", cpuTemp_1digit)
 	}
 
+	// CPU usage.
 	cpuUsage, err := getCPUUsage()
 	if err != nil {
 		fmt.Printf("Could not get CPU usage: %v\n", err)
-		globalData["CpuUsage"] = 0
+		globalData.Store("CpuUsage", 0)
 	} else {
 		cpuUsageInt := int(cpuUsage)
-		globalData["CpuUsage"] = cpuUsageInt
+		globalData.Store("CpuUsage", cpuUsageInt)
 	}
 
-	// Get memory usage.
+	// Memory usage.
 	if memUsed, memTotal, err := getMemUsedAndTotalGB(); err != nil {
 		fmt.Printf("Could not get memory usage: %v\n", err)
-		globalData["MemUsage"] = nil
+		globalData.Store("MemUsage", nil)
 	} else {
 		memUsed_1digit := fmt.Sprintf("%0.1f", memUsed)
 		memTotal_ceilInt := int(math.Ceil(memTotal))
 		memString := fmt.Sprintf("%s/%d", memUsed_1digit, memTotal_ceilInt)
-		globalData["MemUsage"] = memString
+		globalData.Store("MemUsage", memString)
 	}
 
-	// Get disk usage.
+	// Disk usage.
 	if diskData, err := getDiskUsage(); err != nil {
 		fmt.Printf("Could not get disk usage: %v\n", err)
-		globalData["DiskData"] = nil
+		globalData.Store("DiskData", nil)
 	} else {
-		globalData["DiskData"] = diskData
+		globalData.Store("DiskData", diskData)
 	}
 
-	// Get local IP address.
+	// Local IP address.
 	if localIP, err := getLocalIPv4(); err != nil {
 		fmt.Printf("Could not get local IP: %v\n", err)
-		globalData["LAN_IP"] = "N/A"
+		globalData.Store("LAN_IP", "N/A")
 	} else {
-		globalData["LAN_IP"] = localIP
+		globalData.Store("LAN_IP", localIP)
 	}
 
-	// Get public IP address.
+	// Public IP address.
 	if publicIP, err := getPublicIPv4(); err != nil {
 		fmt.Printf("Could not get public IP: %v\n", err)
-		globalData["WAN_IP"] = "N/A"
+		globalData.Store("WAN_IP", "N/A")
 	} else {
-		globalData["WAN_IP"] = publicIP
+		globalData.Store("WAN_IP", publicIP)
 	}
 
+	// SSID.
 	if ssid, err := getSSID(); err != nil {
 		fmt.Printf("Could not get SSID: %v\n", err)
-		globalData["SSID"] = "N/A"
+		globalData.Store("SSID", "N/A")
 	} else {
-		globalData["SSID"] = ssid
+		globalData.Store("SSID", ssid)
 	}
 
-	// Get DHCP clients if OpenWRT.
+	// DHCP clients (OpenWrt).
 	if dhcpClients, err := getDHCPClients(); err != nil {
 		fmt.Printf("Could not get DHCP clients: %v\n", err)
-		globalData["DHCPClients"] = nil
+		globalData.Store("DHCPClients", nil)
 	} else {
-		globalData["DHCPClients"] = dhcpClients
+		globalData.Store("DHCPClients", dhcpClients)
 	}
 
-	// Get WiFi clients if OpenWRT.
+	// WiFi clients (OpenWrt).
 	if wifiClients, err := getWifiClients(); err != nil {
 		fmt.Printf("Could not get WiFi clients: %v\n", err)
-		globalData["WifiClients"] = nil
+		globalData.Store("WifiClients", nil)
 	} else {
-		globalData["WifiClients"] = wifiClients
+		globalData.Store("WifiClients", wifiClients)
 	}
 
 	// Ping Site0 using ICMP.
 	if ping0, err := pingICMP(cfg.Site0); err != nil {
 		fmt.Printf("ICMP ping to %s failed: %v\n", cfg.Site0, err)
-		globalData["Ping0"] = -1 // using -1 to indicate an error
+		globalData.Store("Ping0", -1) // using -1 to indicate an error
 	} else {
-		globalData["Ping0"] = ping0
+		globalData.Store("Ping0", ping0)
 	}
 
 	// Ping Site1 using ICMP.
 	if ping1, err := pingICMP(cfg.Site1); err != nil {
 		fmt.Printf("ICMP ping to %s failed: %v\n", cfg.Site1, err)
-		globalData["Ping1"] = -1
+		globalData.Store("Ping1", -1)
 	} else {
-		globalData["Ping1"] = ping1
+		globalData.Store("Ping1", ping1)
 	}
 
-	// Get country based on public IP geolocation.
+	// Country based on public IP geolocation.
 	if country, err := getCountry(); err != nil {
 		fmt.Printf("Could not get country: %v\n", err)
-		globalData["Country"] = "Unknown"
+		globalData.Store("Country", "Unknown")
 	} else {
-		globalData["Country"] = country
+		globalData.Store("Country", country)
 	}
 
-
-
-	// Get IPv6 public IP.
+	// IPv6 public IP.
 	if ipv6, err := getIPv6Public(); err != nil {
 		fmt.Printf("Could not get IPv6 public IP: %v\n", err)
-		globalData["PublicIPv6"] = "0.0.0.0"
+		globalData.Store("PublicIPv6", "0.0.0.0")
 	} else {
-		globalData["PublicIPv6"] = ipv6
+		globalData.Store("PublicIPv6", ipv6)
 	}
 
 	log.Println("Collected global data:")
-	//log.Println(globalData)
+	// You can range over globalData if needed.
 }
 
+// getDCVoltageUV reads DC voltage from the system.
 func getDCVoltageUV() (float64, error) {
 	file, err := os.Open("/sys/class/power_supply/charger/voltage_now")
 	if err != nil {
@@ -250,13 +254,13 @@ func getDCVoltageUV() (float64, error) {
 	if err != nil {
 		return 0.0, err
 	}
-	if rawUV < 1 * 1000 * 1000 {
+	if rawUV < 1*1000*1000 {
 		return 0.0, nil
 	}
 	return rawUV, nil
 }
 
-// getInterfaceBytes reads rx and tx bytes for a given interface
+// getInterfaceBytes reads rx and tx bytes for a given interface.
 func getInterfaceBytes(iface string) (rxBytes, txBytes uint64, err error) {
 	basePath := "/sys/class/net/" + iface + "/statistics/"
 	rxPath := basePath + "rx_bytes"
@@ -325,7 +329,7 @@ func getSSID() (string, error) {
 	return "", fmt.Errorf("SSID could not be determined")
 }
 
-// getNetworkSpeed calculates instant network speed for the specified interface
+// getNetworkSpeed calculates instant network speed for the specified interface.
 func getNetworkSpeed(iface string) (NetworkSpeed, error) {
 	rx1, tx1, err := getInterfaceBytes(iface)
 	if err != nil {
@@ -349,7 +353,7 @@ func getNetworkSpeed(iface string) (NetworkSpeed, error) {
 	}, nil
 }
 
-// CPUStats represents CPU usage snapshot
+// CPUStats represents a CPU usage snapshot.
 type CPUStats struct {
 	User, Nice, System, Idle, Iowait, Irq, Softirq, Steal uint64
 }
@@ -458,7 +462,7 @@ func pingICMP(host string) (int64, error) {
 	return int64(stats.AvgRtt / time.Millisecond), nil
 }
 
-// getBatterySoc returns the battery soc from /sys/class/power_supply/battery/capacity
+// getBatterySoc returns the battery soc from /sys/class/power_supply/battery/capacity.
 func getBatterySoc() (int, error) {
 	file, err := os.Open("/sys/class/power_supply/battery/capacity")
 	if err != nil {
@@ -469,21 +473,20 @@ func getBatterySoc() (int, error) {
 	if err != nil {
 		return -1, err
 	}
-	socInt, err := strconv.Atoi(strings.TrimSpace(string(content)))	
+	socInt, err := strconv.Atoi(strings.TrimSpace(string(content)))
 	if err != nil {
 		return -1, err
 	}
 	return socInt, nil
 }
 
-// getBatteryCharging returns the battery charging status from /sys/class/power_supply/battery/charging
+// getBatteryCharging returns the battery charging status from /sys/class/power_supply/battery/status.
 func getBatteryCharging() (bool, error) {
 	file, err := os.Open("/sys/class/power_supply/battery/status")
 	if err != nil {
 		return false, err
 	}
 	defer file.Close()
-	// if file content is "charging" return true, else false
 	content, err := ioutil.ReadAll(file)
 	if err != nil {
 		return false, err
@@ -533,7 +536,7 @@ func getCountry() (string, error) {
 	return result.Country, nil
 }
 
-// getLocalIP returns eth0 IP on OpenWrt or WAN IP (default route) on Debian.
+// getLocalIPv4 returns eth0 IP on OpenWrt or WAN IP (default route) on Debian.
 func getLocalIPv4() (string, error) {
 	// Check if running on OpenWrt by existence of "/etc/openwrt_release"
 	if _, err := os.Stat("/etc/openwrt_release"); err == nil {
@@ -554,7 +557,7 @@ func getLocalIPv4() (string, error) {
 		return "", fmt.Errorf("eth0 has no IPv4 address")
 	}
 
-	// Debian/Ubuntu: Find WAN interface from default route
+	// Debian/Ubuntu: Find WAN interface from default route.
 	cmd := exec.Command("ip", "route", "show", "default")
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -588,30 +591,29 @@ func getLocalIPv4() (string, error) {
 	return "", fmt.Errorf("WAN interface (%s) has no IPv4 address", ifaceName)
 }
 
-// getPublicIP makes an HTTP request to a public API to fetch the external IPv4 address.
+// getPublicIPv4 makes an HTTP request to a public API to fetch the external IPv4 address.
 func getPublicIPv4() (string, error) {
 	resp, err := http.Get("https://4.photonicat.com/ip.php")
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
-	
+
 	ip, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", err
 	}
-	
-	// Trim any whitespace or newlines
+
+	// Trim any whitespace or newlines.
 	ipStr := strings.TrimSpace(string(ip))
-	
-	// Optional: Basic validation that it looks like an IPv4 address
+
+	// Optional: Basic validation that it looks like an IPv4 address.
 	if net.ParseIP(ipStr) == nil || net.ParseIP(ipStr).To4() == nil {
 		return "", fmt.Errorf("invalid IPv4 address received: %s", ipStr)
 	}
-	
+
 	return ipStr, nil
 }
-
 
 // getIPv6Public fetches the public IPv6 address.
 func getIPv6Public() (string, error) {
@@ -620,30 +622,25 @@ func getIPv6Public() (string, error) {
 		return "", err
 	}
 	defer resp.Body.Close()
-	
+
 	ip, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", err
 	}
-	
-	// Trim any whitespace or newlines
+
+	// Trim any whitespace or newlines.
 	ipStr := strings.TrimSpace(string(ip))
-	
-	// Optional: Basic validation that it looks like an IPv6 address
+
+	// Optional: Basic validation that it looks like an IPv6 address.
 	if net.ParseIP(ipStr) == nil || net.ParseIP(ipStr).To4() != nil {
 		return "", fmt.Errorf("invalid IPv6 address received: %s", ipStr)
 	}
-	
+
 	return ipStr, nil
 }
 
-// getCpuUsage returns dummy CPU usage and temperature data.
-func getCpuUsage() (map[string]interface{}, error) {
-	
-	return nil, nil
-}
-
-func getCpuTemp() (float64, error) { // /sys/class/thermal/thermal_zone0/temp
+// getCpuTemp returns CPU temperature from /sys/class/thermal/thermal_zone0/temp.
+func getCpuTemp() (float64, error) {
 	file, err := os.Open("/sys/class/thermal/thermal_zone0/temp")
 	if err != nil {
 		return 0, err
@@ -656,6 +653,7 @@ func getCpuTemp() (float64, error) { // /sys/class/thermal/thermal_zone0/temp
 	return strconv.ParseFloat(strings.TrimSpace(string(content)), 64)
 }
 
+// getMemUsedAndTotalGB returns used and total memory in GB.
 func getMemUsedAndTotalGB() (usedGB float64, totalGB float64, err error) {
 	data, err := os.ReadFile("/proc/meminfo")
 	if err != nil {
@@ -699,26 +697,21 @@ func getMemUsedAndTotalGB() (usedGB float64, totalGB float64, err error) {
 	return usedGB, totalGB, nil
 }
 
-// getDiskUsage returns dummy disk usage data.
 // getDiskUsage returns disk usage stats (total and free space in MB) for the current partition.
 func getDiskUsage() (map[string]interface{}, error) {
-	// Stat the root directory ("/") to get the current partition's stats
 	var stat syscall.Statfs_t
 	err := syscall.Statfs("/", &stat)
 	if err != nil {
 		return nil, fmt.Errorf("failed to stat filesystem: %v", err)
 	}
 
-	// Calculate total and free space
-	// Bsize is block size in bytes, Blocks is total blocks, Bfree is free blocks
-	totalMB := (uint64(stat.Bsize) * stat.Blocks) / (1024 * 1024) // Bytes to MB
-	freeMB := (uint64(stat.Bsize) * stat.Bfree) / (1024 * 1024)   // Bytes to MB
+	totalMB := (uint64(stat.Bsize) * stat.Blocks) / (1024 * 1024)
+	freeMB := (uint64(stat.Bsize) * stat.Bfree) / (1024 * 1024)
 
-	// Prepare data
 	data := map[string]interface{}{
 		"Total": totalMB,
 		"Free":  freeMB,
-		"Used":  totalMB - freeMB, // Optional: calculate used space
+		"Used":  totalMB - freeMB,
 	}
 
 	return data, nil
@@ -726,36 +719,30 @@ func getDiskUsage() (map[string]interface{}, error) {
 
 // getCurrNetworkSpeedMbps returns current network speed in Mbps for all interfaces.
 func getCurrNetworkSpeedMbps() (map[string]interface{}, error) {
-	// Read initial stats
 	startStats, err := readNetworkStats()
 	if err != nil {
 		return nil, err
 	}
 
-	// Wait 1 second to measure difference
 	time.Sleep(1 * time.Second)
 
-	// Read stats again
 	endStats, err := readNetworkStats()
 	if err != nil {
 		return nil, err
 	}
 
-	// Calculate speed in Mbps
 	data := make(map[string]interface{})
 	for iface, end := range endStats {
 		if start, ok := startStats[iface]; ok {
-			// Bytes difference over 1 second
 			rxBytes := end.rxBytes - start.rxBytes
 			txBytes := end.txBytes - start.txBytes
 
-			// Convert bytes/sec to Mbps (1 byte = 8 bits, 1 Mb = 1e6 bits)
 			rxMbps := float64(rxBytes) * 8 / 1e6
 			txMbps := float64(txBytes) * 8 / 1e6
 
 			data[iface] = map[string]float64{
-				"download": rxMbps, // Receive speed
-				"upload":   txMbps, // Transmit speed
+				"download": rxMbps,
+				"upload":   txMbps,
 			}
 		}
 	}
@@ -780,11 +767,10 @@ func readNetworkStats() (map[string]networkStats, error) {
 	stats := make(map[string]networkStats)
 	scanner := bufio.NewScanner(file)
 
-	// Skip header lines
+	// Skip header lines.
 	for i := 0; i < 2 && scanner.Scan(); i++ {
 	}
 
-	// Parse each interface line
 	for scanner.Scan() {
 		line := scanner.Text()
 		fields := strings.Fields(line)
@@ -826,4 +812,3 @@ func getWifiClients() ([]string, error) {
 	clients := []string{"AA:BB:CC:DD:EE:FF", "11:22:33:44:55:66"}
 	return clients, nil
 }
-
