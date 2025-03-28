@@ -212,12 +212,13 @@ func main() {
 
 	// For demonstration, we create a mapping from font names to font configurations.
 	fonts = map[string]FontConfig{
-		"clock": 	     {FontPath: assetsPrefix + "/assets/fonts/Orbitron-Medium.ttf", FontSize: 16},
-		"clockBold": 	     {FontPath: assetsPrefix + "/assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 16},
+		"clock": 	     {FontPath: assetsPrefix + "/assets/fonts/Orbitron-Medium.ttf", FontSize: 17},
+		"clockBold": 	     {FontPath: assetsPrefix + "/assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 17},
 		//"small_text": 	 {FontPath: "assets/fonts/Orbitron-Medium.ttf", FontSize: 17},
-		"reg": 	 {FontPath: assetsPrefix + "/assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 17},
+		"reg": 	 {FontPath: assetsPrefix + "/assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 18},
 		"big": 	 {FontPath: assetsPrefix + "/assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 25},
 		"unit": 	 {FontPath: assetsPrefix + "/assets/fonts/Orbitron-Medium.ttf", FontSize: 15},
+		"thin": 	 {FontPath: assetsPrefix + "/assets/fonts/Orbitron-Regular.ttf", FontSize: 18},
 		"huge":      {FontPath: assetsPrefix + "/assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 34},
 		"gigantic":  {FontPath: assetsPrefix + "/assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 48},
 	}

@@ -18,6 +18,7 @@ import (
 	"os/exec"
 	"regexp"
 	"math"
+	"io"
 )
 
 // NetworkSpeed represents upload/download in bytes per second
@@ -594,11 +595,21 @@ func getPublicIPv4() (string, error) {
 		return "", err
 	}
 	defer resp.Body.Close()
-	ip, err := ioutil.ReadAll(resp.Body)
+	
+	ip, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", err
 	}
-	return string(ip), nil
+	
+	// Trim any whitespace or newlines
+	ipStr := strings.TrimSpace(string(ip))
+	
+	// Optional: Basic validation that it looks like an IPv4 address
+	if net.ParseIP(ipStr) == nil || net.ParseIP(ipStr).To4() == nil {
+		return "", fmt.Errorf("invalid IPv4 address received: %s", ipStr)
+	}
+	
+	return ipStr, nil
 }
 
 
@@ -609,11 +620,21 @@ func getIPv6Public() (string, error) {
 		return "", err
 	}
 	defer resp.Body.Close()
-	ip, err := ioutil.ReadAll(resp.Body)
+	
+	ip, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", err
 	}
-	return string(ip), nil
+	
+	// Trim any whitespace or newlines
+	ipStr := strings.TrimSpace(string(ip))
+	
+	// Optional: Basic validation that it looks like an IPv6 address
+	if net.ParseIP(ipStr) == nil || net.ParseIP(ipStr).To4() != nil {
+		return "", fmt.Errorf("invalid IPv6 address received: %s", ipStr)
+	}
+	
+	return ipStr, nil
 }
 
 // getCpuUsage returns dummy CPU usage and temperature data.
