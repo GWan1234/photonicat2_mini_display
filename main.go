@@ -74,6 +74,16 @@ var (
 	assetsPrefix ="."
 	globalData sync.Map
 	autoRotatePages = false
+	
+    lastActivity   = time.Now()
+    lastActivityMu sync.Mutex
+
+    // configuration for idle fade
+    idleTimeout  = 10 * time.Second    // how long until we start fading
+    fadeDuration = 3 * time.Second    // how long the fade takes
+    maxBacklight = 100
+
+	idleState = false
 )
 
 // ImageBuffer holds a 1D slice of pixels for the display area.
@@ -231,9 +241,41 @@ func monitorKeyboard(changePageTriggered *bool) {
 			if e.Type == evdev.EV_KEY && e.Code == evdev.KEY_POWER && e.Value == 1 {
 				log.Println("POWER pressed")
 				*changePageTriggered = true
+				lastActivityMu.Lock()
+				lastActivity = time.Now()
+				lastActivityMu.Unlock()
 			}
 		}
 	}
+}
+
+func idleDimmer() {
+    ticker := time.NewTicker(100 * time.Millisecond)
+    defer ticker.Stop()
+    for range ticker.C {
+        // how long since last key?
+        lastActivityMu.Lock()
+        idle := time.Since(lastActivity)
+        lastActivityMu.Unlock()
+
+        var brightness int
+        switch {
+        case idle < idleTimeout:
+            // still in “active” window
+            brightness = maxBacklight
+
+        case idle >= idleTimeout+fadeDuration:
+            // fully faded out
+            brightness = 0
+
+        default:
+            // somewhere in the fade
+            fadeProgress := float64(idle - idleTimeout) / float64(fadeDuration)
+            brightness = int(float64(maxBacklight) * (1 - fadeProgress))
+        }
+
+        setBacklight(brightness)
+    }
 }
 
 
@@ -394,6 +436,8 @@ func main() {
 
 	// Start keyboard monitoring in a goroutine
     go monitorKeyboard(&changePageTriggered)
+
+	go idleDimmer()
 
 	stitchedFrame := image.NewRGBA(image.Rect(0, 0, middleFrameWidth * 2, middleFrameHeight))
 	for {
