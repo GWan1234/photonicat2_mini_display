@@ -20,7 +20,7 @@ fi
 
 echo "Installing binary to $BINARY_PATH..."
 systemctl stop $SERVICE_NAME
-cp pcat2_mini_display_package/pcat2_mini_display_debian $BINARY_PATH
+cp pcat2_mini_display_debian $BINARY_PATH
 cp config.json /etc/pcat2_mini_display-config.json
 mkdir -p /usr/local/share/pcat2_mini_display
 cp -ar assets /usr/local/share/pcat2_mini_display

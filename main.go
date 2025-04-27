@@ -72,6 +72,7 @@ var (
 	fonts 		map[string]FontConfig
 	assetsPrefix ="."
 	globalData sync.Map
+	autoRotatePages = false
 )
 
 // ImageBuffer holds a 1D slice of pixels for the display area.
@@ -397,13 +398,14 @@ func main() {
 			middleFrames++	
 		}
 
-
-		if middleFrames % 100 == 0 {
-			changePageTriggered = true
-			now := time.Now()
-			fps = 100 / now.Sub(lastUpdate).Seconds()
-			log.Printf("FPS: %0.1f, Total Frames: %d\n", fps, middleFrames)
-			lastUpdate = now
+		if autoRotatePages {
+			if middleFrames % 100 == 0 {
+				changePageTriggered = true
+				now := time.Now()
+				fps = 100 / now.Sub(lastUpdate).Seconds()
+				log.Printf("FPS: %0.1f, Total Frames: %d\n", fps, middleFrames)
+				lastUpdate = now
+			}
 		}
 		//time.Sleep(16 * time.Millisecond)
 	}

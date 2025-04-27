@@ -482,16 +482,25 @@ func getBatterySoc() (int, error) {
 
 // getBatteryCharging returns the battery charging status from /sys/class/power_supply/battery/status.
 func getBatteryCharging() (bool, error) {
-	file, err := os.Open("/sys/class/power_supply/battery/status")
-	if err != nil {
-		return false, err
+	var determineChargingByCurrent bool = true
+	if determineChargingByCurrent {
+		current, err := getBatteryCurrentUA()
+		if err != nil {
+			return false, err
+		}
+		return current > 0, nil
+	}else{
+		file, err := os.Open("/sys/class/power_supply/battery/status")
+		if err != nil {
+			return false, err
+		}
+		defer file.Close()
+		content, err := ioutil.ReadAll(file)
+		if err != nil {
+			return false, err
+		}
+		return strings.TrimSpace(string(content)) == "Charging", nil
 	}
-	defer file.Close()
-	content, err := ioutil.ReadAll(file)
-	if err != nil {
-		return false, err
-	}
-	return strings.TrimSpace(string(content)) == "Charging", nil
 }
 
 func getBatteryVoltageUV() (float64, error) {
