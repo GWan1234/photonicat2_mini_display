@@ -16,6 +16,7 @@ import (
 	"os"
 
 	gc9307 "github.com/photonicat/periph.io-gc9307"
+	evdev "github.com/gvalkov/golang-evdev"
 
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/opentype"
@@ -32,7 +33,7 @@ const (
 	RST_PIN          = "GPIO122"
 	DC_PIN           = "GPIO121"
 	CS_PIN           = "GPIO13"
-	BL_PIN           = "GPIO117"
+	BL_PIN           = "GPIO13" //now we are using pwm control backlight
 	PCAT2_LCD_WIDTH  = 172
 	PCAT2_LCD_HEIGHT = 320
 	PCAT2_X_OFFSET   = 34
@@ -184,8 +185,57 @@ func clearFrame(frame *image.RGBA, width int, height int) {
 }
 
 
+func setBacklight(backlight int) {
+	if backlight < 0 {
+		backlight = 0
+	}
+	if backlight > 100 {
+		backlight = 100
+	}
+	os.WriteFile("/sys/class/backlight/backlight/brightness", []byte(strconv.Itoa(backlight)), 0644)
+}
 
-//---------------- Main ----------------
+// monitorKeyboard watches /dev/input/event* for KEY_POWER.
+func monitorKeyboard(changePageTriggered *bool) {
+	devices, err := evdev.ListInputDevices("/dev/input/event*")
+	if err != nil {
+		log.Printf("ListInputDevices error: %v", err)
+		return
+	}
+	var keyboard *evdev.InputDevice
+	for _, dev := range devices {
+		if dev.Name == "rk805 pwrkey" {
+			keyboard = dev
+			break
+		}
+	}
+
+	if keyboard == nil {
+		log.Println("no EV_KEY device found")
+		return
+	}
+	log.Printf("using input device: %s (%s)", keyboard.Fn, keyboard.Name)
+	if err := keyboard.Grab(); err != nil {
+		log.Printf("warning: failed to grab device: %v", err)
+	}
+	defer keyboard.Release()
+
+	for {
+		events, err := keyboard.Read()
+		if err != nil {
+			log.Printf("read error: %v", err)
+			time.Sleep(100 * time.Millisecond)
+			continue
+		}
+		for _, e := range events {
+			if e.Type == evdev.EV_KEY && e.Code == evdev.KEY_POWER && e.Value == 1 {
+				log.Println("POWER pressed")
+				*changePageTriggered = true
+			}
+		}
+	}
+}
+
 
 func main() {
 	// Initialize board.
@@ -244,7 +294,6 @@ func main() {
 		VSyncLines:   gc9307.MAX_VSYNC_SCANLINES,
 		UseCS:        false,
 	})
-	display.EnableBacklight(false)
 
 	// Load our configuration file (adjust the path as needed).
 	// if local no config.json, use check /etc/pcat2_mini_display-config.json
@@ -342,6 +391,10 @@ func main() {
 		currPageIdx = 0
 		showFPS = false
 	)
+
+	// Start keyboard monitoring in a goroutine
+    go monitorKeyboard(&changePageTriggered)
+
 	stitchedFrame := image.NewRGBA(image.Rect(0, 0, middleFrameWidth * 2, middleFrameHeight))
 	for {
 		if changePageTriggered {
