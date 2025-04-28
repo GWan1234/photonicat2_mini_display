@@ -43,6 +43,10 @@ const (
 	PCAT2_B_MARGIN   = 7
 	PCAT2_TOP_BAR_HEIGHT = 32
 	PCAT2_FOOTER_HEIGHT = 22
+	STATE_IDLE = 0
+	STATE_ACTIVE = 1
+	STATE_FADE_IN = 2
+	STATE_FADE_OUT = 3
 )
 
 var (
@@ -80,10 +84,11 @@ var (
 
     // configuration for idle fade
     idleTimeout  = 10 * time.Second    // how long until we start fading
-    fadeDuration = 3 * time.Second    // how long the fade takes
+    fadeDuration = 2 * time.Second    // how long the fade takes
+	fadeInDur 	 = 500 * time.Millisecond
     maxBacklight = 100
 
-	idleState = false
+	idleState = STATE_ACTIVE
 )
 
 // ImageBuffer holds a 1D slice of pixels for the display area.
@@ -207,73 +212,114 @@ func setBacklight(backlight int) {
 
 // monitorKeyboard watches /dev/input/event* for KEY_POWER.
 func monitorKeyboard(changePageTriggered *bool) {
-	devices, err := evdev.ListInputDevices("/dev/input/event*")
-	if err != nil {
-		log.Printf("ListInputDevices error: %v", err)
-		return
-	}
-	var keyboard *evdev.InputDevice
-	for _, dev := range devices {
-		if dev.Name == "rk805 pwrkey" {
-			keyboard = dev
-			break
-		}
-	}
+	var lastKeyPress time.Time
+    devices, err := evdev.ListInputDevices("/dev/input/event*")
+    if err != nil {
+        log.Printf("ListInputDevices error: %v", err)
+        return
+    }
+    var keyboard *evdev.InputDevice
+    for _, dev := range devices {
+        if dev.Name == "rk805 pwrkey" {
+            keyboard = dev
+            break
+        }
+    }
 
-	if keyboard == nil {
-		log.Println("no EV_KEY device found")
-		return
-	}
-	log.Printf("using input device: %s (%s)", keyboard.Fn, keyboard.Name)
-	if err := keyboard.Grab(); err != nil {
-		log.Printf("warning: failed to grab device: %v", err)
-	}
-	defer keyboard.Release()
+    if keyboard == nil {
+        log.Println("no EV_KEY device found")
+        return
+    }
+    log.Printf("using input device: %s (%s)", keyboard.Fn, keyboard.Name)
+    if err := keyboard.Grab(); err != nil {
+        log.Printf("warning: failed to grab device: %v", err)
+    }
+    defer keyboard.Release()
 
-	for {
-		events, err := keyboard.Read()
-		if err != nil {
-			log.Printf("read error: %v", err)
-			time.Sleep(100 * time.Millisecond)
-			continue
-		}
-		for _, e := range events {
-			if e.Type == evdev.EV_KEY && e.Code == evdev.KEY_POWER && e.Value == 1 {
-				log.Println("POWER pressed")
+    for {
+        events, err := keyboard.Read()
+        if err != nil {
+            log.Printf("read error: %v", err)
+            time.Sleep(100 * time.Millisecond)
+            continue
+        }
+
+        // Scan this batch for press or release
+        var sawPress, sawRelease bool
+        for _, e := range events {
+            if e.Type == evdev.EV_KEY && e.Code == evdev.KEY_POWER {
+                switch e.Value {
+                case 1:
+                    sawPress = true
+                case 0:
+                    sawRelease = true
+                }
+            }
+        }
+
+        now := time.Now()
+        if sawPress {
+            // 1) immediate action on press
+            log.Println("POWER pressed")
+			if idleState == STATE_ACTIVE {
 				*changePageTriggered = true
-				lastActivityMu.Lock()
-				lastActivity = time.Now()
-				lastActivityMu.Unlock()
 			}
-		}
-	}
+            lastActivityMu.Lock()
+            lastActivity = now
+            lastActivityMu.Unlock()
+			lastKeyPress = now
+
+        } else if sawRelease  && now.Sub(lastKeyPress) > 500 * time.Millisecond {
+            // 2) only act on release if no press in the same batch
+            log.Println("POWER released")
+			if idleState == STATE_ACTIVE {
+				*changePageTriggered = true
+			}
+            lastActivityMu.Lock()
+            lastActivity = now
+            lastActivityMu.Unlock()
+        }
+    }
 }
 
 func idleDimmer() {
-    ticker := time.NewTicker(100 * time.Millisecond)
+    ticker := time.NewTicker(50 * time.Millisecond)
     defer ticker.Stop()
+
     for range ticker.C {
-        // how long since last key?
         lastActivityMu.Lock()
         idle := time.Since(lastActivity)
+		lastIfActive := true
         lastActivityMu.Unlock()
 
         var brightness int
         switch {
+        case idle < fadeInDur:
+            // 1) Fade in from 0→maxBacklight over fadeInDur
+			p := float64(idle) / float64(fadeInDur)      // goes 0→1
+			if lastIfActive {
+				brightness = 100 
+			}else{
+				brightness = int(p * float64(maxBacklight))
+			}
+			idleState = STATE_FADE_IN
+			
         case idle < idleTimeout:
-            // still in “active” window
+            // 2) Fully on during the “active” window
             brightness = maxBacklight
+			idleState = STATE_ACTIVE
 
-        case idle >= idleTimeout+fadeDuration:
-            // fully faded out
-            brightness = 0
-
+        case idle < idleTimeout+fadeDuration:
+            // 3) Fade out from maxBacklight→0 over fadeDuration
+            p := float64(idle-idleTimeout) / float64(fadeDuration) // 0→1
+            brightness = int((1 - p) * float64(maxBacklight))
+			idleState = STATE_FADE_OUT
         default:
-            // somewhere in the fade
-            fadeProgress := float64(idle - idleTimeout) / float64(fadeDuration)
-            brightness = int(float64(maxBacklight) * (1 - fadeProgress))
+            // 4) Fully off once past the fade‐out
+            brightness = 0
+			idleState = STATE_IDLE
+			lastIfActive = false
         }
-
         setBacklight(brightness)
     }
 }
