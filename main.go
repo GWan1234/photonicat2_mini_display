@@ -318,13 +318,10 @@ func idleDimmer() {
 				brightness = int(p * float64(maxBacklight))
 			}
 			idleState = STATE_FADE_IN
-			log.Println("idleState: STATE_FADE_IN")
-			
         case idle < idleTimeout:
             // 2) Fully on during the “active” window
             brightness = maxBacklight
 			idleState = STATE_ACTIVE
-
         case idle < idleTimeout+fadeDuration:
             // 3) Fade out from maxBacklight→0 over fadeDuration
             p := float64(idle-idleTimeout) / float64(fadeDuration) // 0→1
@@ -336,7 +333,6 @@ func idleDimmer() {
 			idleState = STATE_IDLE
 			lastIfActive = false
 			desiredFPS = 1
-			log.Println("idleState: STATE_IDLE")
         }
         setBacklight(brightness)
     }

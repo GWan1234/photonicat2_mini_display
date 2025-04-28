@@ -489,7 +489,7 @@ func getBatterySoc() (int, error) {
 
 // getBatteryCharging returns the battery charging status from /sys/class/power_supply/battery/status.
 func getBatteryCharging() (bool, error) {
-	var determineChargingByCurrent bool = true
+	var determineChargingByCurrent bool = false
 	if determineChargingByCurrent {
 		current, err := getBatteryCurrentUA()
 		if err != nil {
@@ -506,7 +506,8 @@ func getBatteryCharging() (bool, error) {
 		if err != nil {
 			return false, err
 		}
-		return strings.TrimSpace(string(content)) == "Charging", nil
+
+		return strings.TrimSpace(string(content)) == "Charging" || strings.TrimSpace(string(content)) == "Full" , nil
 	}
 }
 

@@ -519,7 +519,8 @@ func drawSignalStrength(frame *image.RGBA, x0, y0 int, strength float64) {
 	copyImageToImageAt(frame, img, x0, y0)
 }
 
-func drawBattery(w, h int, soc float64, charging bool, x0, y0 int) *image.RGBA {
+func drawBattery(w, h int, soc float64, isCharging bool, x0, y0 int) *image.RGBA {
+	log.Println("isCharging: ", isCharging, "soc: ", soc)
 	terminalWidth := 3
 	face, _, err := getFontFace("clock")
 	if err != nil {
@@ -531,7 +532,7 @@ func drawBattery(w, h int, soc float64, charging bool, x0, y0 int) *image.RGBA {
 	if soc < 20 {
 		colorMain = PCAT_RED
 	}else{
-		if charging {
+		if isCharging {
 			colorMain = PCAT_GREEN
 		}else{
 			colorMain = PCAT_WHITE
@@ -582,20 +583,20 @@ func drawBattery(w, h int, soc float64, charging bool, x0, y0 int) *image.RGBA {
 	textColor := PCAT_BLACK
 	chargingBlotWidth := 10
 	//draw text
-	if soc == 100 {
-		drawText(img, "100", 2, -3, face, textColor, true)
-	}else if soc < 20 {
+	if soc < 20 {
 		textColor = PCAT_WHITE
 	}else{
 		textColor = PCAT_BLACK
 	}
 	batteryText := strconv.Itoa(int(soc))
-	if !charging {
+	drawChargingBlot := true
+	if !isCharging || soc == 100 {
 		chargingBlotWidth = 0
+		drawChargingBlot = false
 	}
 	//drawText(img, batteryText, (w-terminalWidth)/2, -3, face, textColor, true)
 	x, _ := drawText(img, batteryText, (w-terminalWidth-chargingBlotWidth)/2+1, -4, face, textColor, true)
-	if charging {
+	if drawChargingBlot {
 		var chargingBolt *image.RGBA
 		var err error
 		if soc < 20 {
