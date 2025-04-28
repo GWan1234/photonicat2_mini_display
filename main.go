@@ -17,6 +17,7 @@ import (
 
 	gc9307 "github.com/photonicat/periph.io-gc9307"
 	evdev "github.com/gvalkov/golang-evdev"
+	//evdev "github.com/holoplot/go-evdev"
 
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/opentype"
@@ -47,6 +48,7 @@ const (
 	STATE_ACTIVE = 1
 	STATE_FADE_IN = 2
 	STATE_FADE_OUT = 3
+	DEFAULT_FPS = 10
 )
 
 var (
@@ -95,6 +97,8 @@ var (
 
 	bateryDetectInterval = 250 * time.Millisecond
 	dataGatherInterval = 2 * time.Second
+
+	desiredFPS = 5
 	
 )
 
@@ -303,6 +307,7 @@ func idleDimmer() {
         switch {
         case idle < fadeInDur:
             // 1) Fade in from 0→maxBacklight over fadeInDur
+			desiredFPS = DEFAULT_FPS
 			p := float64(idle) / float64(fadeInDur)      // goes 0→1
 			if lastIfActive {
 				brightness = 100 
@@ -310,6 +315,7 @@ func idleDimmer() {
 				brightness = int(p * float64(maxBacklight))
 			}
 			idleState = STATE_FADE_IN
+			log.Println("idleState: STATE_FADE_IN")
 			
         case idle < idleTimeout:
             // 2) Fully on during the “active” window
@@ -326,6 +332,8 @@ func idleDimmer() {
             brightness = 0
 			idleState = STATE_IDLE
 			lastIfActive = false
+			desiredFPS = 1
+			log.Println("idleState: STATE_IDLE")
         }
         setBacklight(brightness)
     }
@@ -350,7 +358,6 @@ func main() {
 		log.Fatal(err)
 	}
 
-	
 	//if assetsFolder not exists, use /usr/local/share/pcat2_mini_display
 	if _, err := os.Stat("assets"); os.IsNotExist(err) {
 		assetsPrefix = "/usr/local/share/pcat2_mini_display"
@@ -494,6 +501,7 @@ func main() {
 
 	//main loop
 	for {
+		start := time.Now()
 		if changePageTriggered {
 			
 			nextPageIdx := (currPageIdx + 1) % cfg.NumPages
@@ -508,7 +516,7 @@ func main() {
 			renderMiddle(middleFramebuffers[(middleFrames+1)%2], &cfg, currPageIdx)
 			copyImageToImageAt(stitchedFrame, middleFramebuffers[(middleFrames+1)%2], 0, 0)
 			copyImageToImageAt(stitchedFrame, nextPageIdxFrameBuffer, middleFrameWidth, 0)
-			numIntermediatePages := 20
+			numIntermediatePages := 15
 
 			for i := 0; i < numIntermediatePages; i++ {
 				if i <= numIntermediatePages / 2 {
@@ -547,8 +555,10 @@ func main() {
 			sendMiddle(display, middleFramebuffers[middleFrames%2])
 			middleFrames++	
 
-			//timer ticker
-			time.Sleep(20 * time.Millisecond)
+			// stable‐FPS sleep
+			if delta := (time.Second / time.Duration(desiredFPS) - time.Since(start)); delta > 0 {
+				time.Sleep(time.Duration(float64(delta) * 0.99))
+			}
 		}
 
 		
@@ -561,7 +571,5 @@ func main() {
 			log.Printf("FPS: %0.1f, Total Frames: %d\n", fps, middleFrames)
 			lastUpdate = now
 		}
-
-		//time.Sleep(16 * time.Millisecond)
 	}
 }
