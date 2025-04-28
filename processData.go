@@ -555,57 +555,34 @@ func getCountry() (string, error) {
 
 // getLocalIPv4 returns eth0 IP on OpenWrt or WAN IP (default route) on Debian.
 func getLocalIPv4() (string, error) {
-	// Check if running on OpenWrt by existence of "/etc/openwrt_release"
-	if _, err := os.Stat("/etc/openwrt_release"); err == nil {
-		// OpenWrt: return eth0 IP explicitly
-		iface, err := net.InterfaceByName("eth0")
-		if err != nil {
-			return "", fmt.Errorf("eth0 not found: %v", err)
-		}
-		addrs, err := iface.Addrs()
-		if err != nil {
-			return "", err
-		}
-		for _, addr := range addrs {
-			if ipnet, ok := addr.(*net.IPNet); ok && ipnet.IP.To4() != nil {
-				return ipnet.IP.String(), nil
-			}
-		}
-		return "", fmt.Errorf("eth0 has no IPv4 address")
-	}
+    candidates := []string{"eth1", "end1", "end0"}
 
-	// Debian/Ubuntu: Find WAN interface from default route.
-	cmd := exec.Command("ip", "route", "show", "default")
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	if err := cmd.Run(); err != nil {
-		return "", err
-	}
-	fields := strings.Fields(out.String())
-	var ifaceName string
-	for i, field := range fields {
-		if field == "dev" && (i+1) < len(fields) {
-			ifaceName = fields[i+1]
-			break
-		}
-	}
-	if ifaceName == "" {
-		return "", fmt.Errorf("WAN interface not found")
-	}
-	iface, err := net.InterfaceByName(ifaceName)
-	if err != nil {
-		return "", err
-	}
-	addrs, err := iface.Addrs()
-	if err != nil {
-		return "", err
-	}
-	for _, addr := range addrs {
-		if ipnet, ok := addr.(*net.IPNet); ok && ipnet.IP.To4() != nil {
-			return ipnet.IP.String(), nil
-		}
-	}
-	return "", fmt.Errorf("WAN interface (%s) has no IPv4 address", ifaceName)
+    for _, name := range candidates {
+        iface, err := net.InterfaceByName(name)
+        if err != nil {
+            // interface doesn’t exist
+            continue
+        }
+        // skip if interface is down
+        if iface.Flags&net.FlagUp == 0 {
+            continue
+        }
+
+        addrs, err := iface.Addrs()
+        if err != nil {
+            continue
+        }
+        for _, addr := range addrs {
+            if ipnet, ok := addr.(*net.IPNet); ok {
+                if ip4 := ipnet.IP.To4(); ip4 != nil {
+                    return ip4.String(), nil
+                }
+            }
+        }
+    }
+
+    // none of the candidates had a usable IPv4
+    return "LINK DOWN", nil
 }
 
 // getPublicIPv4 makes an HTTP request to a public API to fetch the external IPv4 address.
