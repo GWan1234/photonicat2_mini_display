@@ -6,7 +6,7 @@ require (
 	github.com/ajstarks/svgo v0.0.0-20211024235047-1546f124cd8b
 	github.com/go-ping/ping v1.2.0
 	github.com/gofiber/fiber/v2 v2.52.6
-	github.com/gvalkov/golang-evdev v0.0.0-20220815104727-7e27d6ce89b6
+	github.com/holoplot/go-evdev v0.0.0-20240306072622-217e18f17db1
 	github.com/llgcode/draw2d v0.0.0-20240627062922-0ed1ff131195
 	github.com/photonicat/periph.io-gc9307 v0.0.0-20250327024102-e03f39f11c1d
 	github.com/srwiley/oksvg v0.0.0-20221011165216-be6e8873101c

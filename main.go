@@ -16,8 +16,8 @@ import (
 	"os"
 
 	gc9307 "github.com/photonicat/periph.io-gc9307"
-	evdev "github.com/gvalkov/golang-evdev"
-	//evdev "github.com/holoplot/go-evdev"
+	//evdev "github.com/gvalkov/golang-evdev"
+	evdev "github.com/holoplot/go-evdev"
 
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/opentype"
@@ -221,74 +221,77 @@ func setBacklight(backlight int) {
 	os.WriteFile("/sys/class/backlight/backlight/brightness", []byte(strconv.Itoa(backlight)), 0644)
 }
 
-// monitorKeyboard watches /dev/input/event* for KEY_POWER.
 func monitorKeyboard(changePageTriggered *bool) {
-	var lastKeyPress time.Time
-    devices, err := evdev.ListInputDevices("/dev/input/event*")
+    // 1) find the “rk805 pwrkey” device by name
+    paths, err := evdev.ListDevicePaths()
     if err != nil {
-        log.Printf("ListInputDevices error: %v", err)
+        log.Printf("ListDevicePaths error: %v", err)
         return
     }
-    var keyboard *evdev.InputDevice
-    for _, dev := range devices {
-        if dev.Name == "rk805 pwrkey" {
-            keyboard = dev
+
+    var devPath string
+    for _, ip := range paths {
+        if ip.Name == "rk805 pwrkey" {
+            devPath = ip.Path
             break
         }
     }
-
-    if keyboard == nil {
+    if devPath == "" {
         log.Println("no EV_KEY device found")
         return
     }
-    log.Printf("using input device: %s (%s)", keyboard.Fn, keyboard.Name)
+
+    // 2) open it
+    keyboard, err := evdev.Open(devPath)
+    if err != nil {
+        log.Printf("Open(%s) error: %v", devPath, err)
+        return
+    }
+    defer keyboard.Ungrab()
+
+    // 3) grab for exclusive access
     if err := keyboard.Grab(); err != nil {
         log.Printf("warning: failed to grab device: %v", err)
     }
-    defer keyboard.Release()
 
+    // 4) log what we opened
+    name, _ := keyboard.Name()
+    log.Printf("using input device: %s (%s)", devPath, name)
+
+    var lastKeyPress time.Time
     for {
-        events, err := keyboard.Read()
+        ev, err := keyboard.ReadOne()
         if err != nil {
             log.Printf("read error: %v", err)
             time.Sleep(100 * time.Millisecond)
             continue
         }
 
-        // Scan this batch for press or release
-        var sawPress, sawRelease bool
-        for _, e := range events {
-            if e.Type == evdev.EV_KEY && e.Code == evdev.KEY_POWER {
-                switch e.Value {
-                case 1:
-                    sawPress = true
-                case 0:
-                    sawRelease = true
+        now := time.Now()
+        if ev.Type == evdev.EV_KEY && ev.Code == evdev.KEY_POWER {
+            switch ev.Value {
+            case 1: // key press
+                log.Println("POWER pressed")
+                if idleState == STATE_ACTIVE {
+                    *changePageTriggered = true
+                }
+                lastActivityMu.Lock()
+                lastActivity = now
+                lastActivityMu.Unlock()
+                lastKeyPress = now
+
+            case 0: // key release
+                // only trigger if it wasn’t a quick tap (<500ms)
+                if now.Sub(lastKeyPress) > 500*time.Millisecond {
+                    log.Println("POWER released")
+                    if idleState == STATE_ACTIVE {
+                        *changePageTriggered = true
+                    }
+                    lastActivityMu.Lock()
+                    lastActivity = now
+                    lastActivityMu.Unlock()
                 }
             }
-        }
-
-        now := time.Now()
-        if sawPress {
-            // 1) immediate action on press
-            log.Println("POWER pressed")
-			if idleState == STATE_ACTIVE {
-				*changePageTriggered = true
-			}
-            lastActivityMu.Lock()
-            lastActivity = now
-            lastActivityMu.Unlock()
-			lastKeyPress = now
-
-        } else if sawRelease  && now.Sub(lastKeyPress) > 500 * time.Millisecond {
-            // 2) only act on release if no press in the same batch
-            log.Println("POWER released")
-			if idleState == STATE_ACTIVE {
-				*changePageTriggered = true
-			}
-            lastActivityMu.Lock()
-            lastActivity = now
-            lastActivityMu.Unlock()
         }
     }
 }
