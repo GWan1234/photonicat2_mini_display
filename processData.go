@@ -29,18 +29,25 @@ type NetworkSpeed struct {
 }
 
 func collectTopBarData() {
-	if soc, err := getBatterySoc(); err != nil {
+	var err error
+	if battSOC, err = getBatterySoc(); err != nil {
 		fmt.Printf("Could not get battery soc: %v\n", err)
 		globalData.Store("BatterySoc", -9999)
 	} else {
-		globalData.Store("BatterySoc", soc)
+		globalData.Store("BatterySoc", battSOC)
 	}
 
-	if charging, err := getBatteryCharging(); err != nil {
+	if battChargingStatus, err = getBatteryCharging(); err != nil {
 		fmt.Printf("Could not get battery charging: %v\n", err)
 		globalData.Store("BatteryCharging", false)
 	} else {
-		globalData.Store("BatteryCharging", charging)
+		globalData.Store("BatteryCharging", battChargingStatus)
+	}
+
+	//if charging status change, we trigger lastActivity
+	if battChargingStatus != lastChargingStatus {
+		lastActivity = time.Now()
+		lastChargingStatus = battChargingStatus
 	}
 }
 
@@ -184,7 +191,7 @@ func collectData(cfg Config) {
 
 	// SSID.
 	if ssid, err := getSSID(); err != nil {
-		fmt.Printf("Could not get SSID: %v\n", err)
+		//fmt.Printf("Could not get SSID: %v\n", err)
 		globalData.Store("SSID", "N/A")
 	} else {
 		globalData.Store("SSID", ssid)

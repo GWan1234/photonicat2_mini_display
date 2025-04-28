@@ -89,6 +89,13 @@ var (
     maxBacklight = 100
 
 	idleState = STATE_ACTIVE
+	lastChargingStatus = false
+	battChargingStatus = false
+	battSOC = 0
+
+	bateryDetectInterval = 250 * time.Millisecond
+	dataGatherInterval = 2 * time.Second
+	
 )
 
 // ImageBuffer holds a 1D slice of pixels for the display area.
@@ -400,21 +407,19 @@ func main() {
 		log.Fatalf("Failed to load config: %v", err)
 	}
 	
-	collectTopBarData() //essential data for top bar, blocking
-
 
 	//collect data for middle and footer, non-blocking
 	go func() {
 		for {
 			collectData(cfg)
-			time.Sleep(10 * time.Second)
+			time.Sleep(dataGatherInterval)
 		}
 	}()
 
 	go func() {
 		for {
 			collectTopBarData()
-			time.Sleep(2 * time.Second)
+			time.Sleep(bateryDetectInterval)
 		}
 	}()
 
@@ -486,6 +491,8 @@ func main() {
 	go idleDimmer()
 
 	stitchedFrame := image.NewRGBA(image.Rect(0, 0, middleFrameWidth * 2, middleFrameHeight))
+
+	//main loop
 	for {
 		if changePageTriggered {
 			
@@ -539,17 +546,22 @@ func main() {
 			}
 			sendMiddle(display, middleFramebuffers[middleFrames%2])
 			middleFrames++	
+
+			//timer ticker
+			time.Sleep(16 * time.Millisecond)
 		}
 
-		if autoRotatePages {
-			if middleFrames % 100 == 0 {
+		
+		if middleFrames % 100 == 0 {
+			if autoRotatePages {
 				changePageTriggered = true
-				now := time.Now()
-				fps = 100 / now.Sub(lastUpdate).Seconds()
-				log.Printf("FPS: %0.1f, Total Frames: %d\n", fps, middleFrames)
-				lastUpdate = now
 			}
+			now := time.Now()
+			fps = 100 / now.Sub(lastUpdate).Seconds()
+			log.Printf("FPS: %0.1f, Total Frames: %d\n", fps, middleFrames)
+			lastUpdate = now
 		}
+
 		//time.Sleep(16 * time.Millisecond)
 	}
 }
