@@ -548,7 +548,7 @@ func main() {
 			middleFrames++	
 
 			//timer ticker
-			time.Sleep(16 * time.Millisecond)
+			time.Sleep(20 * time.Millisecond)
 		}
 
 		

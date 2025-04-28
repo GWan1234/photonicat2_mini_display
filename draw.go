@@ -623,9 +623,9 @@ func drawTopBar(display gc9307.Device, frame *image.RGBA) {
 		timeStr = fmt.Sprintf("%02d:%02d", currDateTime.Hour(), currDateTime.Minute())
 	}
 
-	networkStr := "5"
+	networkStr := "5" //5G
 	signalStrength := 0.43
-	magicStr := timeStr + " " + strconv.Itoa(int(signalStrength*100)) + " " + networkStr
+	magicStr := timeStr + " " + strconv.Itoa(int(signalStrength*100)) + " " + networkStr + " " + strconv.Itoa(int(battSOC)) + " " + strconv.FormatBool(battChargingStatus)
 
 	if cacheTopBarStr == magicStr {
 		return //no need to refresh
@@ -637,8 +637,6 @@ func drawTopBar(display gc9307.Device, frame *image.RGBA) {
 	clearFrame(frame, topBarFrameWidth, topBarFrameHeight)
 	
 	faceClock, _, err := getFontFace("clock")
-	//faceClockBold, _, err := getFontFace("clockBold")
-	//faceUnit, _, err := getFontFace("unit")
 	faceTiny, _, err := getFontFace("tiny")
 	if err != nil {
 		fmt.Println("Error loading font:", err)
