@@ -44,11 +44,14 @@ const (
 	PCAT2_B_MARGIN   = 7
 	PCAT2_TOP_BAR_HEIGHT = 32
 	PCAT2_FOOTER_HEIGHT = 22
+	STATE_UNKNOWN = -1
 	STATE_IDLE = 0
 	STATE_ACTIVE = 1
 	STATE_FADE_IN = 2
 	STATE_FADE_OUT = 3
-	DEFAULT_FPS = 10
+	DEFAULT_FPS = 5
+	DEFAULT_IDLE_TIMEOUT = 10 * time.Second
+	ON_CHARGING_IDLE_TIMEOUT = 365 * 86400 * time.Second
 )
 
 var (
@@ -85,9 +88,9 @@ var (
     lastActivityMu sync.Mutex
 
     // configuration for idle fade
-    idleTimeout  = 10 * time.Second    // how long until we start fading
+    idleTimeout  = DEFAULT_IDLE_TIMEOUT  // how long until we start fading
     fadeDuration = 2 * time.Second    // how long the fade takes
-	fadeInDur 	 = 500 * time.Millisecond
+	fadeInDur 	 = 300 * time.Millisecond
     maxBacklight = 100
 
 	idleState = STATE_ACTIVE
@@ -99,6 +102,8 @@ var (
 	dataGatherInterval = 2 * time.Second
 
 	desiredFPS = 5
+
+	lastBrightness = -1
 	
 )
 
@@ -212,12 +217,18 @@ func clearFrame(frame *image.RGBA, width int, height int) {
 
 
 func setBacklight(backlight int) {
-	if backlight < 0 {
-		backlight = 0
+	if lastBrightness == backlight {
+		return
+	}
+	lastBrightness = backlight
+	if backlight <= 0 {
+		backlight = 1
 	}
 	if backlight > 100 {
 		backlight = 100
 	}
+	log.Println("Setting backlight to: ", backlight)
+	
 	os.WriteFile("/sys/class/backlight/backlight/brightness", []byte(strconv.Itoa(backlight)), 0644)
 }
 
@@ -300,46 +311,81 @@ func idleDimmer() {
     ticker := time.NewTicker(50 * time.Millisecond)
     defer ticker.Stop()
 
+	prevState := STATE_UNKNOWN
+	var brightness int
+	var newState int
+	lastStateScreenOn := false
+	
     for range ticker.C {
         lastActivityMu.Lock()
         idle := time.Since(lastActivity)
-		lastIfActive := true
+		
         lastActivityMu.Unlock()
 
-        var brightness int
+        
         switch {
-        case idle < fadeInDur:
+        case idle < fadeInDur && lastStateScreenOn == false:
             // 1) Fade in from 0→maxBacklight over fadeInDur
 			desiredFPS = DEFAULT_FPS
 			p := float64(idle) / float64(fadeInDur)      // goes 0→1
-			if lastIfActive {
+			if lastStateScreenOn {
 				brightness = 100 
 			}else{
 				brightness = int(p * float64(maxBacklight))
+				newState = STATE_FADE_IN
 			}
-			idleState = STATE_FADE_IN
+			
         case idle < idleTimeout:
             // 2) Fully on during the “active” window
             brightness = maxBacklight
-			idleState = STATE_ACTIVE
+			newState  = STATE_ACTIVE
+			lastStateScreenOn = true
         case idle < idleTimeout+fadeDuration:
             // 3) Fade out from maxBacklight→0 over fadeDuration
             p := float64(idle-idleTimeout) / float64(fadeDuration) // 0→1
             brightness = int((1 - p) * float64(maxBacklight))
-			idleState = STATE_FADE_OUT
+			newState  = STATE_FADE_OUT
+			lastStateScreenOn = true
         default:
             // 4) Fully off once past the fade‐out
             brightness = 0
-			idleState = STATE_IDLE
-			lastIfActive = false
+			newState  = STATE_IDLE
+			lastStateScreenOn = false
 			desiredFPS = 1
         }
         setBacklight(brightness)
+		// If the state changed, log it
+        if newState != prevState {
+            log.Printf("idleDimmer: state changed from %s to %s", stateName(prevState), stateName(newState))
+            prevState = newState
+        }
+        idleState = newState 
+    }
+}
+
+func stateName(s int) string {
+    switch s {
+    case STATE_FADE_IN:
+        return "FADE_IN"
+    case STATE_ACTIVE:
+        return "ACTIVE"
+    case STATE_FADE_OUT:
+        return "FADE_OUT"
+    case STATE_IDLE:
+        return "IDLE"
+    default:
+        return "UNKNOWN"
     }
 }
 
 
 func main() {
+	var (
+		changePageTriggered = false
+		nextPageIdxFrameBuffer *image.RGBA
+		currPageIdx = 0
+		showFPS = false
+	)
 	// Initialize board.
 	if _, err := host.Init(); err != nil {
 		log.Fatal(err)
@@ -436,6 +482,12 @@ func main() {
 	}()
 
 	go httpServer()
+
+	// Start keyboard monitoring in a goroutine
+    go monitorKeyboard(&changePageTriggered)
+
+	go idleDimmer()
+
 	// Define frame dimensions (display area excluding margins).
 	topBarFrameWidth := PCAT2_LCD_WIDTH
 	topBarFrameHeight := PCAT2_TOP_BAR_HEIGHT
@@ -464,8 +516,6 @@ func main() {
 	clearFrame(footerFramebuffers[1], footerFrameWidth, footerFrameHeight)
 	
 	
-
-
 	// Create an image.RGBA to draw our page.
 	pageImg := image.NewRGBA(image.Rect(0, 0, middleFrameWidth, middleFrameHeight))
 
@@ -484,17 +534,6 @@ func main() {
 		log.Fatalf("Failed to load font: %v", err)
 	}
 	// Main loop: you could update dynamic data and re-render pages as needed.
-	var (
-		changePageTriggered = false
-		nextPageIdxFrameBuffer *image.RGBA
-		currPageIdx = 0
-		showFPS = false
-	)
-
-	// Start keyboard monitoring in a goroutine
-    go monitorKeyboard(&changePageTriggered)
-
-	go idleDimmer()
 
 	stitchedFrame := image.NewRGBA(image.Rect(0, 0, middleFrameWidth * 2, middleFrameHeight))
 

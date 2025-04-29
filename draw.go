@@ -520,7 +520,6 @@ func drawSignalStrength(frame *image.RGBA, x0, y0 int, strength float64) {
 }
 
 func drawBattery(w, h int, soc float64, isCharging bool, x0, y0 int) *image.RGBA {
-	log.Println("isCharging: ", isCharging, "soc: ", soc)
 	terminalWidth := 3
 	face, _, err := getFontFace("clock")
 	if err != nil {

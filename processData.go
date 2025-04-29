@@ -46,8 +46,14 @@ func collectTopBarData() {
 
 	//if charging status change, we trigger lastActivity
 	if battChargingStatus != lastChargingStatus {
-		lastActivity = time.Now()
+		log.Println("Battery charging status changed to: ", battChargingStatus)
+		lastActivity = time.Now() //reset lastActivity for screen to stay on
 		lastChargingStatus = battChargingStatus
+		if battChargingStatus == true {
+			idleTimeout = ON_CHARGING_IDLE_TIMEOUT
+		} else {
+			idleTimeout = DEFAULT_IDLE_TIMEOUT
+		}
 	}
 }
 
@@ -244,9 +250,6 @@ func collectData(cfg Config) {
 	} else {
 		globalData.Store("PublicIPv6", ipv6)
 	}
-
-	log.Println("Collected global data:")
-	// You can range over globalData if needed.
 }
 
 // getDCVoltageUV reads DC voltage from the system.
@@ -507,7 +510,12 @@ func getBatteryCharging() (bool, error) {
 			return false, err
 		}
 
-		return strings.TrimSpace(string(content)) == "Charging" || strings.TrimSpace(string(content)) == "Full" , nil
+		battContent := strings.TrimSpace(string(content))
+
+		if battContent == "Charging" || battContent == "Full" {
+			return true, nil
+		}
+		return false, nil
 	}
 }
 
