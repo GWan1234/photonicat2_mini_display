@@ -1015,7 +1015,7 @@ func getDHCPClients() ([]string, error) {
 }
 
 // getWifiClients returns dummy WiFi client MAC addresses for OpenWRT.
-func getWifiClients() ([]string, error) {
-	clients := []string{"AA:BB:CC:DD:EE:FF", "11:22:33:44:55:66"}
+func getWifiClients() (string, error) {
+	clients := "TEST"
 	return clients, nil
 }
