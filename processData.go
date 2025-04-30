@@ -346,16 +346,16 @@ func getNetworkSpeed(iface string) (NetworkSpeed, error) {
 		return NetworkSpeed{}, err
 	}
 
-	// Sampling interval
-	time.Sleep(1 * time.Second)
+	// Sampling interval every 2 seconds
+	time.Sleep(1999 * time.Millisecond)
 
 	rx2, tx2, err := getInterfaceBytes(iface)
 	if err != nil {
 		return NetworkSpeed{}, err
 	}
 
-	downloadMbps := float64(rx2-rx1) / 1024 / 128
-	uploadMbps := float64(tx2-tx1) / 1024 / 128
+	downloadMbps := float64(rx2-rx1) / 1024 / 128 / 2
+	uploadMbps := float64(tx2-tx1) / 1024 / 128 / 2 
 
 	return NetworkSpeed{
 		UploadMbps:   uploadMbps,

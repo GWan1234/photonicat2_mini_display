@@ -3,7 +3,7 @@ package main
 import (
 	"image"
 	"image/color"
-	"image/draw"
+	//"image/draw"
 	"log"
 	"time"
 	"math/rand"
@@ -79,6 +79,9 @@ var (
 	
     lastActivity   = time.Now()
     lastActivityMu sync.Mutex
+
+	//flip page
+	numIntermediatePages = 16
 
     // configuration for idle fade
     idleTimeout  = DEFAULT_IDLE_TIMEOUT  // how long until we start fading
@@ -165,7 +168,15 @@ func main() {
 		nextPageIdxFrameBuffer *image.RGBA
 		currPageIdx = 0
 		showFPS = false
+		fps float64
+		lastUpdate = time.Now()
+		topFrames = 0
+		middleFrames = 0
+		stitchedFrames = 0
+		localConfigExists = false
+		cfg Config
 	)
+
 	// Initialize board.
 	if _, err := host.Init(); err != nil {
 		log.Fatal(err)
@@ -206,11 +217,7 @@ func main() {
 	imageCache = make(map[string]*image.RGBA)
 
 	// Setup display.
-	display := gc9307.New(conn,
-		gpioreg.ByName(RST_PIN),
-		gpioreg.ByName(DC_PIN),
-		gpioreg.ByName(CS_PIN), // placeholder for CS if unused
-		gpioreg.ByName(BL_PIN))
+	display := gc9307.New(conn, gpioreg.ByName(RST_PIN), gpioreg.ByName(DC_PIN), gpioreg.ByName(CS_PIN), gpioreg.ByName(BL_PIN))
 	display.Configure(gc9307.Config{
 		Width:        PCAT2_LCD_WIDTH,
 		Height:       PCAT2_LCD_HEIGHT,
@@ -222,13 +229,11 @@ func main() {
 		UseCS:        false,
 	})
 
-	// Load our configuration file (adjust the path as needed).
-	// if local no config.json, use check /etc/pcat2_mini_display-config.json
-	var localConfigExists = false
+	//load json config
 	if _, err := os.Stat("config.json"); err == nil {
 		localConfigExists = true
 	}
-	var cfg Config
+	
 	if localConfigExists {
 		cfg, err = loadConfig("config.json")
 	}else{
@@ -237,8 +242,9 @@ func main() {
 
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
+	}else{
+		log.Println("CFG: READ SUCCESS")
 	}
-	
 
 	//collect data for middle and footer, non-blocking
 	go func() {
@@ -261,14 +267,11 @@ func main() {
 		}
 	}()
 
-	go httpServer()
+	go httpServer() //listen local for http request
+    go monitorKeyboard(&changePageTriggered) // Start keyboard monitoring in a goroutine
+	go idleDimmer() //control backlight
 
-	// Start keyboard monitoring in a goroutine
-    go monitorKeyboard(&changePageTriggered)
-
-	go idleDimmer()
-
-	// Define frame dimensions (display area excluding margins).
+	// init 3 framebuffers, top, middle, footer
 	topBarFrameWidth := PCAT2_LCD_WIDTH
 	topBarFrameHeight := PCAT2_TOP_BAR_HEIGHT
 	
@@ -296,19 +299,6 @@ func main() {
 	clearFrame(footerFramebuffers[1], footerFrameWidth, footerFrameHeight)
 	
 	
-	// Create an image.RGBA to draw our page.
-	pageImg := image.NewRGBA(image.Rect(0, 0, middleFrameWidth, middleFrameHeight))
-
-	draw.Draw(pageImg, pageImg.Bounds(), &image.Uniform{color.Black}, image.Point{}, draw.Src)
-
-	log.Println("CFG: READ SUCCESS")
-
-	var fps float64
-	lastUpdate := time.Now()
-	topFrames := 0
-	middleFrames := 0
-	stitchedFrames := 0
-
 	faceTiny, _, err := getFontFace("tiny")
 	if err != nil {
 		log.Fatalf("Failed to load font: %v", err)
@@ -325,7 +315,6 @@ func main() {
 			nextPageIdx := (currPageIdx + 1) % cfg.NumPages
 			log.Println("Change Page!: Current Page:", currPageIdx, "Next Page:", nextPageIdx)
 			
-			
 			nextPageIdxFrameBuffer = image.NewRGBA(image.Rect(0, 0, middleFrameWidth, middleFrameHeight))
 			clearFrame(nextPageIdxFrameBuffer, middleFrameWidth, middleFrameHeight)
 			renderMiddle(nextPageIdxFrameBuffer, &cfg, nextPageIdx)
@@ -333,8 +322,7 @@ func main() {
 			clearFrame(middleFramebuffers[(middleFrames+1)%2], middleFrameWidth, middleFrameHeight)
 			renderMiddle(middleFramebuffers[(middleFrames+1)%2], &cfg, currPageIdx)
 			copyImageToImageAt(stitchedFrame, middleFramebuffers[(middleFrames+1)%2], 0, 0)
-			copyImageToImageAt(stitchedFrame, nextPageIdxFrameBuffer, middleFrameWidth, 0)
-			numIntermediatePages := 15
+			copyImageToImageAt(stitchedFrame, nextPageIdxFrameBuffer, middleFrameWidth, 0)			
 
 			for i := 0; i < numIntermediatePages; i++ {
 				if i <= numIntermediatePages / 2 {
@@ -343,9 +331,22 @@ func main() {
 
 				drawFooter(display, footerFramebuffers[middleFrames%2], currPageIdx, cfg.NumPages)
 				
-				t := float64(i) / float64(numIntermediatePages)      // t goes from 0 to 1
-				easeT := 0.5 * (1 - math.Cos(math.Pi * t))            // easeInOut: starts slow, speeds up, then slows down
-				xPos := int(easeT * float64(middleFrameWidth))
+				//page transition
+				t := float64(i) / float64(numIntermediatePages)      // 0 -> 1
+				/*
+				et0 := 0.5 * (1 - math.Cos(math.Pi * t))            // cosine
+				et1 := t*(2 - t) // easeOutQuad
+				et2 := 0.0 //quintic 
+				if t < 0.5 {
+					et2 = 16*math.Pow(t, 5)
+				} else {
+					et2 = 1 + 16*math.Pow(t-1, 5)
+				}
+				*/
+				et3 := 1 - math.Pow(1-t, 4) //use quartic
+
+				//log.Println("EaseT, t0, t1, t2, t3:",  et0, et1, et2, et3)
+				xPos  := int(et3 * float64(middleFrameWidth))
 
 				croppedFrame := cropImageAt(stitchedFrame, xPos, 0, middleFrameWidth, middleFrameHeight)
 				if showFPS {	
@@ -378,7 +379,6 @@ func main() {
 				time.Sleep(time.Duration(float64(delta) * 0.99))
 			}
 		}
-
 		
 		if middleFrames % 100 == 0 {
 			if autoRotatePages {
