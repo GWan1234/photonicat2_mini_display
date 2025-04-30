@@ -44,7 +44,7 @@ const (
 	DEFAULT_IDLE_TIMEOUT = 60 * time.Second
 	ON_CHARGING_IDLE_TIMEOUT = 365 * 86400 * time.Second
 	KEYBOARD_DEBOUNCE_TIME = 500 * time.Millisecond
-	ZERO_BACKLIGHT_DELAY = 10 * time.Second
+	ZERO_BACKLIGHT_DELAY = 5 * time.Second
 )
 
 var (

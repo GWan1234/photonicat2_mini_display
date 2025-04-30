@@ -9,6 +9,7 @@ import (
 	"log"
 	"strconv"
 	"fmt"
+	"strings"
 
 	evdev "github.com/holoplot/go-evdev"
 
@@ -203,11 +204,21 @@ func idleDimmer() {
 	lastStateScreenOn := false
 	
     for range ticker.C {
+        data, err := ioutil.ReadFile("/sys/kernel/photonicat-pm/movement_trigger")
+        if err == nil && strings.TrimSpace(string(data)) == "1" {
+            now := time.Now()
+            lastActivityMu.Lock()
+            if time.Since(lastActivity) > 5 * time.Second {
+                lastActivity = now
+            }
+            lastActivityMu.Unlock()
+            lastStateScreenOn = false
+            
+        }
+
         lastActivityMu.Lock()
         idle := time.Since(lastActivity)
-		
         lastActivityMu.Unlock()
-
         
         switch {
         case idle < fadeInDur && lastStateScreenOn == false:
