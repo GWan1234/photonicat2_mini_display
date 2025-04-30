@@ -33,8 +33,8 @@
                     "position": {"x": 10, "y": 76},
                     "font": "huge",
                     "color": [255, 229, 0],
-                    "units": "MB",
-                    "data_key": "session_data_usage",
+                    "units": "GB(S)",
+                    "data_key": "SessionDataUsage",
                     "units_font": "unit",
                     "enable": 1
                 },
@@ -44,8 +44,8 @@
                     "position": {"x": 10, "y": 110},
                     "font": "huge",
                     "color": [255, 229, 0],
-                    "units": "GB",
-                    "data_key": "monthly_data_usage",
+                    "units": "GB(M)",
+                    "data_key": "MonthlyDataUsage",
                     "units_font": "unit",
                     "enable": 1
                 },

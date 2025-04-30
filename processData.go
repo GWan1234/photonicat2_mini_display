@@ -18,6 +18,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"path/filepath"
 
 	"github.com/go-ping/ping"
 )
@@ -86,14 +87,17 @@ func getWANInterface() (string, error) {
 }
 
 func collectWANNetworkSpeed() {
-	wanInterface, err := getWANInterface()
+	var err error
+	wanInterface, err = getWANInterface()
 	if err != nil {
-		globalData.Store("WanUP", "N/A")
-		globalData.Store("WanDOWN", "N/A")
+		fmt.Printf("Could not get WAN interface: %v\n", err)
+		globalData.Store("WanUP", "0")
+		globalData.Store("WanDOWN", "0")
 		return
 	}
 	netData, err := getNetworkSpeed(wanInterface)
 	if err != nil {
+		fmt.Printf("Could not get network speed: %v\n", err)
 		globalData.Store("WanUP", "0")
 		globalData.Store("WanDOWN", "0")
 		return
@@ -169,6 +173,22 @@ func collectData(cfg Config) {
 		memTotal_ceilInt := int(math.Ceil(memTotal))
 		memString := fmt.Sprintf("%s/%d", memUsed_1digit, memTotal_ceilInt)
 		globalData.Store("MemUsage", memString)
+	}
+
+	if sessionDataUsage, err := getSessionDataUsageGB(wanInterface); err != nil {
+		fmt.Printf("Could not get session data usage: %v\n", err)
+		globalData.Store("SessionDataUsage", nil)
+	} else {
+		sessionDataUsage_1digit := fmt.Sprintf("%0.1f", sessionDataUsage)
+		globalData.Store("SessionDataUsage", sessionDataUsage_1digit)
+	}
+
+	if monthlyDataUsage, err := getDataUsageMonthlyGB(wanInterface); err != nil {
+		fmt.Printf("Could not get monthly data usage: %v\n", err)
+		globalData.Store("MonthlyDataUsage", nil)
+	} else {
+		monthlyDataUsage_1digit := fmt.Sprintf("%0.1f", monthlyDataUsage)
+		globalData.Store("MonthlyDataUsage", monthlyDataUsage_1digit)
 	}
 
 	// Disk usage.
@@ -361,6 +381,96 @@ func getNetworkSpeed(iface string) (NetworkSpeed, error) {
 		UploadMbps:   uploadMbps,
 		DownloadMbps: downloadMbps,
 	}, nil
+}
+
+func getSessionDataUsageGB(iface string) (float64, error) {
+    stats := []string{"rx_bytes", "tx_bytes"}
+    var totalBytes uint64
+
+    for _, stat := range stats {
+        // build path: /sys/class/net/<iface>/statistics/<stat>
+        path := filepath.Join("/sys/class/net", iface, "statistics", stat)
+
+        // read the file
+        data, err := os.ReadFile(path)
+        if err != nil {
+            return 0, fmt.Errorf("failed to read %s: %w", path, err)
+        }
+
+        // parse it as uint64
+        s := strings.TrimSpace(string(data))
+        val, err := strconv.ParseUint(s, 10, 64)
+        if err != nil {
+            return 0, fmt.Errorf("failed to parse %s: %w", path, err)
+        }
+
+        totalBytes += val
+    }
+
+    // convert bytes → MiB
+    return float64(totalBytes) / 1024.0 / 1024.0 / 1024.0, nil
+}
+
+type vnstatJSON struct {
+    Interfaces []struct {
+        Name    string `json:"name"`
+        Traffic struct {
+            // 对应 JSON 中 "traffic":"month":[…]
+            Month []struct {
+                Date struct {
+                    Year  int `json:"year"`
+                    Month int `json:"month"`
+                } `json:"date"`
+                Rx uint64 `json:"rx"`
+                Tx uint64 `json:"tx"`
+            } `json:"month"`
+        } `json:"traffic"`
+    } `json:"interfaces"`
+}
+
+// getDataUsageMonthlyGB returns the total (rx+tx) traffic for the current calendar
+// month on the given interface, as reported by vnStat, in GiB.
+func getDataUsageMonthlyGB(iface string) (float64, error) {
+    // 1. 调用 vnstat 获取 JSON
+    out, err := exec.Command("vnstat", "-i", iface, "--json").Output()
+    if err != nil {
+        return 0, fmt.Errorf("failed to run vnstat: %w", err)
+    }
+
+    // 2. 解析 JSON
+    var data vnstatJSON
+    if err := json.Unmarshal(out, &data); err != nil {
+        return 0, fmt.Errorf("failed to parse vnstat JSON: %w", err)
+    }
+
+    // 3. 找到对应接口
+    var ifaceData *vnstatJSON
+    var entryIdx int
+    for i, entry := range data.Interfaces {
+        if entry.Name == iface {
+            ifaceData = &data
+            entryIdx = i
+            break
+        }
+    }
+    if ifaceData == nil {
+        return 0, fmt.Errorf("interface %q not found in vnstat output", iface)
+    }
+
+    // 4. 确定当前年/月
+    now := time.Now()
+    cy, cm := now.Year(), int(now.Month())
+    cmStr := fmt.Sprintf("%02d", cm)
+
+    // 5. 在 traffic.month 数组里找当月条目
+    for _, m := range data.Interfaces[entryIdx].Traffic.Month {
+        if m.Date.Year == cy && m.Date.Month == cm {
+            usedBytes := m.Rx + m.Tx
+            return float64(usedBytes) / (1 << 30), nil // GiB
+        }
+    }
+
+    return 0, fmt.Errorf("no data for %04d-%s in vnstat output", cy, cmStr)
 }
 
 // CPUStats represents a CPU usage snapshot.

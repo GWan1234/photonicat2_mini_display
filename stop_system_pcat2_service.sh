@@ -1,0 +1,1 @@
+sudo systemctl stop pcat2_mini_display

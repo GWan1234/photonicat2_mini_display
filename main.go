@@ -35,6 +35,7 @@ const (
 	PCAT2_B_MARGIN   = 7
 	PCAT2_TOP_BAR_HEIGHT = 32
 	PCAT2_FOOTER_HEIGHT = 22
+
 	STATE_UNKNOWN = -1
 	STATE_IDLE = 0
 	STATE_ACTIVE = 1
@@ -45,6 +46,7 @@ const (
 	ON_CHARGING_IDLE_TIMEOUT = 365 * 86400 * time.Second
 	KEYBOARD_DEBOUNCE_TIME = 500 * time.Millisecond
 	ZERO_BACKLIGHT_DELAY = 5 * time.Second
+	
 )
 
 var (
@@ -54,7 +56,10 @@ var (
 	PCAT_GREY       = color.RGBA{98, 116, 130, 255}
 	PCAT_GREEN      = color.RGBA{70, 235, 145, 255}
 	PCAT_BLACK      = color.RGBA{0, 0, 0, 255}
+	
 	svgCache 		= make(map[string]*image.RGBA)
+
+	wanInterface = "null"
 
     frameMutex   sync.RWMutex
     currFrame 	*image.RGBA
