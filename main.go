@@ -50,8 +50,10 @@ const (
 	STATE_FADE_IN = 2
 	STATE_FADE_OUT = 3
 	DEFAULT_FPS = 5
-	DEFAULT_IDLE_TIMEOUT = 10 * time.Second
+	DEFAULT_IDLE_TIMEOUT = 60 * time.Second
 	ON_CHARGING_IDLE_TIMEOUT = 365 * 86400 * time.Second
+	KEYBOARD_DEBOUNCE_TIME = 500 * time.Millisecond
+	ZERO_BACKLIGHT_DELAY = 10 * time.Second
 )
 
 var (
@@ -98,12 +100,16 @@ var (
 	battChargingStatus = false
 	battSOC = 0
 
-	bateryDetectInterval = 250 * time.Millisecond
+	bateryDetectInterval = 200 * time.Millisecond
 	dataGatherInterval = 2 * time.Second
 
 	desiredFPS = 5
 
 	lastBrightness = -1
+
+	mu          sync.Mutex
+    lastLogical int         // last requested brightness (0–100)
+    offTimer    *time.Timer // timer that will write 0 after delay
 	
 )
 
@@ -114,8 +120,6 @@ type ImageBuffer struct {
 	height int
 	loaded bool
 }
-
-//---------------- Config and Display Element Structs ----------------
 
 // Position defines X and Y coordinates.
 type Position struct {
@@ -215,21 +219,57 @@ func clearFrame(frame *image.RGBA, width int, height int) {
 	}
 }
 
+func setBacklight(brightness int) {
+    mu.Lock()
+    defer mu.Unlock()
 
-func setBacklight(backlight int) {
-	if lastBrightness == backlight {
-		return
-	}
-	lastBrightness = backlight
-	if backlight <= 0 {
-		backlight = 1
-	}
-	if backlight > 100 {
-		backlight = 100
-	}
-	log.Println("Setting backlight to: ", backlight)
-	
-	os.WriteFile("/sys/class/backlight/backlight/brightness", []byte(strconv.Itoa(backlight)), 0644)
+    // clamp into 0..100
+    switch {
+		case brightness < 0:
+			brightness = 0
+		case brightness > 100:
+			brightness = 100
+    }
+
+    if brightness == lastLogical {
+        return
+    }
+    lastLogical = brightness
+
+    // cancel any pending off-timer if we're going to >0
+    if brightness > 0 && offTimer != nil {
+        offTimer.Stop()
+        offTimer = nil
+    }
+
+    // choose what to write right now:
+    phys := brightness
+    if brightness == 0 {
+        phys = 1
+    }
+
+    // perform the write
+    if err := os.WriteFile("/sys/class/backlight/backlight/brightness", []byte(strconv.Itoa(phys)), 0644); err != nil {
+        log.Printf("backlight write error: %v", err)
+    } else {
+        log.Printf("→ physical backlight %d", phys)
+    }
+
+    // if we just handled a logical “0”, schedule the real off in ZERO_BACKLIGHT_DELAY s
+    if brightness == 0 {
+        offTimer = time.AfterFunc(ZERO_BACKLIGHT_DELAY, func() {
+            mu.Lock()
+            defer mu.Unlock()
+            if lastLogical == 0 {
+                // still supposed to be off, so write 0 now
+                if err := os.WriteFile("/sys/class/backlight/backlight/brightness", []byte("0"), 0644); err != nil {
+                    log.Printf("backlight final-off error: %v", err)
+                } else {
+                    log.Println("→ physical backlight 0")
+                }
+            }
+        })
+    }
 }
 
 func monitorKeyboard(changePageTriggered *bool) {
@@ -293,7 +333,7 @@ func monitorKeyboard(changePageTriggered *bool) {
 
             case 0: // key release
                 // only trigger if it wasn’t a quick tap (<500ms)
-                if now.Sub(lastKeyPress) > 500*time.Millisecond {
+                if now.Sub(lastKeyPress) > KEYBOARD_DEBOUNCE_TIME {
                     log.Println("POWER released")
                     if idleState == STATE_ACTIVE {
                         *changePageTriggered = true
@@ -334,7 +374,6 @@ func idleDimmer() {
 				brightness = int(p * float64(maxBacklight))
 				newState = STATE_FADE_IN
 			}
-			
         case idle < idleTimeout:
             // 2) Fully on during the “active” window
             brightness = maxBacklight
@@ -342,8 +381,8 @@ func idleDimmer() {
 			lastStateScreenOn = true
         case idle < idleTimeout+fadeDuration:
             // 3) Fade out from maxBacklight→0 over fadeDuration
-            p := float64(idle-idleTimeout) / float64(fadeDuration) // 0→1
-            brightness = int((1 - p) * float64(maxBacklight))
+            p := float64(idle-idleTimeout) / float64(fadeDuration) 
+            brightness = int((1 - p) * float64(maxBacklight)) // 1→0
 			newState  = STATE_FADE_OUT
 			lastStateScreenOn = true
         default:
