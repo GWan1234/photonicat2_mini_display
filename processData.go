@@ -58,7 +58,6 @@ func collectTopBarData() {
 	}
 }
 
-
 // formatSpeed formats speed into value and units as Mbps
 func formatSpeed(mbps float64) (string, string) {
 	if mbps >= 1.0 {
@@ -109,6 +108,13 @@ func collectWANNetworkSpeed() {
 	globalData.Store("WanDOWN", wanDOWNVal)
 	globalData.Store("WanUP_Unit", wanUPUnit)
 	globalData.Store("WanDOWN_Unit", wanDOWNUnit)
+}
+
+func collectFixedData(){
+	kernelDate, _ := getKernelDate()
+	globalData.Store("Kernel", kernelDate)
+	sn, _ := getSN()
+	globalData.Store("SN", sn)
 }
 
 // collectData gathers several pieces of system and network information and stores them in globalData.
@@ -210,8 +216,6 @@ func collectNetworkData(cfg Config) {
 		globalData.Store("MonthlyDataUsage", monthlyDataUsage_1digit)
 	}
 
-
-
 	// Local IP address.
 	if localIP, err := getLocalIPv4(); err != nil {
 		fmt.Printf("Could not get local IP: %v\n", err)
@@ -285,13 +289,82 @@ func collectNetworkData(cfg Config) {
 	}
 }
 
+func getSN() (string, error) {
+    // Read first 500 bytes
+    out, err := exec.Command("head", "-c", "10000", "/dev/mmcblk0boot1").Output()
+    if err != nil {
+        return "", fmt.Errorf("read partition: %w", err)
+    }
+
+    // Truncate at first 0 byte
+    if idx := bytes.IndexByte(out, 0); idx != -1 {
+        out = out[:idx]
+    }
+
+    // Parse JSON
+    var payload map[string]interface{}
+    if err := json.Unmarshal(out, &payload); err != nil {
+        return "", fmt.Errorf("unmarshal JSON: %w", err)
+    }
+
+    // Extract "sn"
+    snVal, ok := payload["sn"]
+    if !ok {
+        return "", fmt.Errorf(`key "sn" not found`)
+    }
+    sn, ok := snVal.(string)
+    if !ok {
+        return "", fmt.Errorf(`"sn" is not a string`)
+    }
+
+    return sn, nil
+}
+
 func getUptime() (string, error) {
 	cmd := exec.Command("uptime", "-p")
 	out, err := cmd.Output()
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(string(out)), nil
+	raw := strings.TrimSpace(string(out))
+	uptime := strings.Replace(raw, "up ", "", 1)
+	uptime = strings.Replace(uptime, "minutes", "m", 1)
+	uptime = strings.Replace(uptime, "hours,", "h ", 1)
+	uptime = strings.Replace(uptime, "hour,", "h ", 1)
+	uptime = strings.Replace(uptime, "days,", "d ", 1)
+	uptime = strings.Replace(uptime, "day,", "d ", 1)
+	uptime = strings.Replace(uptime, "years,", "y ", 1)
+	uptime = strings.Replace(uptime, "year,", "y ", 1)
+	uptime = strings.Replace(uptime, "and", "", 1)
+	return uptime, nil
+}
+
+func getKernelDate() (string, error) {
+	// get kernel version (release)
+	/*verOut, err := exec.Command("uname", "-r").Output()
+	version := "unknown-version"
+	if err == nil {
+		version = strings.TrimSpace(string(verOut))
+	}*/
+
+	// get raw build info
+	buildOut, err := exec.Command("uname", "-v").Output()
+	date := "unknown-date"
+	if err == nil {
+		raw := strings.TrimSpace(string(buildOut))
+		parts := strings.Split(raw, " ")
+		// expect something like:
+		// ["#1","SMP","Fri","Apr","25","12:34:56","UTC","2025"]
+		if len(parts) >= 8 {
+			// month = parts[3], day = parts[4], year = parts[7]
+			date = fmt.Sprintf("%s-%s-%s", parts[8], parts[4], parts[5])
+			log.Println(date)
+		} else {
+			date = raw
+		}
+	}
+
+	return fmt.Sprintf("%s", date), nil
 }
 
 // getDCVoltageUV reads DC voltage from the system.

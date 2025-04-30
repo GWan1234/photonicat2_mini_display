@@ -263,9 +263,56 @@
                 {
                     "type": "fixed_text",
                     "label": "uptime",
-                    "position": {"x": 10, "y": 130},
+                    "position": {"x": 10, "y": 120},
                     "font": "unit",
                     "color": [255, 229, 0],
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "lan",
+                    "position": {"x": 10, "y": 137},
+                    "font": "thin",
+                    "color": [255, 229, 255],
+                    "data_key": "Uptime",
+                    "units_font": "unit",
+                    "units": "",
+                    "enable": 1
+                },
+                {
+                    "type": "fixed_text",
+                    "label": "Kernel",
+                    "position": {"x": 10, "y": 160},
+                    "font": "unit",
+                    "color": [255, 229, 0],
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "Kernel",
+                    "position": {"x": 10, "y": 178},
+                    "font": "thin",
+                    "color": [255, 229, 255],
+                    "data_key": "Kernel",
+                    "units_font": "unit",
+                    "enable": 1
+                },
+                {
+                    "type": "fixed_text",
+                    "label": "SN",
+                    "position": {"x": 10, "y": 202},
+                    "font": "unit",
+                    "color": [255, 229, 0],
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "SN",
+                    "position": {"x": 10, "y": 220},
+                    "font": "thin",
+                    "color": [255, 229, 255],
+                    "data_key": "SN",
+                    "units_font": "unit",
                     "enable": 1
                 }
             ],

@@ -278,7 +278,8 @@ func main() {
 			collectWANNetworkSpeed()
 		}
 	}()
-
+	
+	go collectFixedData() 
 	go httpServer() //listen local for http request
     go monitorKeyboard(&changePageTriggered) // Start keyboard monitoring in a goroutine
 	go idleDimmer() //control backlight
