@@ -62,10 +62,10 @@ func collectTopBarData() {
 func formatSpeed(mbps float64) (string, string) {
 	if mbps >= 1.0 {
 		// For speeds ≥1 Mbps, use 3 significant digits
-		return fmt.Sprintf("%.3g", mbps), "Mb/s"
+		return fmt.Sprintf("%.3g", mbps), "Mbps"
 	}
 	// For speeds <1 Mbps, keep up to 3 digits after decimal point
-	return fmt.Sprintf("%.2f", mbps), "Mb/s"
+	return fmt.Sprintf("%.2f", mbps), "Mbps"
 }
 
 func getWANInterface() (string, error) {

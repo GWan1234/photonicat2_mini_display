@@ -1,14 +1,14 @@
 {
     "num_pages": 4,
     "site0": "taobao.com",
-    "site1": "4.photonicat.com",
+    "site1": "photonicat.com",
     "display_template": {
         "elements": {
             "page0": [ 
                 {
                     "type": "text",
                     "label": "WAN Speed Up",
-                    "position": {"x": 10, "y": 6},
+                    "position": {"x": 10, "y": 3},
                     "font": "huge",
                     "color": [255, 229, 0],
                     "units": "Mbps",
@@ -19,7 +19,7 @@
                 {
                     "type": "text",
                     "label": "WAN Speed Down",
-                    "position": {"x": 10, "y": 40},
+                    "position": {"x": 10, "y": 38},
                     "font": "huge",
                     "color": [255, 229, 0],
                     "units": "Mbps",
@@ -28,23 +28,45 @@
                     "enable": 1
                 },
                 {
-                    "type": "text",
-                    "label": "Ping",
-                    "position": {"x": 10, "y": 76},
-                    "font": "huge",
+                    "type": "icon",
+                    "icon_path": "assets/svg/hline.svg",
+                    "position": {"x": 10, "y": 84},
+                    "enable": 1
+                },
+                {
+                    "type": "fixed_text",
+                    "label": "Session Data",
+                    "position": {"x": 10, "y": 89},
+                    "font": "tiny",
                     "color": [255, 229, 0],
-                    "units": "GB(S)",
-                    "data_key": "SessionDataUsage",
-                    "units_font": "unit",
                     "enable": 1
                 },
                 {
                     "type": "text",
                     "label": "Ping",
-                    "position": {"x": 10, "y": 110},
+                    "position": {"x": 10, "y": 101},
                     "font": "huge",
                     "color": [255, 229, 0],
-                    "units": "GB(M)",
+                    "units": "GB",
+                    "data_key": "SessionDataUsage",
+                    "units_font": "unit",
+                    "enable": 1
+                },
+                {
+                    "type": "fixed_text",
+                    "label": "Monthly Data",
+                    "position": {"x": 10, "y": 141},
+                    "font": "tiny",
+                    "color": [255, 229, 0],
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "Ping",
+                    "position": {"x": 10, "y": 152},
+                    "font": "huge",
+                    "color": [255, 229, 0],
+                    "units": "GB",
                     "data_key": "MonthlyDataUsage",
                     "units_font": "unit",
                     "enable": 1
@@ -52,46 +74,22 @@
                 {
                     "type": "icon",
                     "icon_path": "assets/svg/hline.svg",
-                    "position": {"x": 10, "y": 151},
-                    "enable": 1
-                },
-                {
-                    "type": "icon",
-                    "icon_path": "assets/svg/temp.svg",
-                    "position": {"x": 10, "y": 158},
-                    "size": {"width": 14, "height": 22},
-                    "enable": 1
-                },
-                {
-                    "type": "text",
-                    "label": "Temperature",
-                    "position": {"x": 35, "y": 154},
-                    "font": "big",
-                    "color": [255, 229, 0],
-                    "units": "°C",
-                    "data_key": "CpuTemp",
-                    "units_font": "unit",
-                    "enable": 1
-                },
-                {
-                    "type": "icon",
-                    "icon_path": "assets/svg/hline.svg",
-                    "position": {"x": 10, "y": 187},
+                    "position": {"x": 10, "y": 198},
                     "enable": 1
                 },
                 {
                     "type": "icon",
                     "icon_path": "assets/svg/batt.svg",
-                    "position": {"x": 10, "y": 197},
+                    "position": {"x": 10, "y": 210},
                     "enable": 1
                 },
                 {
                     "type": "text",
                     "label": "Batt",
-                    "position": {"x": 100, "y": 191},
+                    "position": {"x": 100, "y": 204},
                     "font": "reg",
                     "color": [255, 229, 0],
-                    "units": "W",
+                    "units": "w",
                     "data_key": "BatteryWattage",
                     "units_font": "unit",
                     "enable": 1
@@ -99,7 +97,7 @@
                 {
                     "type": "text",
                     "label": "Batt_v",
-                    "position": {"x": 35, "y": 191},
+                    "position": {"x": 35, "y": 204},
                     "font": "reg",
                     "color": [255, 229, 0],
                     "units": "v",
@@ -110,13 +108,13 @@
                 {
                     "type": "icon",
                     "icon_path": "assets/svg/charge.svg",
-                    "position": {"x": 10, "y": 215},
+                    "position": {"x": 10, "y": 228},
                     "enable": 1
                 },
                 {
                     "type": "text",
                     "label": "dc",
-                    "position": {"x": 35, "y": 215},
+                    "position": {"x": 35, "y": 228},
                     "font": "reg",
                     "color": [255, 229, 0],
                     "units": "v",
@@ -129,7 +127,7 @@
                 {
                     "type": "fixed_text",
                     "label": "ping: taobao.com",
-                    "position": {"x": 10, "y": 5},
+                    "position": {"x": 10, "y": 4},
                     "font": "tiny",
                     "color": [255, 229, 0],
                     "enable": 1
@@ -137,7 +135,7 @@
                 {
                     "type": "text",
                     "label": "Ping0",
-                    "position": {"x": 10, "y": 20},
+                    "position": {"x": 10, "y": 18},
                     "font": "huge",
                     "color": [255, 229, 0],
                     "units": "ms",
@@ -147,8 +145,8 @@
                 },
                 {
                     "type": "fixed_text",
-                    "label": "ping: 4.photonicat.com",
-                    "position": {"x": 10, "y": 70},
+                    "label": "ping: photonicat.com",
+                    "position": {"x": 10, "y": 62},
                     "font": "tiny",
                     "color": [255, 229, 0],
                     "enable": 1
@@ -156,7 +154,7 @@
                 {
                     "type": "text",
                     "label": "Ping1",
-                    "position": {"x": 10, "y": 85},
+                    "position": {"x": 10, "y": 76},
                     "font": "huge",
                     "color": [255, 229, 0],
                     "units": "ms",
@@ -175,7 +173,7 @@
                 {
                     "type": "text",
                     "label": "lan",
-                    "position": {"x": 10, "y": 155},
+                    "position": {"x": 10, "y": 153},
                     "font": "thin",
                     "color": [255, 229, 255],
                     "data_key": "LAN_IP",
@@ -194,7 +192,7 @@
                 {
                     "type": "text",
                     "label": "wan",
-                    "position": {"x": 10, "y": 195},
+                    "position": {"x": 10, "y": 193},
                     "font": "thin",
                     "color": [255, 229, 255],
                     "data_key": "WAN_IP",
@@ -205,7 +203,7 @@
                 {
                     "type": "fixed_text",
                     "label": "SSID",
-                    "position": {"x": 10, "y": 215},
+                    "position": {"x": 10, "y": 217},
                     "font": "unit",
                     "color": [255, 229, 0],
                     "enable": 1
@@ -264,59 +262,10 @@
                 },
                 {
                     "type": "fixed_text",
-                    "label": "LAN IP",
+                    "label": "uptime",
                     "position": {"x": 10, "y": 135},
                     "font": "unit",
                     "color": [255, 229, 0],
-                    "enable": 1
-                },
-                {
-                    "type": "text",
-                    "label": "lan",
-                    "position": {"x": 10, "y": 155},
-                    "font": "thin",
-                    "color": [255, 229, 255],
-                    "data_key": "LAN_IP",
-                    "units_font": "unit",
-                    "units": "",
-                    "enable": 1
-                },
-                {
-                    "type": "fixed_text",
-                    "label": "WAN IP",
-                    "position": {"x": 10, "y": 175},
-                    "font": "unit",
-                    "color": [255, 229, 0],
-                    "enable": 1
-                },
-                {
-                    "type": "text",
-                    "label": "wan",
-                    "position": {"x": 10, "y": 195},
-                    "font": "thin",
-                    "color": [255, 229, 255],
-                    "data_key": "WAN_IP",
-                    "units_font": "unit",
-                    "units": "",
-                    "enable": 1
-                },
-                {
-                    "type": "fixed_text",
-                    "label": "SSID",
-                    "position": {"x": 10, "y": 215},
-                    "font": "unit",
-                    "color": [255, 229, 0],
-                    "enable": 1
-                },
-                {
-                    "type": "text",
-                    "label": "ssid",
-                    "position": {"x": 10, "y": 235},
-                    "font": "thin",
-                    "color": [255, 229, 255],
-                    "data_key": "SSID",
-                    "units_font": "unit",
-                    "units": "",
                     "enable": 1
                 }
             ],

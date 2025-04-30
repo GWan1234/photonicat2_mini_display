@@ -109,7 +109,7 @@ func setBacklight(brightness int) {
             defer mu.Unlock()
             if lastLogical == 0 {
                 // still supposed to be off, so write 0 now
-                if err := os.WriteFile("/sys/class/backlight/backlight/brightness", []byte("0"), 0644); err != nil {
+                if err := os.WriteFile("/sys/class/backlight/backlight/brightness", []byte("1"), 0644); err != nil {
                     log.Printf("backlight final-off error: %v", err)
                 } else {
                     log.Println("→ physical backlight 0")
