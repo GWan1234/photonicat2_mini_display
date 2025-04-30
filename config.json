@@ -165,7 +165,7 @@
                 {
                     "type": "fixed_text",
                     "label": "LAN IP",
-                    "position": {"x": 10, "y": 135},
+                    "position": {"x": 10, "y": 120},
                     "font": "unit",
                     "color": [255, 229, 0],
                     "enable": 1
@@ -173,7 +173,7 @@
                 {
                     "type": "text",
                     "label": "lan",
-                    "position": {"x": 10, "y": 153},
+                    "position": {"x": 10, "y": 137},
                     "font": "thin",
                     "color": [255, 229, 255],
                     "data_key": "LAN_IP",
@@ -184,7 +184,7 @@
                 {
                     "type": "fixed_text",
                     "label": "WAN IP",
-                    "position": {"x": 10, "y": 175},
+                    "position": {"x": 10, "y": 160},
                     "font": "unit",
                     "color": [255, 229, 0],
                     "enable": 1
@@ -192,7 +192,7 @@
                 {
                     "type": "text",
                     "label": "wan",
-                    "position": {"x": 10, "y": 193},
+                    "position": {"x": 10, "y": 178},
                     "font": "thin",
                     "color": [255, 229, 255],
                     "data_key": "WAN_IP",
@@ -203,7 +203,7 @@
                 {
                     "type": "fixed_text",
                     "label": "SSID",
-                    "position": {"x": 10, "y": 217},
+                    "position": {"x": 10, "y": 202},
                     "font": "unit",
                     "color": [255, 229, 0],
                     "enable": 1
@@ -211,7 +211,7 @@
                 {
                     "type": "text",
                     "label": "ssid",
-                    "position": {"x": 10, "y": 235},
+                    "position": {"x": 10, "y": 220},
                     "font": "thin",
                     "color": [255, 229, 255],
                     "data_key": "SSID",
@@ -225,7 +225,7 @@
                 {
                     "type": "fixed_text",
                     "label": "CPU",
-                    "position": {"x": 10, "y": 5},
+                    "position": {"x": 10, "y": 4},
                     "font": "unit",
                     "color": [255, 229, 0],
                     "enable": 1
@@ -233,7 +233,7 @@
                 {
                     "type": "text",
                     "label": "CPU",
-                    "position": {"x": 10, "y": 20},
+                    "position": {"x": 10, "y": 18},
                     "font": "huge",
                     "color": [255, 229, 0],
                     "units": "%",
@@ -244,7 +244,7 @@
                 {
                     "type": "fixed_text",
                     "label": "Memory - GB",
-                    "position": {"x": 10, "y": 70},
+                    "position": {"x": 10, "y": 62},
                     "font": "unit",
                     "color": [255, 229, 0],
                     "enable": 1
@@ -252,7 +252,7 @@
                 {
                     "type": "text",
                     "label": "MemUsage",
-                    "position": {"x": 10, "y": 85},
+                    "position": {"x": 10, "y": 76},
                     "font": "huge",
                     "color": [255, 229, 0],
                     "units": "",
@@ -263,7 +263,7 @@
                 {
                     "type": "fixed_text",
                     "label": "uptime",
-                    "position": {"x": 10, "y": 135},
+                    "position": {"x": 10, "y": 130},
                     "font": "unit",
                     "color": [255, 229, 0],
                     "enable": 1

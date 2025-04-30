@@ -726,7 +726,11 @@ func renderMiddle(frame *image.RGBA, cfg *Config, currPage int) {
 			textValue, exists := globalData.Load(element.DataKey)
 			var textToDisplay string
 			if exists {
-				textToDisplay = fmt.Sprintf("%v", textValue)
+				if textValue == nil {
+					textToDisplay = "-"
+				}else{
+					textToDisplay = fmt.Sprintf("%v", textValue)
+				}
 			} else {
 				textToDisplay = "-" // or any default value you prefer
 			}

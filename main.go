@@ -261,6 +261,13 @@ func main() {
 
 	go func() {
 		for {
+			collectNetworkData(cfg)
+			time.Sleep(dataGatherInterval)
+		}
+	}()
+
+	go func() {
+		for {
 			collectTopBarData()
 			time.Sleep(bateryDetectInterval)
 		}

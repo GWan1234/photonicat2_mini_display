@@ -58,6 +58,7 @@ func collectTopBarData() {
 	}
 }
 
+
 // formatSpeed formats speed into value and units as Mbps
 func formatSpeed(mbps float64) (string, string) {
 	if mbps >= 1.0 {
@@ -112,6 +113,14 @@ func collectWANNetworkSpeed() {
 
 // collectData gathers several pieces of system and network information and stores them in globalData.
 func collectData(cfg Config) {
+	// Uptime.
+	if uptime, err := getUptime(); err != nil {
+		fmt.Printf("Could not get uptime: %v\n", err)
+		globalData.Store("Uptime", "N/A")
+	} else {
+		globalData.Store("Uptime", uptime)
+	}
+
 	// Battery voltage.
 	voltageUV, err := getBatteryVoltageUV()
 	if err != nil {
@@ -175,6 +184,16 @@ func collectData(cfg Config) {
 		globalData.Store("MemUsage", memString)
 	}
 
+	// Disk usage.
+	if diskData, err := getDiskUsage(); err != nil {
+		fmt.Printf("Could not get disk usage: %v\n", err)
+		globalData.Store("DiskData", nil)
+	} else {
+		globalData.Store("DiskData", diskData)
+	}
+}
+
+func collectNetworkData(cfg Config) {
 	if sessionDataUsage, err := getSessionDataUsageGB(wanInterface); err != nil {
 		fmt.Printf("Could not get session data usage: %v\n", err)
 		globalData.Store("SessionDataUsage", nil)
@@ -191,13 +210,7 @@ func collectData(cfg Config) {
 		globalData.Store("MonthlyDataUsage", monthlyDataUsage_1digit)
 	}
 
-	// Disk usage.
-	if diskData, err := getDiskUsage(); err != nil {
-		fmt.Printf("Could not get disk usage: %v\n", err)
-		globalData.Store("DiskData", nil)
-	} else {
-		globalData.Store("DiskData", diskData)
-	}
+
 
 	// Local IP address.
 	if localIP, err := getLocalIPv4(); err != nil {
@@ -270,6 +283,15 @@ func collectData(cfg Config) {
 	} else {
 		globalData.Store("PublicIPv6", ipv6)
 	}
+}
+
+func getUptime() (string, error) {
+	cmd := exec.Command("uptime", "-p")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 // getDCVoltageUV reads DC voltage from the system.
