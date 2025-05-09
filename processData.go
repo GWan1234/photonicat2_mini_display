@@ -93,6 +93,7 @@ func collectWANNetworkSpeed() {
 		fmt.Printf("Could not get WAN interface: %v\n", err)
 		globalData.Store("WanUP", "0")
 		globalData.Store("WanDOWN", "0")
+		time.Sleep(5 * time.Second) // prevent infinite loop
 		return
 	}
 	netData, err := getNetworkSpeed(wanInterface)
