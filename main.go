@@ -204,6 +204,9 @@ func main() {
 		assetsPrefix = "/usr/local/share/pcat2_mini_display"
 	}
 
+	if _, err := os.Stat(assetsPrefix + "/assets"); os.IsNotExist(err) {
+		assetsPrefix = "/usr/share/pcat2_mini_display"
+	}
 
 	// For demonstration, we create a mapping from font names to font configurations.
 	fonts = map[string]FontConfig{

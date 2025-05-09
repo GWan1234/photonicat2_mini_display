@@ -1,6 +1,8 @@
-module github.com/photonicat/pcat2_mini_display
+module github.com/photonicat/photonicat2_mini_display
 
-go 1.19
+go 1.22.6
+
+toolchain go1.23.5
 
 require (
 	github.com/ajstarks/svgo v0.0.0-20211024235047-1546f124cd8b
