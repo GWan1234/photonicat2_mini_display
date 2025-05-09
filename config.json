@@ -410,7 +410,7 @@
                 },
                 {
                     "type": "fixed_text",
-                    "label": "Cell",
+                    "label": "WWAN:",
                     "position": {"x": 10, "y": 105},
                     "font": "unit",
                     "color": [255, 229, 0],
@@ -418,16 +418,16 @@
                 },
                 {
                     "type": "text",
-                    "label": "Phone Num",
+                    "label": "wwan",
                     "position": {"x": 90, "y": 105},
                     "font": "unit",
                     "color": [255, 229, 255],
-                    "data_key": "PhoneNum",
+                    "data_key": "WWANModule",
                     "units_font": "unit",
                     "enable": 1
                 },{
                     "type": "fixed_text",
-                    "label": "Phone Num:",
+                    "label": "WIFI:",
                     "position": {"x": 10, "y": 105},
                     "font": "unit",
                     "color": [255, 229, 0],
@@ -442,7 +442,7 @@
                     "data_key": "PhoneNum",
                     "units_font": "unit",
                     "enable": 1
-                },
+                }
 
             ]
         }
