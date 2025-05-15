@@ -342,30 +342,19 @@ func getUptime() (string, error) {
 
 func getKernelDate() (string, error) {
 	// get kernel version (release)
-	/*verOut, err := exec.Command("uname", "-r").Output()
-	version := "unknown-version"
-	if err == nil {
-		version = strings.TrimSpace(string(verOut))
-	}*/
-
-	// get raw build info
 	buildOut, err := exec.Command("uname", "-v").Output()
-	date := "unknown-date"
+	display_date_str := "unknown-date"
 	if err == nil {
 		raw := strings.TrimSpace(string(buildOut))
 		parts := strings.Split(raw, " ")
-		// expect something like:
-		// ["#1","SMP","Fri","Apr","25","12:34:56","UTC","2025"]
-		if len(parts) >= 8 {
-			// month = parts[3], day = parts[4], year = parts[7]
-			date = fmt.Sprintf("%s-%s-%s", parts[8], parts[4], parts[5])
-			log.Println(date)
-		} else {
-			date = raw
+		if len(parts) >= 9 { //#15 SMP PREEMPT Wed Apr 30 17:23:30 JST 2025 //debian
+			display_date_str = fmt.Sprintf("%s-%s-%s", parts[8], parts[4], parts[5])
+		} else if len(parts) >= 8 { //#0 SMP PREEMPT Wed May 14 09:34:38 2025 //openwrt
+			display_date_str = fmt.Sprintf("%s-%s-%s", parts[7], parts[4], parts[5])
 		}
 	}
 
-	return fmt.Sprintf("%s", date), nil
+	return fmt.Sprintf("%s", display_date_str), nil
 }
 
 // getDCVoltageUV reads DC voltage from the system.
