@@ -18,6 +18,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"errors"
 	"path/filepath"
 
 	"github.com/go-ping/ping"
@@ -120,7 +121,6 @@ func collectFixedData(){
 
 // collectData gathers several pieces of system and network information and stores them in globalData.
 func collectData(cfg Config) {
-	// Uptime.
 	if uptime, err := getUptime(); err != nil {
 		fmt.Printf("Could not get uptime: %v\n", err)
 		globalData.Store("Uptime", "N/A")
@@ -241,6 +241,14 @@ func collectNetworkData(cfg Config) {
 		globalData.Store("SSID", ssid)
 	}
 
+	// SSID.
+	if ssid2, err := getSSID2(); err != nil {
+		//fmt.Printf("Could not get SSID: %v\n", err)
+		globalData.Store("SSID2", "N/A")
+	} else {
+		globalData.Store("SSID2", ssid2)
+	}
+
 	// DHCP clients (OpenWrt).
 	if dhcpClients, err := getDHCPClients(); err != nil {
 		fmt.Printf("Could not get DHCP clients: %v\n", err)
@@ -321,23 +329,74 @@ func getSN() (string, error) {
     return sn, nil
 }
 
+
 func getUptime() (string, error) {
-	cmd := exec.Command("uptime", "-p")
-	out, err := cmd.Output()
-	if err != nil {
-		return "", err
-	}
-	raw := strings.TrimSpace(string(out))
-	uptime := strings.Replace(raw, "up ", "", 1)
-	uptime = strings.Replace(uptime, "minutes", "m", 1)
-	uptime = strings.Replace(uptime, "hours,", "h ", 1)
-	uptime = strings.Replace(uptime, "hour,", "h ", 1)
-	uptime = strings.Replace(uptime, "days,", "d ", 1)
-	uptime = strings.Replace(uptime, "day,", "d ", 1)
-	uptime = strings.Replace(uptime, "years,", "y ", 1)
-	uptime = strings.Replace(uptime, "year,", "y ", 1)
-	uptime = strings.Replace(uptime, "and", "", 1)
-	return uptime, nil
+    cmd := exec.Command("uptime", "-p")
+    out, err := cmd.Output()
+    if err == nil {
+        return parsePrettyUptime(string(out)), nil
+    }
+
+    cmd = exec.Command("uptime")
+    out, err = cmd.Output()
+    if err != nil {
+        return "", err
+    }
+    return parsePlainUptime(string(out))
+}
+
+func parsePrettyUptime(raw string) string {
+    s := strings.TrimSpace(raw)
+    s = strings.TrimPrefix(s, "up ")
+    replacements := []struct{ old, new string }{
+        {"years,", "y "}, {"year,", "y "},
+        {"days,", "d "}, {"day,", "d "},
+        {"hours,", "h "}, {"hour,", "h "},
+        {"minutes", "m"}, {"minute", "m"},
+        {"and ", ""},
+    }
+    for _, r := range replacements {
+        s = strings.Replace(s, r.old, r.new, -1)
+    }
+    return strings.TrimSpace(s)
+}
+
+func parsePlainUptime(raw string) (string, error) {
+    re := regexp.MustCompile(`up\s+((?:\d+\s+days?,\s*)?\d+:\d+)`)
+    match := re.FindStringSubmatch(raw)
+    if len(match) < 2 {
+        return "", errors.New("无法解析 uptime 输出: " + raw)
+    }
+    period := match[1]
+
+    var parts []string
+    if strings.Contains(period, "day") {
+        dayRe := regexp.MustCompile(`(\d+)\s+days?`)
+        dm := dayRe.FindStringSubmatch(period)
+        if len(dm) >= 2 {
+            parts = append(parts, dm[1]+"d")
+        }
+        period = strings.SplitN(period, ",", 2)[1]
+    }
+
+    period = strings.TrimSpace(period)
+    hm := strings.Split(period, ":")
+    if len(hm) != 2 {
+        return "", fmt.Errorf("unexpected time format: %q", period)
+    }
+    h, err1 := strconv.Atoi(hm[0])
+    m, err2 := strconv.Atoi(hm[1])
+    if err1 != nil || err2 != nil {
+        return "", fmt.Errorf("cannot parse hours or minutes: %v, %v", err1, err2)
+    }
+    if h > 0 {
+        parts = append(parts, fmt.Sprintf("%dh", h))
+    }
+    if m > 0 {
+        parts = append(parts, fmt.Sprintf("%dm", m))
+    }
+
+    return strings.Join(parts, " "), nil
 }
 
 func getKernelDate() (string, error) {
@@ -404,6 +463,52 @@ func getSSID() (string, error) {
 	if _, err := os.Stat("/etc/openwrt_release"); err == nil {
 		// OpenWrt: Use uci command
 		out, err := exec.Command("uci", "get", "wireless.@wifi-iface[0].ssid").Output()
+		if err != nil {
+			return "", fmt.Errorf("failed to get OpenWrt SSID: %v", err)
+		}
+		return strings.TrimSpace(string(out)), nil
+	}
+
+	// Debian/Ubuntu: Try iwgetid first
+	if out, err := exec.Command("iwgetid", "-r").Output(); err == nil {
+		ssid := strings.TrimSpace(string(out))
+		if ssid != "" {
+			return ssid, nil
+		}
+	}
+
+	// Fallback 1: iwconfig
+	if out, err := exec.Command("iwconfig").Output(); err == nil {
+		re := regexp.MustCompile(`ESSID:"(.*?)"`)
+		matches := re.FindSubmatch(out)
+		if len(matches) >= 2 {
+			ssid := string(matches[1])
+			if ssid != "" && ssid != "off/any" {
+				return ssid, nil
+			}
+		}
+	}
+
+	// Fallback 2: nmcli (NetworkManager)
+	if out, err := exec.Command("nmcli", "-t", "-f", "active,ssid", "dev", "wifi").Output(); err == nil {
+		lines := strings.Split(string(out), "\n")
+		for _, line := range lines {
+			fields := strings.Split(line, ":")
+			if len(fields) == 2 && fields[0] == "yes" && fields[1] != "" {
+				return fields[1], nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("SSID could not be determined")
+}
+
+// getSSID returns connected SSID on Debian or broadcasting SSID on OpenWrt.
+func getSSID2() (string, error) {
+	// OpenWrt detection
+	if _, err := os.Stat("/etc/openwrt_release"); err == nil {
+		// OpenWrt: Use uci command
+		out, err := exec.Command("uci", "get", "wireless.@wifi-iface[1].ssid").Output()
 		if err != nil {
 			return "", fmt.Errorf("failed to get OpenWrt SSID: %v", err)
 		}
@@ -519,8 +624,19 @@ func getDataUsageMonthlyGB(iface string) (float64, error) {
     // 1. 调用 vnstat 获取 JSON
     out, err := exec.Command("vnstat", "-i", iface, "--json").Output()
     if err != nil {
-        return 0, fmt.Errorf("failed to run vnstat: %w", err)
-    }
+		fmt.Printf("failed to run vnstat with default interface: %s, %w", iface, err)
+		iface = "wwan0"	
+		out, err = exec.Command("vnstat", "-i", iface, "--json").Output()
+		if err != nil {
+			fmt.Printf("failed to run vnstat with default interface: %s, %w", iface, err)
+			iface = "br-lan"
+			out, err = exec.Command("vnstat", "-i", iface, "--json").Output()	
+			if err != nil {
+				fmt.Printf("failed to run vnstat with default interface: %s, %w", iface, err)
+				return 0, fmt.Errorf("failed to run vnstat with iface: %s, %w", iface, err)
+			}
+		}
+	}
 
     // 2. 解析 JSON
     var data vnstatJSON
@@ -758,7 +874,7 @@ func getCountry() (string, error) {
 
 // getLocalIPv4 returns eth0 IP on OpenWrt or WAN IP (default route) on Debian.
 func getLocalIPv4() (string, error) {
-    candidates := []string{"eth1", "end1", "end0"}
+    candidates := []string{"eth1", "end1", "end0", "br-lan"}
 
     for _, name := range candidates {
         iface, err := net.InterfaceByName(name)

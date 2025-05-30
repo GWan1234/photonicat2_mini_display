@@ -127,7 +127,7 @@
                 {
                     "type": "fixed_text",
                     "label": "ping: taobao.com",
-                    "position": {"x": 10, "y": 4},
+                    "position": {"x": 6, "y": 4},
                     "font": "tiny",
                     "color": [255, 229, 0],
                     "enable": 1
@@ -135,8 +135,8 @@
                 {
                     "type": "text",
                     "label": "Ping0",
-                    "position": {"x": 10, "y": 18},
-                    "font": "huge",
+                    "position": {"x": 6, "y": 18},
+                    "font": "big",
                     "color": [255, 229, 0],
                     "units": "ms",
                     "data_key": "Ping0",
@@ -146,7 +146,7 @@
                 {
                     "type": "fixed_text",
                     "label": "ping: photonicat.com",
-                    "position": {"x": 10, "y": 62},
+                    "position": {"x": 6, "y":49},
                     "font": "tiny",
                     "color": [255, 229, 0],
                     "enable": 1
@@ -154,8 +154,8 @@
                 {
                     "type": "text",
                     "label": "Ping1",
-                    "position": {"x": 10, "y": 76},
-                    "font": "huge",
+                    "position": {"x": 6, "y": 63},
+                    "font": "big",
                     "color": [255, 229, 0],
                     "units": "ms",
                     "data_key": "Ping1",
@@ -165,7 +165,7 @@
                 {
                     "type": "fixed_text",
                     "label": "LAN IP",
-                    "position": {"x": 10, "y": 120},
+                    "position": {"x": 6, "y": 97},
                     "font": "unit",
                     "color": [255, 229, 0],
                     "enable": 1
@@ -173,7 +173,7 @@
                 {
                     "type": "text",
                     "label": "lan",
-                    "position": {"x": 10, "y": 137},
+                    "position": {"x": 6, "y": 114},
                     "font": "thin",
                     "color": [255, 229, 255],
                     "data_key": "LAN_IP",
@@ -183,8 +183,8 @@
                 },
                 {
                     "type": "fixed_text",
-                    "label": "WAN IP",
-                    "position": {"x": 10, "y": 160},
+                    "label": "PUBLIC IP",
+                    "position": {"x": 6, "y": 137},
                     "font": "unit",
                     "color": [255, 229, 0],
                     "enable": 1
@@ -192,7 +192,7 @@
                 {
                     "type": "text",
                     "label": "wan",
-                    "position": {"x": 10, "y": 178},
+                    "position": {"x": 6, "y": 154},
                     "font": "thin",
                     "color": [255, 229, 255],
                     "data_key": "WAN_IP",
@@ -202,8 +202,8 @@
                 },
                 {
                     "type": "fixed_text",
-                    "label": "SSID",
-                    "position": {"x": 10, "y": 202},
+                    "label": "SSID - Onboard",
+                    "position": {"x": 6, "y": 177},
                     "font": "unit",
                     "color": [255, 229, 0],
                     "enable": 1
@@ -211,10 +211,29 @@
                 {
                     "type": "text",
                     "label": "ssid",
-                    "position": {"x": 10, "y": 220},
-                    "font": "thin",
+                    "position": {"x": 5, "y": 194},
+                    "font": "tiny",
                     "color": [255, 229, 255],
                     "data_key": "SSID",
+                    "units_font": "unit",
+                    "units": "",
+                    "enable": 1
+                },
+                {
+                    "type": "fixed_text",
+                    "label": "SSID - PICE",
+                    "position": {"x": 6, "y": 215},
+                    "font": "unit",
+                    "color": [255, 229, 0],
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "ssid",
+                    "position": {"x": 5, "y": 232},
+                    "font": "tiny",
+                    "color": [255, 229, 255],
+                    "data_key": "SSID2",
                     "units_font": "unit",
                     "units": "",
                     "enable": 1
@@ -411,7 +430,7 @@
                 {
                     "type": "fixed_text",
                     "label": "WWAN:",
-                    "position": {"x": 10, "y": 105},
+                    "position": {"x": 10, "y": 130},
                     "font": "unit",
                     "color": [255, 229, 0],
                     "enable": 1
@@ -419,7 +438,7 @@
                 {
                     "type": "text",
                     "label": "wwan",
-                    "position": {"x": 90, "y": 105},
+                    "position": {"x": 90, "y": 130},
                     "font": "unit",
                     "color": [255, 229, 255],
                     "data_key": "WWANModule",
@@ -428,7 +447,7 @@
                 },{
                     "type": "fixed_text",
                     "label": "WIFI:",
-                    "position": {"x": 10, "y": 105},
+                    "position": {"x": 10, "y": 155},
                     "font": "unit",
                     "color": [255, 229, 0],
                     "enable": 1
@@ -436,7 +455,7 @@
                 {
                     "type": "text",
                     "label": "Phone Num",
-                    "position": {"x": 90, "y": 105},
+                    "position": {"x": 90, "y": 155},
                     "font": "unit",
                     "color": [255, 229, 255],
                     "data_key": "PhoneNum",
