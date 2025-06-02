@@ -24,6 +24,52 @@ import (
 	"github.com/go-ping/ping"
 )
 
+// WiFiInterface mirrors each element of "wifi_interfaces" in the JSON.
+type WiFiInterface struct {
+	Band            string `json:"band"`
+	Device          string `json:"device"`
+	DeviceType      string `json:"device_type"`
+	Enabled         bool   `json:"enabled"`
+	Encryption      string `json:"encryption"`
+	Exist           bool   `json:"exist"`
+	Hidden          string `json:"hidden"`
+	Htmode          string `json:"htmode"`
+	Password        string `json:"password"`
+	SSID            string `json:"ssid"`
+	Frequency       string `json:"frequency,omitempty"`
+}
+
+// DashboardInfo matches the top‐level keys in your sample JSON.
+type DashboardInfo struct {
+	BatteryCurrent     float64          `json:"battery_current"`
+	BatteryWattage     float64          `json:"battery_wattage"`
+	BoardTemperature   int              `json:"board_temperature"`
+	Carrier            string           `json:"carrier"`
+	ChargePercent      int              `json:"charge_percent"`
+	ChargeVoltage      int              `json:"charge_voltage"`
+	Connection         string           `json:"connection"`
+	DHCPClientsCount   int              `json:"dhcp_clients_count"`
+	DownSpeed          float64          `json:"down_speed"`
+	FirmwareVersion    string           `json:"firmware_version"`
+	Hostname           string           `json:"hostname"`
+	ISPName            string           `json:"isp_name"`
+	Kernel             string           `json:"kernel"`
+	Model              string           `json:"model"`
+	ModemModel         string           `json:"modem_model"`
+	ModemSignalStrength int             `json:"modem_signal_strength"`
+	OnCharging         bool             `json:"on_charging"`
+	OpenWRTVersion     string           `json:"openwrt_version"`
+	SdState            int              `json:"sd_state"`
+	ServerLocation     string           `json:"server_location"`
+	SimState           string           `json:"sim_state"`
+	UpSpeed            float64          `json:"up_speed"`
+	Uptime             string           `json:"uptime"`
+	Voltage            int              `json:"voltage"`
+	WanIP              string           `json:"wan_ip"`
+	WiFiClientsCount   int              `json:"wifi_clients_count"`
+	WiFiInterfaces     []WiFiInterface  `json:"wifi_interfaces"`
+}
+
 // NetworkSpeed represents upload/download in bytes per second
 type NetworkSpeed struct {
 	UploadMbps   float64
@@ -57,6 +103,69 @@ func collectTopBarData() {
 			idleTimeout = DEFAULT_IDLE_TIMEOUT
 		}
 	}
+    
+	getInfoFromPcatWeb()
+}
+
+
+func getInfoFromPcatWeb() { //we get from this api to save /dev/ttyUSBX port used
+	urls := []string{
+		"http://localhost:80/api/v1/dashboard.json",
+
+	}
+
+	for _, url := range urls {
+		resp, err := http.Get(url)
+		if err != nil {
+			fmt.Printf("Could not GET %s: %v\n", url, err)
+			continue
+		}
+		defer resp.Body.Close()
+
+		// Read the entire response body
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			fmt.Printf("Could not read body from %s: %v\n", url, err)
+			continue
+		}
+
+		// Unmarshal into our DashboardInfo struct
+		var info DashboardInfo
+		if err := json.Unmarshal(body, &info); err != nil {
+			fmt.Printf("Could not unmarshal JSON from %s: %v\n", url, err)
+			continue
+		}
+
+		// (3) Store each field into globalData under a sensible key.
+		//     Adjust the keys to match whatever your front‐end expects.
+
+		globalData.Store("BoardTemperature", info.BoardTemperature)
+		globalData.Store("Carrier", info.Carrier)
+		globalData.Store("GatewayDevice", info.Connection)
+		globalData.Store("DHCPClientsCount", info.DHCPClientsCount)
+
+		globalData.Store("FirmwareVersion", info.FirmwareVersion)
+		globalData.Store("ISPName",         info.ISPName)
+		globalData.Store("Model",           info.Model)
+		globalData.Store("ModemModel",      info.ModemModel)
+		globalData.Store("ModemSignalStrength", info.ModemSignalStrength)
+		globalData.Store("SdState",         info.SdState)
+		globalData.Store("ServerLocation",  info.ServerLocation)
+		globalData.Store("SimState",        info.SimState)
+		globalData.Store("Uptime",          info.Uptime)
+		globalData.Store("WiFiClientsCount", info.WiFiClientsCount)
+
+		// If you need to show the raw JSON array of interfaces somewhere, you can re‐marshal or store
+		// the slice directly. For example:
+		globalData.Store("WiFiInterfaces", info.WiFiInterfaces)
+
+		// If only the SSIDs of each interface matter, you could also collect them here:
+		var ssids []string
+		for _, iface := range info.WiFiInterfaces {
+			ssids = append(ssids, iface.SSID)
+		}
+		globalData.Store("WiFiSSIDs", ssids)
+	}
 }
 
 // formatSpeed formats speed into value and units as Mbps
@@ -70,6 +179,9 @@ func formatSpeed(mbps float64) (string, string) {
 }
 
 func getWANInterface() (string, error) {
+	if isOpenWRT(){
+		return "br-lan", nil
+	}
 	cmd := exec.Command("ip", "route", "show", "default")
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -457,11 +569,17 @@ func getInterfaceBytes(iface string) (rxBytes, txBytes uint64, err error) {
 	return
 }
 
+func isOpenWRT() bool {
+	if _, err := os.Stat("/etc/openwrt_release"); err == nil {
+		return true
+	}
+	return false
+}
+
 // getSSID returns connected SSID on Debian or broadcasting SSID on OpenWrt.
 func getSSID() (string, error) {
 	// OpenWrt detection
-	if _, err := os.Stat("/etc/openwrt_release"); err == nil {
-		// OpenWrt: Use uci command
+	if isOpenWRT() {
 		out, err := exec.Command("uci", "get", "wireless.@wifi-iface[0].ssid").Output()
 		if err != nil {
 			return "", fmt.Errorf("failed to get OpenWrt SSID: %v", err)

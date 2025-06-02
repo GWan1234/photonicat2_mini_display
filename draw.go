@@ -615,6 +615,7 @@ func drawBattery(w, h int, soc float64, isCharging bool, x0, y0 int) *image.RGBA
 
 func drawTopBar(display gc9307.Device, frame *image.RGBA) {
 	var timeStr string
+	var networkStr string
 	currDateTime := time.Now()
 
 	if currDateTime.Year() < 2025 {
@@ -623,7 +624,17 @@ func drawTopBar(display gc9307.Device, frame *image.RGBA) {
 		timeStr = fmt.Sprintf("%02d:%02d", currDateTime.Hour(), currDateTime.Minute())
 	}
 
-	networkStr := "5" //5G
+	gatewayDevice, _ := globalData.Load("GatewayDevice")
+	
+	if gatewayDevice == "5G"{
+		networkStr = "5"
+	}else if gatewayDevice == "4G"{
+		networkStr = "4"
+	}else if gatewayDevice == "wired"{
+		networkStr = "w"
+	}else{
+		networkStr = "u"
+	}
 	signalStrength := 0.43
 	magicStr := timeStr + " " + strconv.Itoa(int(signalStrength*100)) + " " + networkStr + " " + strconv.Itoa(int(battSOC)) + " " + strconv.FormatBool(battChargingStatus)
 
@@ -651,18 +662,26 @@ func drawTopBar(display gc9307.Device, frame *image.RGBA) {
 	//draw time
 	drawText(frame, timeStr, x0+2, y0-3, faceClock, PCAT_WHITE, false)	
 
-	//draw signal strength
-	if fiveGonTop {
-		drawSignalStrength(frame, x0+80, y0, signalStrength)
-	}else{
-		drawSignalStrength(frame, x0+70, y0, signalStrength)
-	}
+	if networkStr == "w"{
+		//draw wired
+		eth, _, _, err := loadImage(assetsPrefix+"/assets/svg/eth.svg")
+		if err != nil {
+			fmt.Println("Error loading eth:", err)
+			return
+		}
+		copyImageToImageAt(frame, eth, x0+80, y0+2)
 
-	//draw network
-	if fiveGonTop {	
-		drawText(frame, networkStr, x0+78, y0-6, faceTiny, PCAT_WHITE, false)
-	}else{
-		drawText(frame, networkStr, x0+94, y0-3, faceTiny, PCAT_WHITE, false)
+	}else if networkStr == "4" || networkStr == "5" || networkStr == "3" {
+		signalStrengthInt, _ := globalData.Load("SignalStrength")
+		signalStrength := float64(signalStrengthInt.(int)) / 100.0
+		//draw signal strength
+		if fiveGonTop {
+			drawSignalStrength(frame, x0+80, y0, signalStrength)
+			drawText(frame, networkStr, x0+78, y0-6, faceTiny, PCAT_WHITE, false)
+		}else{
+			drawSignalStrength(frame, x0+70, y0, signalStrength)
+			drawText(frame, networkStr, x0+94, y0-3, faceTiny, PCAT_WHITE, false)
+		}
 	}
 
 	//draw Battery
