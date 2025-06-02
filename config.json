@@ -6,9 +6,15 @@
         "elements": {
             "page0": [ 
                 {
+                    "type": "icon",
+                    "icon_path": "assets/svg/up_trig.svg",
+                    "position": {"x": 9, "y": 18},
+                    "enable": 1
+                },
+                {
                     "type": "text",
                     "label": "WAN Speed Up",
-                    "position": {"x": 10, "y": 3},
+                    "position": {"x": 23, "y": 3},
                     "font": "huge",
                     "color": [255, 229, 0],
                     "units": "Mbps",
@@ -17,9 +23,15 @@
                     "enable": 1
                 },
                 {
+                    "type": "icon",
+                    "icon_path": "assets/svg/down_trig.svg",
+                    "position": {"x": 9, "y": 58},
+                    "enable": 1
+                },
+                {
                     "type": "text",
                     "label": "WAN Speed Down",
-                    "position": {"x": 10, "y": 38},
+                    "position": {"x": 23, "y": 38},
                     "font": "huge",
                     "color": [255, 229, 0],
                     "units": "Mbps",
