@@ -44,7 +44,7 @@ const (
 	DEFAULT_FPS = 5
 	DEFAULT_IDLE_TIMEOUT = 60 * time.Second
 	ON_CHARGING_IDLE_TIMEOUT = 365 * 86400 * time.Second
-	KEYBOARD_DEBOUNCE_TIME = 250 * time.Millisecond
+	KEYBOARD_DEBOUNCE_TIME = 200 * time.Millisecond
 	ZERO_BACKLIGHT_DELAY = 5 * time.Second
 )
 
@@ -211,11 +211,11 @@ func main() {
 	fonts = map[string]FontConfig{
 		"clock": 	     {FontPath: assetsPrefix + "/assets/fonts/Orbitron-Medium.ttf", FontSize: 20},
 		"clockBold": 	     {FontPath: assetsPrefix + "/assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 17},
-		//"small_text": 	 {FontPath: "assets/fonts/Orbitron-Medium.ttf", FontSize: 17},
 		"reg": 	 {FontPath: assetsPrefix + "/assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 18},
 		"big": 	 {FontPath: assetsPrefix + "/assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 25},
 		"unit": 	 {FontPath: assetsPrefix + "/assets/fonts/Orbitron-Medium.ttf", FontSize: 15},
 		"tiny": 	 {FontPath: assetsPrefix + "/assets/fonts/Orbitron-Regular.ttf", FontSize: 12},
+		"micro": 	 {FontPath: assetsPrefix + "/assets/fonts/Orbitron-Regular.ttf", FontSize: 10},
 		"thin": 	 {FontPath: assetsPrefix + "/assets/fonts/Orbitron-Regular.ttf", FontSize: 18},
 		"huge":      {FontPath: assetsPrefix + "/assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 34},
 		"gigantic":  {FontPath: assetsPrefix + "/assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 48},
@@ -313,11 +313,13 @@ func main() {
 	clearFrame(footerFramebuffers[0], footerFrameWidth, footerFrameHeight)
 	clearFrame(footerFramebuffers[1], footerFrameWidth, footerFrameHeight)
 	
-	
 	faceTiny, _, err := getFontFace("tiny")
 	if err != nil {
 		log.Fatalf("Failed to load font: %v", err)
 	}
+
+	showWelcome(display, middleFrameWidth, middleFrameHeight, faceTiny, 5 * time.Second)
+
 	// Main loop: you could update dynamic data and re-render pages as needed.
 
 	stitchedFrame := image.NewRGBA(image.Rect(0, 0, middleFrameWidth * 2, middleFrameHeight))
@@ -348,16 +350,7 @@ func main() {
 				
 				//page transition
 				t := float64(i) / float64(numIntermediatePages)      // 0 -> 1
-				/*
-				et0 := 0.5 * (1 - math.Cos(math.Pi * t))            // cosine
-				et1 := t*(2 - t) // easeOutQuad
-				et2 := 0.0 //quintic 
-				if t < 0.5 {
-					et2 = 16*math.Pow(t, 5)
-				} else {
-					et2 = 1 + 16*math.Pow(t-1, 5)
-				}
-				*/
+
 				et3 := 1 - math.Pow(1-t, 4) //use quartic
 
 				//log.Println("EaseT, t0, t1, t2, t3:",  et0, et1, et2, et3)

@@ -884,3 +884,79 @@ func drawFooter(display gc9307.Device, frame *image.RGBA, currPage int, numOfPag
 	cacheFooterStr = magicStr
 	sendFooter(display, frame)
 }
+
+func showWelcome(display gc9307.Device, width, height int, face font.Face, duration time.Duration) {
+    frame := image.NewRGBA(image.Rect(0, 0, width, height))
+
+    // Progress‑bar parameters:
+	spaceBetweenLogoAndBar := 28
+	barWidth := 82
+    barX := width/2 - barWidth/2
+	barHeight := 8
+	fnBase:="/tmp/barBackground.svg"
+	fnProgressPart:="/tmp/barProgress_"
+
+    //sleepPerPixel := 5*time.Second / time.Duration(barWidth)
+	clearFrame(frame, width, height)
+	welcomeLogo, w, h, err := loadImage(assetsPrefix+"/assets/svg/welcome.svg")
+	if err != nil {
+		log.Printf("Error loading welcome logo from %s: %v", "assets/svg/welcome.svg", err)
+		return
+	}
+	logoY := height/2 - (h+spaceBetweenLogoAndBar+barHeight)/2
+	copyImageToImageAt(frame, welcomeLogo, width/2 - w/2, logoY ) 
+	var bufBack bytes.Buffer
+	canvas := svg.New(&bufBack)
+	canvas.Start(barWidth, barHeight)
+	canvas.Roundrect(0, 0, barWidth, barHeight, 2, 2, "fill:#627482")
+	canvas.End()
+	svgFile, err := os.Create(fnBase)
+	if err != nil {
+		panic(err)
+	}
+	_, err = svgFile.Write(bufBack.Bytes())
+	if err != nil {
+		panic(err)
+	}
+	svgFile.Close()
+	barBackground, _, _, err := loadImage(fnBase)
+	if err != nil {
+		log.Printf("Error loading bar background from %s: %v", fnBase, err)
+		return
+	}
+	barY := logoY + spaceBetweenLogoAndBar + h
+	copyImageToImageAt(frame, barBackground, barX, barY)
+	sendMiddle(display, frame)
+
+	var bufProgress bytes.Buffer
+	var progressBar *image.RGBA
+
+    for i := 1; i <= barWidth; i++ {
+		fnProgress := fnProgressPart+strconv.Itoa(i)+".svg"
+		bufProgress.Reset()
+		canvasProgress := svg.New(&bufProgress)
+		canvasProgress.Start(barWidth, barHeight)
+		canvasProgress.Roundrect(0, 0, i, barHeight, 2, 2, "fill:#FDE021")
+		canvasProgress.End()
+		svgFile, err := os.Create(fnProgress)
+		if err != nil {
+			panic(err)
+		}
+		_, err = svgFile.Write(bufProgress.Bytes())
+		if err != nil {
+			panic(err)
+		}
+		svgFile.Close()
+		progressBar, _, _, err = loadImage(fnProgress)
+		
+		if err != nil {
+			log.Printf("Error loading bar background from %s: %v", fnBase, err)
+			return
+		}
+		copyImageToImageAt(frame, progressBar, barX, barY)
+		sendMiddle(display, frame)
+      
+		//time.Sleep(sleepPerPixel)
+    }
+	//time.Sleep(5*time.Second)
+}
