@@ -3,7 +3,8 @@ package main
 import (
 	"image"
 	"image/color"
-	//"image/draw"
+	"os/signal"
+	"syscall"
 	"log"
 	"time"
 	"math/rand"
@@ -41,14 +42,18 @@ const (
 	STATE_ACTIVE = 1
 	STATE_FADE_IN = 2
 	STATE_FADE_OUT = 3
+	STATE_OFF = 4
 	DEFAULT_FPS = 5
 	DEFAULT_IDLE_TIMEOUT = 60 * time.Second
 	ON_CHARGING_IDLE_TIMEOUT = 365 * 86400 * time.Second
 	KEYBOARD_DEBOUNCE_TIME = 200 * time.Millisecond
 	ZERO_BACKLIGHT_DELAY = 5 * time.Second
+	OFF_TIMEOUT = 3 * time.Second
 )
 
 var (
+	weAreRunning 	= true
+	offTime			= time.Now()
 	PCAT_YELLOW     = color.RGBA{255, 229, 0, 255}
 	PCAT_WHITE      = color.RGBA{255, 255, 255, 255}
 	PCAT_RED        = color.RGBA{226, 72, 38, 255}
@@ -181,6 +186,8 @@ func main() {
 		cfg Config
 	)
 
+	//rm pcat_display_initialized
+	os.Remove("/tmp/pcat_display_initialized")
 	// Initialize board.
 	if _, err := host.Init(); err != nil {
 		log.Fatal(err)
@@ -317,15 +324,30 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to load font: %v", err)
 	}
+	
+	// 4) Catch SIGINT/SIGTERM so we can show the shutdown image.
+	sigs := make(chan os.Signal, 1)
+	//signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
 
-	showWelcome(display, middleFrameWidth, middleFrameHeight, faceTiny, 5 * time.Second)
+	go func() {
+		sig := <-sigs
+		log.Printf("Received signal: %v", sig)
+		weAreRunning=false
+		offTime = time.Now()
+		time.Sleep(200 * time.Millisecond)
+		showCiao(display, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT, OFF_TIMEOUT)
+		time.Sleep(OFF_TIMEOUT)
+		os.Exit(0)
+	}()
+	
+	showWelcome(display, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT, 5 * time.Second)
 
 	// Main loop: you could update dynamic data and re-render pages as needed.
-
 	stitchedFrame := image.NewRGBA(image.Rect(0, 0, middleFrameWidth * 2, middleFrameHeight))
 
 	//main loop
-	for {
+	for weAreRunning {
 		start := time.Now()
 		if changePageTriggered {
 			
@@ -398,4 +420,5 @@ func main() {
 			lastUpdate = now
 		}
 	}
+	select{} //blocking for sigterm processing
 }

@@ -112,7 +112,7 @@ func setBacklight(brightness int) {
                 if err := os.WriteFile("/sys/class/backlight/backlight/brightness", []byte("1"), 0644); err != nil {
                     log.Printf("backlight final-off error: %v", err)
                 } else {
-                    log.Println("→ physical backlight 0")
+                    log.Println("→ physical backlight OFF")
                 }
             }
         })
@@ -195,7 +195,7 @@ func monitorKeyboard(changePageTriggered *bool) {
 }
 
 func idleDimmer() {
-    ticker := time.NewTicker(50 * time.Millisecond)
+    ticker := time.NewTicker(25 * time.Millisecond)
     defer ticker.Stop()
 
 	prevState := STATE_UNKNOWN
@@ -221,6 +221,13 @@ func idleDimmer() {
         lastActivityMu.Unlock()
         
         switch {
+        case weAreRunning == false:
+            p := float64(time.Since(offTime)) / float64(OFF_TIMEOUT) 
+            brightness = int((1 - p) * float64(maxBacklight))
+            if brightness < 10 {
+				brightness = 10
+			}
+			newState = STATE_OFF
         case idle < fadeInDur && lastStateScreenOn == false:
             // 1) Fade in from 0→maxBacklight over fadeInDur
 			desiredFPS = DEFAULT_FPS
@@ -243,7 +250,6 @@ func idleDimmer() {
 			newState  = STATE_FADE_OUT
 			lastStateScreenOn = true
         default:
-            // 4) Fully off once past the fade‐out
             brightness = 0
 			newState  = STATE_IDLE
 			lastStateScreenOn = false
@@ -269,6 +275,8 @@ func stateName(s int) string {
         return "FADE_OUT"
     case STATE_IDLE:
         return "IDLE"
+	case STATE_OFF:
+		return "OFF"
     default:
         return "UNKNOWN"
     }

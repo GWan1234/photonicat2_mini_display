@@ -37,45 +37,40 @@ var (
 )
 
 //---------------- Drawing Functions ----------------
-
-// drawText draws a string onto an *image.RGBA at (x,y) using the specified font face and color.
 func drawText(img *image.RGBA, text string, posX, posY int, face font.Face, clr color.Color, center bool) (finishX, finishY int) {
     d := &font.Drawer{
         Dst:  img,
         Src:  image.NewUniform(clr),
         Face: face,
     }
-    
+
     // Get font metrics once.
     metrics := face.Metrics()
-    
+
+    // Calculate text dimensions.
+    textWidth := d.MeasureString(text).Round()
+    textHeight := (metrics.Ascent + metrics.Descent).Round()
     var x, y int
     if center {
-        // Measure the width and height.
-        textWidth := d.MeasureString(text).Round()
-        //textHeight := (metrics.Ascent + metrics.Descent).Round()
-        // Calculate starting position so text is centered.
+        // Center horizontally: shift x left by half the text width.
         x = posX - textWidth/2
+        // Center vertically: shift y up by half the text height, then add ascent for baseline.
+        y = posY - textHeight/2 - metrics.Ascent.Round() 
+		//we still use the same y
+		//y = posY
     } else {
         x = posX
     }
 	y = posY + metrics.Ascent.Round()
-    
+
+    // Set drawing position and draw the text.
     d.Dot = fixed.P(x, y)
     d.DrawString(text)
-    
-    // Recalculate dimensions for finishing coordinates.
-    textWidth := d.MeasureString(text).Round()
-    textHeight := metrics.Ascent.Round() + metrics.Descent.Round()
-    
+
+    // Calculate finishing coordinates.
     finishX = x + textWidth
-    // For finishing Y, if centered we subtract the ascent offset to align with the original posY
-    if center {
-        finishY = (y - metrics.Ascent.Round()) + textHeight
-    } else {
-        finishY = posY + textHeight
-    }
-    
+    finishY = y - metrics.Ascent.Round() + textHeight // Bottom of the text block.
+
     return
 }
 
@@ -243,6 +238,10 @@ func sendMiddlePartial(display gc9307.Device, frame *image.RGBA) {
 func sendMiddle(display gc9307.Device, frame *image.RGBA) {
 	//crop some frame to save data transfer
 	display.FillRectangleWithImage(0, PCAT2_TOP_BAR_HEIGHT, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT-PCAT2_TOP_BAR_HEIGHT-PCAT2_FOOTER_HEIGHT, frame)
+}
+
+func sendFull(display gc9307.Device, frame *image.RGBA) {
+	display.FillRectangleWithImage(0, 0, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT, frame)
 }
 
 // Function to display time on frame buffer
@@ -885,10 +884,7 @@ func drawFooter(display gc9307.Device, frame *image.RGBA, currPage int, numOfPag
 	sendFooter(display, frame)
 }
 
-func showWelcome(display gc9307.Device, width, height int, face font.Face, duration time.Duration) {
-    frame := image.NewRGBA(image.Rect(0, 0, width, height))
-
-    // Progress‑bar parameters:
+func showWelcome(display gc9307.Device, width, height int, duration time.Duration) {
 	spaceBetweenLogoAndBar := 28
 	barWidth := 82
     barX := width/2 - barWidth/2
@@ -896,7 +892,7 @@ func showWelcome(display gc9307.Device, width, height int, face font.Face, durat
 	fnBase:="/tmp/barBackground.svg"
 	fnProgressPart:="/tmp/barProgress_"
 
-    //sleepPerPixel := 5*time.Second / time.Duration(barWidth)
+	frame := image.NewRGBA(image.Rect(0, 0, width, height))
 	clearFrame(frame, width, height)
 	welcomeLogo, w, h, err := loadImage(assetsPrefix+"/assets/svg/welcome.svg")
 	if err != nil {
@@ -926,7 +922,7 @@ func showWelcome(display gc9307.Device, width, height int, face font.Face, durat
 	}
 	barY := logoY + spaceBetweenLogoAndBar + h
 	copyImageToImageAt(frame, barBackground, barX, barY)
-	sendMiddle(display, frame)
+	sendFull(display, frame)
 
 	var bufProgress bytes.Buffer
 	var progressBar *image.RGBA
@@ -954,9 +950,35 @@ func showWelcome(display gc9307.Device, width, height int, face font.Face, durat
 			return
 		}
 		copyImageToImageAt(frame, progressBar, barX, barY)
-		sendMiddle(display, frame)
+		sendFull(display, frame)
       
 		//time.Sleep(sleepPerPixel)
     }
-	//time.Sleep(5*time.Second)
+}
+
+
+
+func showCiao(display gc9307.Device, width, height int, duration time.Duration) {
+	spaceBetweenLogoAndText := 28
+	textHeight := 12
+	frame := image.NewRGBA(image.Rect(0, 0, width, height))
+	clearFrame(frame, width, height)
+	//clear display
+	sendFull(display, frame)
+	ciaoLogo, w, h, err := loadImage(assetsPrefix+"/assets/svg/ciao.svg")
+	if err != nil {
+		log.Printf("Error loading ciao logo from %s: %v", "assets/svg/ciao.svg", err)
+		return
+	}
+	logoY := height/2 - (h+spaceBetweenLogoAndText+textHeight)/2
+	copyImageToImageAt(frame, ciaoLogo, width/2 - w/2, logoY ) 
+	text := "Powering Off..."
+	faceUnit, _, err := getFontFace("unit")
+	if err != nil {
+		log.Printf("Error getting font face for %s: %v", "unit", err)
+		return
+	}
+	drawText(frame, text, width/2, logoY + h + spaceBetweenLogoAndText, faceUnit, PCAT_WHITE, true)
+	sendFull(display, frame)
+
 }
