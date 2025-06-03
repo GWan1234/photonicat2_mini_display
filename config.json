@@ -379,7 +379,7 @@
                 {
                     "type": "fixed_text",
                     "label": "SIM:",
-                    "position": {"x": 10, "y": 52},
+                    "position": {"x": 10, "y": 75},
                     "font": "unit",
                     "color": [255, 229, 0],
                     "enable": 1
@@ -387,7 +387,7 @@
                 {
                     "type": "text",
                     "label": "SIM:",
-                    "position": {"x": 110, "y": 52},
+                    "position": {"x": 110, "y": 75},
                     "font": "unit",
                     "color": [255, 229, 255],
                     "data_key": "SimState",
@@ -397,15 +397,15 @@
                 {
                     "type": "fixed_text",
                     "label": "Cell Dev:",
-                    "position": {"x": 10, "y": 75},
+                    "position": {"x": 10, "y": 52},
                     "font": "unit",
                     "color": [255, 229, 0],
-                    "enable": 1
+                    "enable": 0
                 },
                 {
                     "type": "text",
                     "label": "celldev",
-                    "position": {"x": 90, "y": 75},
+                    "position": {"x": 10, "y": 52},
                     "font": "unit",
                     "color": [255, 229, 255],
                     "data_key": "ModemModel",
