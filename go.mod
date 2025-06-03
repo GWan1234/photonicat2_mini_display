@@ -1,6 +1,8 @@
 module github.com/photonicat/photonicat2_mini_display
 
-go 1.19
+go 1.18
+
+//go 1.19
 
 //go 1.22.6
 
@@ -9,7 +11,7 @@ go 1.19
 require (
 	github.com/ajstarks/svgo v0.0.0-20211024235047-1546f124cd8b
 	github.com/go-ping/ping v1.2.0
-	github.com/gofiber/fiber/v2 v2.52.6
+	github.com/gofiber/fiber/v2 v2.52.7
 	github.com/holoplot/go-evdev v0.0.0-20240306072622-217e18f17db1
 	github.com/llgcode/draw2d v0.0.0-20240627062922-0ed1ff131195
 	github.com/photonicat/periph.io-gc9307 v0.0.0-20250327024102-e03f39f11c1d
@@ -32,8 +34,8 @@ require (
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasthttp v1.51.0 // indirect
 	github.com/valyala/tcplisten v1.0.0 // indirect
-	golang.org/x/net v0.26.0 // indirect
-	golang.org/x/sync v0.11.0 // indirect
-	golang.org/x/sys v0.28.0 // indirect
-	golang.org/x/text v0.22.0 // indirect
+	golang.org/x/net v0.38.0 // indirect
+	golang.org/x/sync v0.12.0 // indirect
+	golang.org/x/sys v0.31.0 // indirect
+	golang.org/x/text v0.23.0 // indirect
 )
