@@ -1,7 +1,8 @@
 module github.com/photonicat/photonicat2_mini_display
 
+go 1.23.0
 
-go 1.22
+toolchain go1.23.9
 
 //go 1.22.6
 
@@ -33,7 +34,7 @@ require (
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasthttp v1.51.0 // indirect
 	github.com/valyala/tcplisten v1.0.0 // indirect
-	golang.org/x/net v0.38.0 // indirect
+	golang.org/x/net v0.32.0 // indirect
 	golang.org/x/sync v0.12.0 // indirect
 	golang.org/x/sys v0.31.0 // indirect
 	golang.org/x/text v0.23.0 // indirect

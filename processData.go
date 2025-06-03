@@ -18,7 +18,6 @@ import (
 	"strings"
 	"syscall"
 	"time"
-	"errors"
 	"path/filepath"
 
 	"github.com/go-ping/ping"
@@ -449,72 +448,48 @@ func getSN() (string, error) {
 
 
 func getUptime() (string, error) {
-    cmd := exec.Command("uptime", "-p")
-    out, err := cmd.Output()
-    if err == nil {
-        return parsePrettyUptime(string(out)), nil
-    }
+	// Read /proc/uptime
+	data, err := ioutil.ReadFile("/proc/uptime")
+	if err != nil {
+		return "", fmt.Errorf("error reading /proc/uptime: %v", err)
+	}
 
-    cmd = exec.Command("uptime")
-    out, err = cmd.Output()
-    if err != nil {
-        return "", err
-    }
-    return parsePlainUptime(string(out))
-}
+	// Parse the first value (uptime in seconds)
+	fields := strings.Fields(string(data))
+	if len(fields) < 1 {
+		return "", fmt.Errorf("invalid uptime data")
+	}
 
-func parsePrettyUptime(raw string) string {
-    s := strings.TrimSpace(raw)
-    s = strings.TrimPrefix(s, "up ")
-    replacements := []struct{ old, new string }{
-        {"years,", "y "}, {"year,", "y "},
-        {"days,", "d "}, {"day,", "d "},
-        {"hours,", "h "}, {"hour,", "h "},
-        {"minutes", "m"}, {"minute", "m"},
-        {"and ", ""},
-    }
-    for _, r := range replacements {
-        s = strings.Replace(s, r.old, r.new, -1)
-    }
-    return strings.TrimSpace(s)
-}
+	seconds, err := strconv.ParseFloat(fields[0], 64)
+	if err != nil {
+		return "", fmt.Errorf("error parsing uptime: %v", err)
+	}
 
-func parsePlainUptime(raw string) (string, error) {
-    re := regexp.MustCompile(`up\s+((?:\d+\s+days?,\s*)?\d+:\d+)`)
-    match := re.FindStringSubmatch(raw)
-    if len(match) < 2 {
-        return "", errors.New("无法解析 uptime 输出: " + raw)
-    }
-    period := match[1]
+	// Convert seconds to time.Duration
+	uptime := time.Duration(seconds) * time.Second
 
-    var parts []string
-    if strings.Contains(period, "day") {
-        dayRe := regexp.MustCompile(`(\d+)\s+days?`)
-        dm := dayRe.FindStringSubmatch(period)
-        if len(dm) >= 2 {
-            parts = append(parts, dm[1]+"d")
-        }
-        period = strings.SplitN(period, ",", 2)[1]
-    }
+	// Calculate days, hours, minutes, and seconds
+	days := int(uptime.Hours()) / 24
+	hours := int(uptime.Hours()) % 24
+	minutes := int(uptime.Minutes()) % 60
+	secs := int(uptime.Seconds()) % 60
 
-    period = strings.TrimSpace(period)
-    hm := strings.Split(period, ":")
-    if len(hm) != 2 {
-        return "", fmt.Errorf("unexpected time format: %q", period)
-    }
-    h, err1 := strconv.Atoi(hm[0])
-    m, err2 := strconv.Atoi(hm[1])
-    if err1 != nil || err2 != nil {
-        return "", fmt.Errorf("cannot parse hours or minutes: %v, %v", err1, err2)
-    }
-    if h > 0 {
-        parts = append(parts, fmt.Sprintf("%dh", h))
-    }
-    if m > 0 {
-        parts = append(parts, fmt.Sprintf("%dm", m))
-    }
+	// Build human-readable string, omitting zero values
+	var parts []string
+	if days > 0 {
+		parts = append(parts, fmt.Sprintf("%dd", days))
+	}
+	if hours > 0 {
+		parts = append(parts, fmt.Sprintf("%dh", hours))
+	}
+	if minutes > 0 {
+		parts = append(parts, fmt.Sprintf("%dm", minutes))
+	}
+	if secs > 0 || len(parts) == 0 { // Include seconds if zero to avoid empty string
+		parts = append(parts, fmt.Sprintf("%ds", secs))
+	}
 
-    return strings.Join(parts, " "), nil
+	return strings.Join(parts, " "), nil
 }
 
 func getKernelDate() (string, error) {
