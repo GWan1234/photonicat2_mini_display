@@ -42,11 +42,10 @@ const (
 	STATE_FADE_IN = 2
 	STATE_FADE_OUT = 3
 	DEFAULT_FPS = 5
-	DEFAULT_IDLE_TIMEOUT = 10 * time.Second
+	DEFAULT_IDLE_TIMEOUT = 60 * time.Second
 	ON_CHARGING_IDLE_TIMEOUT = 365 * 86400 * time.Second
-	KEYBOARD_DEBOUNCE_TIME = 500 * time.Millisecond
+	KEYBOARD_DEBOUNCE_TIME = 250 * time.Millisecond
 	ZERO_BACKLIGHT_DELAY = 5 * time.Second
-	
 )
 
 var (
