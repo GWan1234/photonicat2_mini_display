@@ -682,6 +682,13 @@ func drawTopBar(display gc9307.Device, frame *image.RGBA) {
 			drawSignalStrength(frame, x0+70, y0, signalStrength)
 			drawText(frame, networkStr, x0+94, y0-3, faceTiny, PCAT_WHITE, false)
 		}
+	}else if networkStr == "u"{
+		nolink, _, _, err := loadImage(assetsPrefix+"/assets/svg/nolink.svg")
+		if err != nil {
+			fmt.Println("Error loading nolink:", err)
+			return
+		}
+		copyImageToImageAt(frame, nolink, x0+80, y0+2)
 	}
 
 	//draw Battery
