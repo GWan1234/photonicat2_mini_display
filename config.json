@@ -349,9 +349,146 @@
             ],
             "page3": [
                 {
-                    "type": "fixed_text",
-                    "label": "CPU Temp:",
+                    "type": "text",
+                    "label": "ISP",
                     "position": {"x": 10, "y": 5},
+                    "font": "unit",
+                    "color": [255, 229, 255],
+                    "data_key": "ISPName",
+                    "units_font": "unit",
+                    "enable": 1
+                },
+                {
+                    "type": "fixed_text",
+                    "label": "Cell#:",
+                    "position": {"x": 10, "y": 29},
+                    "font": "unit",
+                    "color": [255, 229, 0],
+                    "enable": 0
+                },
+                {
+                    "type": "text",
+                    "label": "Cell Num",
+                    "position": {"x": 10, "y": 29},
+                    "font": "unit",
+                    "color": [255, 229, 255],
+                    "data_key": "CellNum",
+                    "units_font": "unit",
+                    "enable": 1
+                },
+                {
+                    "type": "fixed_text",
+                    "label": "SIM:",
+                    "position": {"x": 10, "y": 52},
+                    "font": "unit",
+                    "color": [255, 229, 0],
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "SIM:",
+                    "position": {"x": 110, "y": 52},
+                    "font": "unit",
+                    "color": [255, 229, 255],
+                    "data_key": "SimState",
+                    "units_font": "unit",
+                    "enable": 1
+                },
+                {
+                    "type": "fixed_text",
+                    "label": "Cell Dev:",
+                    "position": {"x": 10, "y": 75},
+                    "font": "unit",
+                    "color": [255, 229, 0],
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "celldev",
+                    "position": {"x": 90, "y": 75},
+                    "font": "unit",
+                    "color": [255, 229, 255],
+                    "data_key": "ModemModel",
+                    "units_font": "unit",
+                    "enable": 1
+                },
+                {
+                    "type": "fixed_text",
+                    "label": "WiFi C/s:",
+                    "position": {"x": 10, "y": 98},
+                    "font": "unit",
+                    "color": [255, 229, 0],
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "WiFi C/s:",
+                    "position": {"x": 110, "y": 98},
+                    "font": "unit",
+                    "color": [255, 229, 255],
+                    "data_key": "WiFiClientsCount",
+                    "units_font": "unit",
+                    "enable": 1
+                },
+                {
+                    "type": "fixed_text",
+                    "label": "DHCP C/s:",
+                    "position": {"x": 10, "y": 121},
+                    "font": "unit",
+                    "color": [255, 229, 0],
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "DHCP C/s:",
+                    "position": {"x": 110, "y": 121},
+                    "font": "unit",
+                    "color": [255, 229, 255],
+                    "data_key": "DHCPClientsCount",
+                    "units_font": "unit",
+                    "enable": 1
+                },
+
+                {
+                    "type": "fixed_text",
+                    "label": "SD Card:",
+                    "position": {"x": 10, "y": 167},
+                    "font": "unit",
+                    "color": [255, 229, 0],
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "SD State",
+                    "position": {"x": 110, "y": 167},
+                    "font": "unit",
+                    "color": [255, 229, 255],
+                    "data_key": "SdState",
+                    "units_font": "unit",
+                    "enable": 1
+                },
+                {
+                    "type": "fixed_text",
+                    "label": "Fan RPM:",
+                    "position": {"x": 10, "y": 190},
+                    "font": "unit",
+                    "color": [255, 229, 0],
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "Fan",
+                    "position": {"x": 110, "y": 190},
+                    "font": "unit",
+                    "color": [255, 229, 255],
+                    "data_key": "Fan",
+                    "units_font": "unit",
+                    "enable": 1
+                },
+                {
+                    "type": "fixed_text",
+                    "label": "PCAT C°:",
+                    "position": {"x": 10, "y": 213},
                     "font": "unit",
                     "color": [255, 229, 0],
                     "enable": 1
@@ -359,7 +496,26 @@
                 {
                     "type": "text",
                     "label": "Temp",
-                    "position": {"x": 110, "y": 5},
+                    "position": {"x": 110, "y": 213},
+                    "font": "unit",
+                    "color": [255, 229, 255],
+                    "data_key": "BoardTemperature",
+                    "units_font": "unit",
+                    "units": " C",
+                    "enable": 1
+                },
+                {
+                    "type": "fixed_text",
+                    "label": "CPU C°:",
+                    "position": {"x": 10, "y": 236},
+                    "font": "unit",
+                    "color": [255, 229, 0],
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "Temp",
+                    "position": {"x": 110, "y": 236},
                     "font": "unit",
                     "color": [255, 229, 255],
                     "data_key": "CpuTemp",
@@ -369,110 +525,11 @@
                 },
                 {
                     "type": "fixed_text",
-                    "label": "Fan RPM:",
-                    "position": {"x": 10, "y": 30},
+                    "label": "ISP:",
+                    "position": {"x": 10, "y": 158},
                     "font": "unit",
                     "color": [255, 229, 0],
-                    "enable": 1
-                },
-                {
-                    "type": "text",
-                    "label": "Fan",
-                    "position": {"x": 110, "y": 30},
-                    "font": "unit",
-                    "color": [255, 229, 255],
-                    "data_key": "Fan",
-                    "units_font": "unit",
-                    "enable": 1
-                },
-                {
-                    "type": "fixed_text",
-                    "label": "Wifi Clients:",
-                    "position": {"x": 10, "y": 55},
-                    "font": "unit",
-                    "color": [255, 229, 0],
-                    "enable": 1
-                },
-                {
-                    "type": "text",
-                    "label": "Wifi Clients",
-                    "position": {"x": 110, "y": 55},
-                    "font": "unit",
-                    "color": [255, 229, 255],
-                    "data_key": "WifiClients",
-                    "units_font": "unit",
-                    "enable": 1
-                },
-                {
-                    "type": "fixed_text",
-                    "label": "Carrier:",
-                    "position": {"x": 10, "y": 80},
-                    "font": "unit",
-                    "color": [255, 229, 0],
-                    "enable": 1
-                },
-                {
-                    "type": "text",
-                    "label": "Carrier",
-                    "position": {"x": 90, "y": 80},
-                    "font": "unit",
-                    "color": [255, 229, 255],
-                    "data_key": "Carrier",
-                    "units_font": "unit",
-                    "enable": 1
-                },
-                {
-                    "type": "fixed_text",
-                    "label": "Cell Num:",
-                    "position": {"x": 10, "y": 105},
-                    "font": "unit",
-                    "color": [255, 229, 0],
-                    "enable": 1
-                },
-                {
-                    "type": "text",
-                    "label": "Cell Num",
-                    "position": {"x": 90, "y": 105},
-                    "font": "unit",
-                    "color": [255, 229, 255],
-                    "data_key": "CellNum",
-                    "units_font": "unit",
-                    "enable": 1
-                },
-                {
-                    "type": "fixed_text",
-                    "label": "WWAN:",
-                    "position": {"x": 10, "y": 130},
-                    "font": "unit",
-                    "color": [255, 229, 0],
-                    "enable": 1
-                },
-                {
-                    "type": "text",
-                    "label": "wwan",
-                    "position": {"x": 90, "y": 130},
-                    "font": "unit",
-                    "color": [255, 229, 255],
-                    "data_key": "WWANModule",
-                    "units_font": "unit",
-                    "enable": 1
-                },{
-                    "type": "fixed_text",
-                    "label": "WIFI:",
-                    "position": {"x": 10, "y": 155},
-                    "font": "unit",
-                    "color": [255, 229, 0],
-                    "enable": 1
-                },
-                {
-                    "type": "text",
-                    "label": "Phone Num",
-                    "position": {"x": 90, "y": 155},
-                    "font": "unit",
-                    "color": [255, 229, 255],
-                    "data_key": "PhoneNum",
-                    "units_font": "unit",
-                    "enable": 1
+                    "enable": 0
                 }
 
             ]

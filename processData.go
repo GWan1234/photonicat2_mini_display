@@ -152,8 +152,14 @@ func getInfoFromPcatWeb() { //we get from this api to save /dev/ttyUSBX port use
 		globalData.Store("SdState",         info.SdState)
 		globalData.Store("ServerLocation",  info.ServerLocation)
 		globalData.Store("SimState",        info.SimState)
-		globalData.Store("Uptime",          info.Uptime)
+		if info.SimState == "ready" {
+			globalData.Store("SimState",         "Yes")
+		} else {
+			globalData.Store("SimState",         "No")
+		}
 		globalData.Store("WiFiClientsCount", info.WiFiClientsCount)
+		//globalData.Store("CellNum",         info.CellNum)
+
 
 		// If you need to show the raw JSON array of interfaces somewhere, you can re‐marshal or store
 		// the slice directly. For example:
