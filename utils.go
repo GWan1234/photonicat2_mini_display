@@ -10,11 +10,19 @@ import (
 	"strconv"
 	"fmt"
 	"strings"
+	"sync"
+	"math"
 
 	evdev "github.com/holoplot/go-evdev"
 
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/opentype"
+)
+
+var (
+    fadeMu sync.Mutex
+    fadeCancel chan struct{}
+    swippingScreen bool
 )
 
 // loadConfig reads and unmarshals the config file.
@@ -99,7 +107,7 @@ func setBacklight(brightness int) {
     if err := os.WriteFile("/sys/class/backlight/backlight/brightness", []byte(strconv.Itoa(phys)), 0644); err != nil {
         log.Printf("backlight write error: %v", err)
     } else {
-        log.Printf("→ physical backlight %d", phys)
+        //log.Printf("→ physical backlight %d", phys)
     }
 
     // if we just handled a logical “0”, schedule the real off in ZERO_BACKLIGHT_DELAY s
@@ -169,8 +177,9 @@ func monitorKeyboard(changePageTriggered *bool) {
         if ev.Type == evdev.EV_KEY && ev.Code == evdev.KEY_POWER {
             switch ev.Value {
             case 1: // key press
-                log.Println("POWER pressed")
-                if idleState == STATE_ACTIVE {
+                log.Println("POWER pressed, state =", stateName(idleState))
+                if idleState == STATE_ACTIVE || idleState == STATE_FADE_IN {
+                    swippingScreen = true
                     *changePageTriggered = true
                 }
                 lastActivityMu.Lock()
@@ -181,8 +190,9 @@ func monitorKeyboard(changePageTriggered *bool) {
             case 0: // key release
                 // only trigger if it wasn’t a quick tap (<500ms)
                 if now.Sub(lastKeyPress) > KEYBOARD_DEBOUNCE_TIME {
-                    log.Println("POWER released")
-                    if idleState == STATE_ACTIVE {
+                    log.Println("POWER released, state =", stateName(idleState))
+                    if idleState == STATE_ACTIVE{
+                        swippingScreen = true
                         *changePageTriggered = true
                     }
                     lastActivityMu.Lock()
@@ -194,74 +204,135 @@ func monitorKeyboard(changePageTriggered *bool) {
     }
 }
 
+func getBacklight() int {
+    data, err := ioutil.ReadFile("/sys/class/backlight/backlight/brightness")
+    if err != nil {
+        log.Printf("getBacklight error: %v", err)
+        return 0
+    }
+    return int(data[0])
+}
+
+
+func fadeBacklight(wantValue int, timePeriod time.Duration) {
+	// Grab a snapshot of the “current” cancel channel under the fadeMu lock:
+	fadeMu.Lock()
+	cancelChan := fadeCancel
+	fadeMu.Unlock()
+
+	initValue := getBacklight()
+	if timePeriod <= 0 || initValue == wantValue {
+		setBacklight(wantValue)
+		return
+	}
+
+	const stepDuration = 40 * time.Millisecond
+	steps := int(timePeriod / stepDuration)
+	if steps < 1 {
+		setBacklight(wantValue)
+		return
+	}
+
+	diff := wantValue - initValue
+	ticker := time.NewTicker(stepDuration)
+	defer ticker.Stop()
+
+	for i := 1; i <= steps; i++ {
+		select {
+		case <-cancelChan:
+			// Someone closed fadeCancel → abort immediately
+            log.Println("fadeBacklight: cancel requested")
+			return
+		case <-ticker.C:
+			frac := float64(i) / float64(steps)
+			b := initValue + int(math.Round(frac*float64(diff)))
+			setBacklight(b)
+			log.Printf("fadeBacklight: step %d/%d → brightness=%d", i, steps, b)
+		}
+	}
+	// final guarantee
+	setBacklight(wantValue)
+}
+
 func idleDimmer() {
-    ticker := time.NewTicker(25 * time.Millisecond)
+    ticker := time.NewTicker(100 * time.Millisecond)
     defer ticker.Stop()
 
-	prevState := STATE_UNKNOWN
-	var brightness int
-	var newState int
-	lastStateScreenOn := false
-	
+    prevState := STATE_UNKNOWN
+
     for range ticker.C {
+        // 1) Movement/keypress detection
         data, err := ioutil.ReadFile("/sys/kernel/photonicat-pm/movement_trigger")
         if err == nil && strings.TrimSpace(string(data)) == "1" {
+            // Reset idle timer, treat screen as already “on”
             now := time.Now()
             lastActivityMu.Lock()
-            if time.Since(lastActivity) > 5 * time.Second {
-                lastActivity = now
-            }
+            lastActivity = now
             lastActivityMu.Unlock()
-            lastStateScreenOn = false
-            
         }
 
+        // 2) Compute idle time
         lastActivityMu.Lock()
         idle := time.Since(lastActivity)
         lastActivityMu.Unlock()
-        
+
+        var newState int
+
         switch {
         case weAreRunning == false:
-            p := float64(time.Since(offTime)) / float64(OFF_TIMEOUT) 
-            brightness = int((1 - p) * float64(maxBacklight))
-            if brightness < 10 {
-				brightness = 10
-			}
-			newState = STATE_OFF
-        case idle < fadeInDur && lastStateScreenOn == false:
-            // 1) Fade in from 0→maxBacklight over fadeInDur
-			desiredFPS = DEFAULT_FPS
-			p := float64(idle) / float64(fadeInDur)      // goes 0→1
-			if lastStateScreenOn {
-				brightness = 100 
-			}else{
-				brightness = int(p * float64(maxBacklight))
-				newState = STATE_FADE_IN
-			}
+            newState = STATE_OFF
+        case idle < fadeInDur:
+            if swippingScreen {
+                newState = STATE_ACTIVE
+            } else {
+                newState = STATE_FADE_IN
+            }
         case idle < idleTimeout:
-            // 2) Fully on during the “active” window
-            brightness = maxBacklight
-			newState  = STATE_ACTIVE
-			lastStateScreenOn = true
+            newState = STATE_ACTIVE
+            swippingScreen = false
         case idle < idleTimeout+fadeDuration:
-            // 3) Fade out from maxBacklight→0 over fadeDuration
-            p := float64(idle-idleTimeout) / float64(fadeDuration) 
-            brightness = int((1 - p) * float64(maxBacklight)) // 1→0
-			newState  = STATE_FADE_OUT
-			lastStateScreenOn = true
+            newState = STATE_FADE_OUT
         default:
-            brightness = 0
-			newState  = STATE_IDLE
-			lastStateScreenOn = false
-			desiredFPS = 1
+            newState = STATE_IDLE
         }
-        setBacklight(brightness)
-		// If the state changed, log it
-        if newState != prevState {
-            log.Printf("idleDimmer: state changed from %s to %s", stateName(prevState), stateName(newState))
+
+        if prevState != newState {
+            log.Printf("STATE CHANGED: %s -> %s", stateName(prevState), stateName(newState))
+            idleState = newState
             prevState = newState
+
+            // ── Cancel any existing fade by closing fadeCancel ──────────
+			fadeMu.Lock()
+            if fadeCancel != nil {
+                close(fadeCancel)          // signal the currently running fadeBacklight (if any) to stop
+                 // allocate a brand‑new channel
+            }
+            fadeCancel = make(chan struct{})
+			//myCancel := fadeCancel
+			fadeMu.Unlock()
+
+            switch newState {
+            case STATE_OFF:
+                fadeBacklight(10, OFF_TIMEOUT)
+                os.Exit(0)
+
+            case STATE_FADE_IN:
+                if !swippingScreen {
+                    go fadeBacklight(maxBacklight, fadeInDur)
+                }
+            case STATE_FADE_OUT:
+                go fadeBacklight(0, fadeDuration)
+
+            case STATE_ACTIVE:
+                setBacklight(maxBacklight)
+                swippingScreen = false
+
+            case STATE_IDLE:
+                setBacklight(0)
+                desiredFPS = 1
+            }
         }
-        idleState = newState 
+        
     }
 }
 

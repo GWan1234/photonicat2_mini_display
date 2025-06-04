@@ -44,7 +44,7 @@ const (
 	STATE_FADE_OUT = 3
 	STATE_OFF = 4
 	DEFAULT_FPS = 5
-	DEFAULT_IDLE_TIMEOUT = 60 * time.Second
+	DEFAULT_IDLE_TIMEOUT = 10 * time.Second
 	ON_CHARGING_IDLE_TIMEOUT = 365 * 86400 * time.Second
 	KEYBOARD_DEBOUNCE_TIME = 200 * time.Millisecond
 	ZERO_BACKLIGHT_DELAY = 5 * time.Second

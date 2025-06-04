@@ -107,71 +107,68 @@ func collectTopBarData() {
 }
 
 
-func getInfoFromPcatWeb() { //we get from this api to save /dev/ttyUSBX port used
+func getInfoFromPcatWeb() { 
 	urls := []string{
-		"http://localhost:80/api/v1/dashboard.json",
-
+	  "http://localhost:80/api/v1/dashboard.json",
+	  "http://localhost:8001/api/v1/dashboard.json",
 	}
-
+  
+	var info DashboardInfo
+	var success bool
+  
 	for _, url := range urls {
-		resp, err := http.Get(url)
-		if err != nil {
-			fmt.Printf("Could not GET %s: %v\n", url, err)
-			continue
-		}
-		defer resp.Body.Close()
-
-		// Read the entire response body
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			fmt.Printf("Could not read body from %s: %v\n", url, err)
-			continue
-		}
-
-		// Unmarshal into our DashboardInfo struct
-		var info DashboardInfo
-		if err := json.Unmarshal(body, &info); err != nil {
-			fmt.Printf("Could not unmarshal JSON from %s: %v\n", url, err)
-			continue
-		}
-
-		// (3) Store each field into globalData under a sensible key.
-		//     Adjust the keys to match whatever your front‐end expects.
-
-		globalData.Store("BoardTemperature", info.BoardTemperature)
-		globalData.Store("Carrier", info.Carrier)
-		globalData.Store("GatewayDevice", info.Connection)
-		globalData.Store("DHCPClientsCount", info.DHCPClientsCount)
-
-		globalData.Store("FirmwareVersion", info.FirmwareVersion)
-		globalData.Store("ISPName",         info.ISPName)
-		globalData.Store("Model",           info.Model)
-		globalData.Store("ModemModel",      info.ModemModel)
-		globalData.Store("ModemSignalStrength", info.ModemSignalStrength)
-		globalData.Store("SdState",         info.SdState)
-		globalData.Store("ServerLocation",  info.ServerLocation)
-		globalData.Store("SimState",        info.SimState)
-		if info.SimState == "ready" {
-			globalData.Store("SimState",         "Yes")
-		} else {
-			globalData.Store("SimState",         "No")
-		}
-		globalData.Store("WiFiClientsCount", info.WiFiClientsCount)
-		//globalData.Store("CellNum",         info.CellNum)
-
-
-		// If you need to show the raw JSON array of interfaces somewhere, you can re‐marshal or store
-		// the slice directly. For example:
-		globalData.Store("WiFiInterfaces", info.WiFiInterfaces)
-
-		// If only the SSIDs of each interface matter, you could also collect them here:
-		var ssids []string
-		for _, iface := range info.WiFiInterfaces {
-			ssids = append(ssids, iface.SSID)
-		}
-		globalData.Store("WiFiSSIDs", ssids)
+	  resp, err := http.Get(url)
+	  if err != nil {
+		continue // try next URL silently
+	  }
+	  defer resp.Body.Close()
+  
+	  body, err := io.ReadAll(resp.Body)
+	  if err != nil {
+		continue // try next URL silently
+	  }
+  
+	  if err := json.Unmarshal(body, &info); err != nil {
+		continue // try next URL silently
+	  }
+  
+	  // Successfully fetched and unmarshaled; no need to try further
+	  success = true
+	  break
 	}
-}
+  
+	if !success {
+	  return // both URLs failed, exit silently
+	}
+  
+	// Store each field into globalData under a sensible key.
+	globalData.Store("BoardTemperature",      info.BoardTemperature)
+	globalData.Store("Carrier",               info.Carrier)
+	globalData.Store("GatewayDevice",         info.Connection)
+	globalData.Store("DHCPClientsCount",      info.DHCPClientsCount)
+	globalData.Store("FirmwareVersion",       info.FirmwareVersion)
+	globalData.Store("ISPName",               info.ISPName)
+	globalData.Store("Model",                 info.Model)
+	globalData.Store("ModemModel",            info.ModemModel)
+	globalData.Store("ModemSignalStrength",   info.ModemSignalStrength)
+	globalData.Store("SdState",               info.SdState)
+	globalData.Store("ServerLocation",        info.ServerLocation)
+  
+	if info.SimState == "ready" {
+	  globalData.Store("SimState", "Yes")
+	} else {
+	  globalData.Store("SimState", "No")
+	}
+  
+	globalData.Store("WiFiClientsCount", info.WiFiClientsCount)
+	globalData.Store("WiFiInterfaces",   info.WiFiInterfaces)
+  
+	var ssids []string
+	for _, iface := range info.WiFiInterfaces {
+	  ssids = append(ssids, iface.SSID)
+	}
+	globalData.Store("WiFiSSIDs", ssids)
+  }
 
 // formatSpeed formats speed into value and units as Mbps
 func formatSpeed(mbps float64) (string, string) {
@@ -408,7 +405,7 @@ func collectNetworkData(cfg Config) {
 
 	// IPv6 public IP.
 	if ipv6, err := getIPv6Public(); err != nil {
-		fmt.Printf("Could not get IPv6 public IP: %v\n", err)
+		//fmt.Printf("Could not get IPv6 public IP: %v\n", err)
 		globalData.Store("PublicIPv6", "0.0.0.0")
 	} else {
 		globalData.Store("PublicIPv6", ipv6)
