@@ -172,6 +172,10 @@ func getInfoFromPcatWeb() {
 
 // formatSpeed formats speed into value and units as Mbps
 func formatSpeed(mbps float64) (string, string) {
+	if mbps > 100000 || mbps < 0.0 { //clamping
+		mbps = 0.0
+	}
+
 	if mbps >= 1.0 {
 		// For speeds ≥1 Mbps, use 3 significant digits
 		return fmt.Sprintf("%.3g", mbps), "Mbps"

@@ -624,11 +624,15 @@ func drawTopBar(display gc9307.Device, frame *image.RGBA) {
 	}
 
 	gatewayDevice, _ := globalData.Load("GatewayDevice")
+	carrier, _ := globalData.Load("Carrier")
+        log.Println(gatewayDevice, carrier)
 	
-	if gatewayDevice == "5G"{
-		networkStr = "5"
-	}else if gatewayDevice == "4G"{
-		networkStr = "4"
+	if gatewayDevice == "mobile"{
+		if carrier == "5G"{
+			networkStr = "5"
+		}else if carrier == "4G"{
+			networkStr = "4"
+		}
 	}else if gatewayDevice == "wired"{
 		networkStr = "w"
 	}else{
@@ -671,8 +675,15 @@ func drawTopBar(display gc9307.Device, frame *image.RGBA) {
 		copyImageToImageAt(frame, eth, x0+80, y0+2)
 
 	}else if networkStr == "4" || networkStr == "5" || networkStr == "3" {
-		signalStrengthInt, _ := globalData.Load("SignalStrength")
-		signalStrength := float64(signalStrengthInt.(int)) / 100.0
+		signalStrengthInt, ok := globalData.Load("ModemSignalStrength")
+		if !ok {
+			fmt.Println("ModemSignalStrength not found, use default 0")
+			signalStrength = 0.0
+		}
+
+		fmt.Println("ModemSignalStrength:", signalStrengthInt)
+
+		signalStrength = float64(signalStrengthInt.(int)) / 100.0
 		//draw signal strength
 		if fiveGonTop {
 			drawSignalStrength(frame, x0+80, y0, signalStrength)
