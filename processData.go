@@ -69,6 +69,14 @@ type DashboardInfo struct {
 	WiFiInterfaces     []WiFiInterface  `json:"wifi_interfaces"`
 }
 
+// NetworkStats matches the keys returned by /api/v1/data_stats.json?network_type=mobile
+type NetworkStats struct {
+    TodayUsed     float64 `json:"today_used"`
+    WeekUsed      float64 `json:"week_used"`
+    MonthUsed     float64 `json:"month_used"`
+    LastMonthUsed float64 `json:"last_month_used"`
+}
+
 // NetworkSpeed represents upload/download in bytes per second
 type NetworkSpeed struct {
 	UploadMbps   float64
@@ -104,71 +112,90 @@ func collectTopBarData() {
 	}
     
 	getInfoFromPcatWeb()
+	time.Sleep(1 * time.Second)
 }
 
 
-func getInfoFromPcatWeb() { 
-	urls := []string{
-	  "http://localhost:80/api/v1/dashboard.json",
-	  "http://localhost:8001/api/v1/dashboard.json",
-	}
-  
-	var info DashboardInfo
-	var success bool
-  
-	for _, url := range urls {
-	  resp, err := http.Get(url)
-	  if err != nil {
-		continue // try next URL silently
-	  }
-	  defer resp.Body.Close()
-  
-	  body, err := io.ReadAll(resp.Body)
-	  if err != nil {
-		continue // try next URL silently
-	  }
-  
-	  if err := json.Unmarshal(body, &info); err != nil {
-		continue // try next URL silently
-	  }
-  
-	  // Successfully fetched and unmarshaled; no need to try further
-	  success = true
-	  break
-	}
-  
-	if !success {
-	  return // both URLs failed, exit silently
-	}
-  
-	// Store each field into globalData under a sensible key.
-	globalData.Store("BoardTemperature",      info.BoardTemperature)
-	globalData.Store("Carrier",               info.Carrier)
-	globalData.Store("GatewayDevice",         info.Connection)
-	globalData.Store("DHCPClientsCount",      info.DHCPClientsCount)
-	globalData.Store("FirmwareVersion",       info.FirmwareVersion)
-	globalData.Store("ISPName",               info.ISPName)
-	globalData.Store("Model",                 info.Model)
-	globalData.Store("ModemModel",            info.ModemModel)
-	globalData.Store("ModemSignalStrength",   info.ModemSignalStrength)
-	globalData.Store("SdState",               info.SdState)
-	globalData.Store("ServerLocation",        info.ServerLocation)
-  
-	if info.SimState == "ready" {
-	  globalData.Store("SimState", "Yes")
-	} else {
-	  globalData.Store("SimState", "No")
-	}
-  
-	globalData.Store("WiFiClientsCount", info.WiFiClientsCount)
-	globalData.Store("WiFiInterfaces",   info.WiFiInterfaces)
-  
-	var ssids []string
-	for _, iface := range info.WiFiInterfaces {
-	  ssids = append(ssids, iface.SSID)
-	}
-	globalData.Store("WiFiSSIDs", ssids)
-  }
+func getInfoFromPcatWeb() {
+    dashbarodURL   := "http://localhost:80/api/v1/dashboard.json"
+    networkStatsURL := "http://localhost:80/api/v1/data_stats.json?network_type=mobile"
+
+    var info DashboardInfo
+
+    // === 1) Fetch dashboard.json ===
+    resp, err := http.Get(dashbarodURL)
+    if err != nil {
+        fmt.Println("Could not get dashboard info:", err)
+    } else {
+        defer resp.Body.Close()
+        body, err := io.ReadAll(resp.Body)
+        if err != nil {
+            fmt.Println("Failed to read dashboard response body:", err)
+        } else {
+            if err2 := json.Unmarshal(body, &info); err2 != nil {
+                fmt.Println("Could not unmarshal dashboard info:", err2)
+            } else {
+                // Store each field into globalData under a sensible key.
+                globalData.Store("BoardTemperature",      info.BoardTemperature)
+                globalData.Store("Carrier",               info.Carrier)
+                globalData.Store("GatewayDevice",         info.Connection)
+                globalData.Store("DHCPClientsCount",      info.DHCPClientsCount)
+                globalData.Store("FirmwareVersion",       info.FirmwareVersion)
+                globalData.Store("ISPName",               info.ISPName)
+                globalData.Store("Model",                 info.Model)
+                globalData.Store("ModemModel",            info.ModemModel)
+                globalData.Store("ModemSignalStrength",   info.ModemSignalStrength)
+                globalData.Store("SdState",               info.SdState)
+                globalData.Store("ServerLocation",        info.ServerLocation)
+
+                if info.SimState == "ready" {
+                    globalData.Store("SimState", "Yes")
+                } else {
+                    globalData.Store("SimState", "-")
+                }
+
+                globalData.Store("WiFiClientsCount", info.WiFiClientsCount)
+                globalData.Store("WiFiInterfaces",   info.WiFiInterfaces)
+
+                // Build a slice of SSIDs for convenience
+                var ssids []string
+                for _, iface := range info.WiFiInterfaces {
+                    ssids = append(ssids, iface.SSID)
+                }
+                globalData.Store("WiFiSSIDs", ssids)
+            }
+        }
+    }
+
+
+    // === 2) Fetch data_stats.json ===
+    resp2, err := http.Get(networkStatsURL)
+    if err != nil {
+        fmt.Println("Could not get network stats:", err)
+    } else {
+        defer resp2.Body.Close()
+        body2, err := io.ReadAll(resp2.Body)
+        if err != nil {
+            fmt.Println("Failed to read network stats body:", err)
+        } else {
+            var stats NetworkStats
+            if err3 := json.Unmarshal(body2, &stats); err3 != nil {
+                fmt.Println("Could not unmarshal network stats:", err3)
+            } else {
+                // Now store exactly the fields you want:
+				strTodayUsed := fmt.Sprintf("%0.2f", stats.TodayUsed / 1024 /1024 / 1024)
+				strWeekUsed := fmt.Sprintf("%0.2f", stats.WeekUsed / 1024 /1024 / 1024)
+				strMonthUsed := fmt.Sprintf("%0.2f", stats.MonthUsed / 1024 /1024 / 1024)
+				strLastMonthUsed := fmt.Sprintf("%0.2f", stats.LastMonthUsed / 1024 /1024 / 1024)
+
+                globalData.Store("DailyDataUsage",   strTodayUsed)
+                globalData.Store("WeeklyDataUsage",  strWeekUsed)
+                globalData.Store("MonthlyDataUsage", strMonthUsed)
+                globalData.Store("LastMonthUsage", strLastMonthUsed)
+            }
+        }
+    }
+}
 
 // formatSpeed formats speed into value and units as Mbps
 func formatSpeed(mbps float64) (string, string) {
@@ -319,20 +346,22 @@ func collectData(cfg Config) {
 }
 
 func collectNetworkData(cfg Config) {
-	if sessionDataUsage, err := getSessionDataUsageGB(wanInterface); err != nil {
-		fmt.Printf("Could not get session data usage: %v\n", err)
-		globalData.Store("SessionDataUsage", nil)
-	} else {
-		sessionDataUsage_1digit := fmt.Sprintf("%0.1f", sessionDataUsage)
-		globalData.Store("SessionDataUsage", sessionDataUsage_1digit)
-	}
+	if !isOpenWRT(){
+		if sessionDataUsage, err := getSessionDataUsageGB(wanInterface); err != nil {
+			fmt.Printf("Could not get session data usage: %v\n", err)
+			globalData.Store("SessionDataUsage", nil)
+		} else {
+			sessionDataUsage_1digit := fmt.Sprintf("%0.1f", sessionDataUsage)
+			globalData.Store("SessionDataUsage", sessionDataUsage_1digit)
+		}
 
-	if monthlyDataUsage, err := getDataUsageMonthlyGB(wanInterface); err != nil {
-		fmt.Printf("Could not get monthly data usage: %v\n", err)
-		globalData.Store("MonthlyDataUsage", nil)
-	} else {
-		monthlyDataUsage_1digit := fmt.Sprintf("%0.1f", monthlyDataUsage)
-		globalData.Store("MonthlyDataUsage", monthlyDataUsage_1digit)
+		if monthlyDataUsage, err := getDataUsageMonthlyGB(wanInterface); err != nil {
+			fmt.Printf("Could not get monthly data usage: %v\n", err)
+			globalData.Store("MonthlyDataUsage", nil)
+		} else {
+			monthlyDataUsage_1digit := fmt.Sprintf("%0.1f", monthlyDataUsage)
+			globalData.Store("MonthlyDataUsage", monthlyDataUsage_1digit)
+		}
 	}
 
 	// Local IP address.

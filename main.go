@@ -103,7 +103,7 @@ var (
 	battChargingStatus = false
 	battSOC = 0
 
-	bateryDetectInterval = 200 * time.Millisecond
+	TopBarDataInterval = 2 * time.Second
 	dataGatherInterval = 2 * time.Second
 
 	desiredFPS = 5
@@ -278,7 +278,7 @@ func main() {
 	go func() {
 		for {
 			collectTopBarData()
-			time.Sleep(bateryDetectInterval)
+			time.Sleep(TopBarDataInterval)
 		}
 	}()
 

@@ -47,7 +47,8 @@
                 },
                 {
                     "type": "fixed_text",
-                    "label": "Session Data",
+                    "os": "OpenWRT",
+                    "label": "Daily Cell Usage",
                     "position": {"x": 10, "y": 89},
                     "font": "tiny",
                     "color": [255, 229, 0],
@@ -55,18 +56,19 @@
                 },
                 {
                     "type": "text",
+                    "os": "OpenWRT",
                     "label": "Ping",
                     "position": {"x": 10, "y": 101},
                     "font": "huge",
                     "color": [255, 229, 0],
                     "units": "GB",
-                    "data_key": "SessionDataUsage",
+                    "data_key": "DailyDataUsage",
                     "units_font": "unit",
                     "enable": 1
                 },
                 {
                     "type": "fixed_text",
-                    "label": "Monthly Data",
+                    "label": "Monthly Data Usage",
                     "position": {"x": 10, "y": 141},
                     "font": "tiny",
                     "color": [255, 229, 0],
