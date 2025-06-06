@@ -361,20 +361,12 @@
                     "enable": 1
                 },
                 {
-                    "type": "fixed_text",
-                    "label": "Cell#:",
-                    "position": {"x": 10, "y": 29},
-                    "font": "unit",
-                    "color": [255, 229, 0],
-                    "enable": 0
-                },
-                {
                     "type": "text",
                     "label": "Cell Num",
                     "position": {"x": 10, "y": 29},
                     "font": "unit",
                     "color": [255, 229, 255],
-                    "data_key": "CellNum",
+                    "data_key": "SimNumber",
                     "units_font": "unit",
                     "enable": 1
                 },
@@ -524,16 +516,7 @@
                     "units_font": "unit",
                     "units": " C",
                     "enable": 1
-                },
-                {
-                    "type": "fixed_text",
-                    "label": "ISP:",
-                    "position": {"x": 10, "y": 158},
-                    "font": "unit",
-                    "color": [255, 229, 0],
-                    "enable": 0
                 }
-
             ]
         }
     }

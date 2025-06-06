@@ -61,6 +61,7 @@ type DashboardInfo struct {
 	SdState            int              `json:"sd_state"`
 	ServerLocation     string           `json:"server_location"`
 	SimState           string           `json:"sim_state"`
+	SimNumber          string           `json:"sim_number"`
 	UpSpeed            float64          `json:"up_speed"`
 	Uptime             string           `json:"uptime"`
 	Voltage            int              `json:"voltage"`
@@ -147,6 +148,7 @@ func getInfoFromPcatWeb() {
                 globalData.Store("ModemSignalStrength",   info.ModemSignalStrength)
                 globalData.Store("SdState",               info.SdState)
                 globalData.Store("ServerLocation",        info.ServerLocation)
+				globalData.Store("SimNumber",             info.SimNumber)
 
                 if info.SimState == "ready" {
                     globalData.Store("SimState", "Yes")
