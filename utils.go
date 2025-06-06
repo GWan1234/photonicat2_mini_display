@@ -267,7 +267,10 @@ func idleDimmer() {
             // Reset idle timer, treat screen as already “on”
             now := time.Now()
             lastActivityMu.Lock()
-            lastActivity = now
+            tempLastActivity := now.Add(-2 * time.Second)
+            if tempLastActivity.After(lastActivity) {   
+                lastActivity = tempLastActivity
+            }
             lastActivityMu.Unlock()
         }
 

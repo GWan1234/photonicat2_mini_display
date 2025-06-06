@@ -103,7 +103,7 @@ var (
 	battChargingStatus = false
 	battSOC = 0
 
-	TopBarDataInterval = 2 * time.Second
+	TopBarDataInterval = 1 * time.Second
 	dataGatherInterval = 2 * time.Second
 
 	desiredFPS = 5

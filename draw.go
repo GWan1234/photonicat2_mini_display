@@ -625,7 +625,6 @@ func drawTopBar(display gc9307.Device, frame *image.RGBA) {
 
 	gatewayDevice, _ := globalData.Load("GatewayDevice")
 	carrier, _ := globalData.Load("Carrier")
-        log.Println(gatewayDevice, carrier)
 	
 	if gatewayDevice == "mobile"{
 		if carrier == "5G"{
@@ -896,6 +895,7 @@ func drawFooter(display gc9307.Device, frame *image.RGBA, currPage int, numOfPag
 }
 
 func showWelcome(display gc9307.Device, width, height int, duration time.Duration) {
+	radiusBarCorner := 5
 	spaceBetweenLogoAndBar := 28
 	barWidth := 82
     barX := width/2 - barWidth/2
@@ -915,7 +915,7 @@ func showWelcome(display gc9307.Device, width, height int, duration time.Duratio
 	var bufBack bytes.Buffer
 	canvas := svg.New(&bufBack)
 	canvas.Start(barWidth, barHeight)
-	canvas.Roundrect(0, 0, barWidth, barHeight, 2, 2, "fill:#627482")
+	canvas.Roundrect(0, 0, barWidth, barHeight, radiusBarCorner, radiusBarCorner, "fill:#627482")
 	canvas.End()
 	svgFile, err := os.Create(fnBase)
 	if err != nil {
@@ -943,7 +943,7 @@ func showWelcome(display gc9307.Device, width, height int, duration time.Duratio
 		bufProgress.Reset()
 		canvasProgress := svg.New(&bufProgress)
 		canvasProgress.Start(barWidth, barHeight)
-		canvasProgress.Roundrect(0, 0, i, barHeight, 2, 2, "fill:#FDE021")
+		canvasProgress.Roundrect(0, 0, i, barHeight, radiusBarCorner, radiusBarCorner, "fill:#FDE021")
 		canvasProgress.End()
 		svgFile, err := os.Create(fnProgress)
 		if err != nil {
