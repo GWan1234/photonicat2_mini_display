@@ -732,8 +732,6 @@ func saveFrameToPng(frame *image.RGBA, filename string) {
 }
 
 func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
-	// Get the elements for page0 from the configuration.
-
 	if isSMS {
 		copyImageToImageAt(frame, smsPagesImages[pageIdx], 0, 0)
 		return
@@ -878,7 +876,7 @@ func drawFooter(display gc9307.Device, frame *image.RGBA, currPage int, numOfPag
 
 	if isSMS {
 		log.Printf("Drawing SMS footer")
-		footerText := "SMS: " + strconv.Itoa(currPage) + "/" + strconv.Itoa(numOfPages)
+		footerText := "SMS: " + strconv.Itoa(currPage+1) + "/" + strconv.Itoa(numOfPages)
 		drawText(frame, footerText, 172/2, 2, faceMicro, PCAT_WHITE, true)
 
 	}else{

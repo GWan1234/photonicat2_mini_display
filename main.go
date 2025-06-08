@@ -373,7 +373,8 @@ func main() {
 	nextLocalIdx := 0
 	isSMS := false
 	nextPageIdx := 0
-	//isNextPageSMS := false
+	isNextPageSMS := false
+	nextPageIdxFrameBuffer = image.NewRGBA(image.Rect(0, 0, middleFrameWidth, middleFrameHeight))
 
 	//logic
 	// first x pages are json defined pages
@@ -402,27 +403,30 @@ func main() {
 			}
 
 			if currPageIdx + 2 > jsonNumPages {
-				//isNextPageSMS = true
+				isNextPageSMS = true
 				nextLocalIdx = (currPageIdx + 1 - jsonNumPages) % len(smsPagesImages)
 			}else{
-				//isNextPageSMS = false
+				isNextPageSMS = false
 				nextLocalIdx = (currPageIdx + 1) % jsonNumPages
 			}
 
+			if currPageIdx + 2 > totalNumPages {
+				isNextPageSMS = false
+				nextLocalIdx = (currPageIdx + 1) % totalNumPages
+			}
 
-			log.Println("currPageIdx:", currPageIdx, "totalNumPages:", totalNumPages, "len(smsPagesImages):", len(smsPagesImages), "localIdx:", localIdx, "nextLocalIdx:", nextLocalIdx, "isSMS:", isSMS)
+			log.Println("currPageIdx:", currPageIdx, "json/sms/total:", jsonNumPages, len(smsPagesImages), totalNumPages, "localIdx:", localIdx, "nextLocalIdx:", nextLocalIdx, "isSMS:", isSMS)
 			
 			//log.Println("Change Page!: Current Page:", currPageIdx, "Next Page:", nextPageIdx, "isSMS:", isSMS, "pageIdx:", pageIdx)
-			
-			nextPageIdxFrameBuffer = image.NewRGBA(image.Rect(0, 0, middleFrameWidth, middleFrameHeight))
 			clearFrame(nextPageIdxFrameBuffer, middleFrameWidth, middleFrameHeight)
 			renderMiddle(nextPageIdxFrameBuffer, &cfg, isSMS, localIdx)
 			
 			clearFrame(middleFramebuffers[(middleFrames+1)%2], middleFrameWidth, middleFrameHeight)
-			renderMiddle(middleFramebuffers[(middleFrames+1)%2], &cfg, isSMS, nextLocalIdx)
+			renderMiddle(middleFramebuffers[(middleFrames+1)%2], &cfg, isNextPageSMS, nextLocalIdx)
 
-			copyImageToImageAt(stitchedFrame, middleFramebuffers[(middleFrames+1)%2], 0, 0)
-			copyImageToImageAt(stitchedFrame, nextPageIdxFrameBuffer, middleFrameWidth, 0)			
+			copyImageToImageAt(stitchedFrame, nextPageIdxFrameBuffer, 0, 0)
+			copyImageToImageAt(stitchedFrame, middleFramebuffers[(middleFrames+1)%2], middleFrameWidth, 0)
+			
 
 			for i := 0; i < numIntermediatePages; i++ {
 				if i <= numIntermediatePages / 2 { //recheck here

@@ -180,7 +180,7 @@ func monitorKeyboard(changePageTriggered *bool) {
                 log.Println("POWER pressed, state =", stateName(idleState))
                 if idleState == STATE_ACTIVE || idleState == STATE_FADE_IN {
                     swippingScreen = true
-                    *changePageTriggered = true
+                    //*changePageTriggered = true
                 }
                 lastActivityMu.Lock()
                 lastActivity = now
