@@ -114,7 +114,7 @@ var (
     lastLogical int         // last requested brightness (0–100)
     offTimer    *time.Timer // timer that will write 0 after delay
 
-	smsPagesImage *image.RGBA
+	smsPagesImages []*image.RGBA
 )
 
 // ImageBuffer holds a 1D slice of pixels for the display area.
@@ -367,8 +367,6 @@ func main() {
 			}
 		}()
 	}
-
-
 
 	//main loop
 	for weAreRunning {

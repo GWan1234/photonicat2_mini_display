@@ -733,6 +733,17 @@ func saveFrameToPng(frame *image.RGBA, filename string) {
 
 func renderMiddle(frame *image.RGBA, cfg *Config, currPage int) {
 	// Get the elements for page0 from the configuration.
+
+	if currPage > cfg.NumPages {
+		//copy sms page to frame
+		idxSmsPage := currPage-cfg.NumPages-1
+		if idxSmsPage < 0 {
+			idxSmsPage = 0
+		}
+		copyImageToImageAt(frame, smsPagesImages[idxSmsPage], 0, 0)
+		return
+	}
+
 	page := cfg.DisplayTemplate.Elements["page"+strconv.Itoa(currPage)]
 
 	// Process each element.

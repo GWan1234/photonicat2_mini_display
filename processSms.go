@@ -33,16 +33,32 @@ type SMS struct {
 }
 
 func collectAndDrawSms(cfg *Config) int {
-	jsonContent := getJsonContent(cfg)
-	smsImagesPages, err := drawSmsFrJson(jsonContent, true)
-	if err != nil {
-		log.Println("Error drawing SMS:", err)
-		return 0
-	}
+    jsonContent := getJsonContent(cfg)
+    rawImgs, err := drawSmsFrJson(jsonContent, true)
+    if err != nil {
+        log.Println("Error drawing SMS:", err)
+        return 0
+    }
 
-	return len(smsImagesPages)
-	
+    // prepare the global slice
+    smsPagesImages = make([]*image.RGBA, len(rawImgs))
+    for i, img := range rawImgs {
+        // try a direct cast
+        rgba, ok := img.(*image.RGBA)
+        if !ok {
+            log.Printf("Image %d is not *image.RGBA, converting…", i)
+            // convert by drawing into a new RGBA
+            b := img.Bounds()
+            r := image.NewRGBA(b)
+            draw.Draw(r, b, img, b.Min, draw.Src)
+            rgba = r
+        }
+        smsPagesImages[i] = rgba
+    }
+
+    return len(smsPagesImages)
 }
+
 
 func getJsonContent(cfg *Config) string {
     // exec.Command takes the program name, then each arg as its own string
