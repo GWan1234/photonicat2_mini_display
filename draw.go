@@ -731,20 +731,15 @@ func saveFrameToPng(frame *image.RGBA, filename string) {
 	fmt.Println("Frame saved to", filename)
 }
 
-func renderMiddle(frame *image.RGBA, cfg *Config, currPage int) {
+func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
 	// Get the elements for page0 from the configuration.
 
-	if currPage > cfg.NumPages {
-		//copy sms page to frame
-		idxSmsPage := currPage-cfg.NumPages-1
-		if idxSmsPage < 0 {
-			idxSmsPage = 0
-		}
-		copyImageToImageAt(frame, smsPagesImages[idxSmsPage], 0, 0)
+	if isSMS {
+		copyImageToImageAt(frame, smsPagesImages[pageIdx], 0, 0)
 		return
 	}
 
-	page := cfg.DisplayTemplate.Elements["page"+strconv.Itoa(currPage)]
+	page := cfg.DisplayTemplate.Elements["page"+strconv.Itoa(pageIdx)]
 
 	// Process each element.
 	for _, element := range page {
@@ -866,37 +861,51 @@ func renderMiddle(frame *image.RGBA, cfg *Config, currPage int) {
 	}
 }
 
-func drawFooter(display gc9307.Device, frame *image.RGBA, currPage int, numOfPages int) {
-	magicStr:= strconv.Itoa(currPage) + " " + strconv.Itoa(numOfPages)
+func drawFooter(display gc9307.Device, frame *image.RGBA, currPage int, numOfPages int, isSMS bool) {
+	magicStr:= strconv.Itoa(currPage) + " " + strconv.Itoa(numOfPages) + " " + strconv.FormatBool(isSMS)
 	if cacheFooterStr == magicStr {
 		return //no need to refresh
 	}
+	faceMicro, _, err := getFontFace("micro")
+	if err != nil {
+		log.Printf("Error getting font face for %s: %v", "tiny", err)
+		return
+	}
+
 	footerFrameWidth := PCAT2_LCD_WIDTH
 	footerFrameHeight := PCAT2_FOOTER_HEIGHT
 	clearFrame(frame, footerFrameWidth, footerFrameHeight)
 
-	cir, _, _, err := loadImage(assetsPrefix+"/assets/svg/dotCircle.svg")
-	if err != nil {
-		log.Printf("Error loading circle_dot from %s: %v", "assets/svg/dotCircle.svg", err)
-		return
-	}
-	dot, _, _, err := loadImage(assetsPrefix+"/assets/svg/dotSolid.svg")
-	if err != nil {
-		log.Printf("Error loading dot from %s: %v", "assets/svg/dotSolid.svg", err)
-		return
-	}
+	if isSMS {
+		log.Printf("Drawing SMS footer")
+		footerText := "SMS: " + strconv.Itoa(currPage) + "/" + strconv.Itoa(numOfPages)
+		drawText(frame, footerText, 172/2, 2, faceMicro, PCAT_WHITE, true)
 
-	whiteDotRadius := 8
-	greyDotRadius := 4
-	xPart := 10 + whiteDotRadius * 2
-	yOffset := 2
-	x0 := (PCAT2_LCD_WIDTH - (numOfPages-1)*xPart) / 2  - whiteDotRadius
+	}else{
+		log.Printf("Drawing normal footer")
+		cir, _, _, err := loadImage(assetsPrefix+"/assets/svg/dotCircle.svg")
+		if err != nil {
+			log.Printf("Error loading circle_dot from %s: %v", "assets/svg/dotCircle.svg", err)
+			return
+		}
+		dot, _, _, err := loadImage(assetsPrefix+"/assets/svg/dotSolid.svg")
+		if err != nil {
+			log.Printf("Error loading dot from %s: %v", "assets/svg/dotSolid.svg", err)
+			return
+		}
 
-	for i := 0; i < numOfPages; i++ {
-		if i == currPage {
-			copyImageToImageAt(frame, cir, x0+i*xPart, yOffset)
-		}else{
-			copyImageToImageAt(frame, dot, x0+i*xPart + greyDotRadius, yOffset + greyDotRadius)
+		whiteDotRadius := 8
+		greyDotRadius := 4
+		xPart := 10 + whiteDotRadius * 2
+		yOffset := 2
+		x0 := (PCAT2_LCD_WIDTH - (numOfPages-1)*xPart) / 2  - whiteDotRadius
+
+		for i := 0; i < numOfPages; i++ {
+			if i == currPage {
+				copyImageToImageAt(frame, cir, x0+i*xPart, yOffset)
+			}else{
+				copyImageToImageAt(frame, dot, x0+i*xPart + greyDotRadius, yOffset + greyDotRadius)
+			}
 		}
 	}
 	//make a frame cache

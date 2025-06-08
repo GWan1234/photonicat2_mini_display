@@ -115,6 +115,8 @@ var (
     offTimer    *time.Timer // timer that will write 0 after delay
 
 	smsPagesImages []*image.RGBA
+
+	httpChangePageTriggered = false
 )
 
 // ImageBuffer holds a 1D slice of pixels for the display area.
@@ -367,31 +369,77 @@ func main() {
 			}
 		}()
 	}
+	localIdx := 0
+	nextLocalIdx := 0
+	isSMS := false
+	nextPageIdx := 0
+	//isNextPageSMS := false
 
+	//logic
+	// first x pages are json defined pages
+	// next y pages are sms pages
+	// currPageIdx is the index of the total current page
+	// pageIdx is the index of the SMS OR JSON defined page
+	// isSMS is true if the current page is a SMS page
+	
 	//main loop
 	for weAreRunning {
 		start := time.Now()
-		if changePageTriggered { //changeing page
+		if changePageTriggered || httpChangePageTriggered { //chang./cing page
+			httpChangePageTriggered = false
+			changePageTriggered = false
+
+			jsonNumPages := cfg.NumPages 
+			currPageIdx = currPageIdx % totalNumPages
+			nextPageIdx = (currPageIdx + 1) % totalNumPages
+
+			if currPageIdx + 1 > jsonNumPages {
+				isSMS = true
+				localIdx = currPageIdx - jsonNumPages
+			}else{
+				isSMS = false
+				localIdx = currPageIdx
+			}
+
+			if currPageIdx + 2 > jsonNumPages {
+				//isNextPageSMS = true
+				nextLocalIdx = (currPageIdx + 1 - jsonNumPages) % len(smsPagesImages)
+			}else{
+				//isNextPageSMS = false
+				nextLocalIdx = (currPageIdx + 1) % jsonNumPages
+			}
+
+
+			log.Println("currPageIdx:", currPageIdx, "totalNumPages:", totalNumPages, "len(smsPagesImages):", len(smsPagesImages), "localIdx:", localIdx, "nextLocalIdx:", nextLocalIdx, "isSMS:", isSMS)
 			
-			nextPageIdx := (currPageIdx + 1) % totalNumPages
-			log.Println("Change Page!: Current Page:", currPageIdx, "Next Page:", nextPageIdx)
+			//log.Println("Change Page!: Current Page:", currPageIdx, "Next Page:", nextPageIdx, "isSMS:", isSMS, "pageIdx:", pageIdx)
 			
 			nextPageIdxFrameBuffer = image.NewRGBA(image.Rect(0, 0, middleFrameWidth, middleFrameHeight))
 			clearFrame(nextPageIdxFrameBuffer, middleFrameWidth, middleFrameHeight)
-			renderMiddle(nextPageIdxFrameBuffer, &cfg, nextPageIdx)
+			renderMiddle(nextPageIdxFrameBuffer, &cfg, isSMS, localIdx)
 			
 			clearFrame(middleFramebuffers[(middleFrames+1)%2], middleFrameWidth, middleFrameHeight)
-			renderMiddle(middleFramebuffers[(middleFrames+1)%2], &cfg, currPageIdx)
+			renderMiddle(middleFramebuffers[(middleFrames+1)%2], &cfg, isSMS, nextLocalIdx)
 
 			copyImageToImageAt(stitchedFrame, middleFramebuffers[(middleFrames+1)%2], 0, 0)
 			copyImageToImageAt(stitchedFrame, nextPageIdxFrameBuffer, middleFrameWidth, 0)			
 
 			for i := 0; i < numIntermediatePages; i++ {
-				if i <= numIntermediatePages / 2 {
+				if i <= numIntermediatePages / 2 { //recheck here
+					localIdx = nextLocalIdx
 					currPageIdx = nextPageIdx
 				}
+				if currPageIdx + 1 > jsonNumPages {
+					isSMS = true
+				}else{
+					isSMS = false
+				}
 
-				drawFooter(display, footerFramebuffers[middleFrames%2], currPageIdx, totalNumPages)
+				if isSMS {
+					drawFooter(display, footerFramebuffers[middleFrames%2], localIdx, len(smsPagesImages), isSMS)
+				}else{
+					drawFooter(display, footerFramebuffers[middleFrames%2], localIdx, cfg.NumPages, isSMS)
+				}
 				
 				//page transition
 				t := float64(i) / float64(numIntermediatePages)      // 0 -> 1
@@ -413,13 +461,18 @@ func main() {
 				middleFrames++
 				stitchedFrames++
 			}
-			changePageTriggered = false
 		}else{ //normal page rendering
+			//log.Println("NORMAL:currPageIdx:", currPageIdx, "totalNumPages:", totalNumPages, "len(smsPagesImages):", len(smsPagesImages), "localIdx:", localIdx, "nextLocalIdx:", nextLocalIdx, "isSMS:", isSMS)
+			
 			drawTopBar(display, topBarFramebuffers[topFrames%2])
-			drawFooter(display, footerFramebuffers[middleFrames%2], currPageIdx, cfg.NumPages)
+			if isSMS {
+				drawFooter(display, footerFramebuffers[middleFrames%2], localIdx, len(smsPagesImages), isSMS)
+			}else{
+				drawFooter(display, footerFramebuffers[middleFrames%2], localIdx, cfg.NumPages, isSMS)
+			}
 			//draw middle
 			clearFrame(middleFramebuffers[middleFrames%2], middleFrameWidth, middleFrameHeight)
-			renderMiddle(middleFramebuffers[middleFrames%2], &cfg, currPageIdx)
+			renderMiddle(middleFramebuffers[middleFrames%2], &cfg, isSMS, localIdx)
 			//draw fps
 			if showFPS {
 				drawText(middleFramebuffers[middleFrames%2], "FPS:" + strconv.Itoa(int(fps)) + ", " + strconv.Itoa(middleFrames), 10, 240, faceTiny, PCAT_RED, false)

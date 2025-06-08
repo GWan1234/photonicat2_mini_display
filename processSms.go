@@ -34,7 +34,7 @@ type SMS struct {
 
 func collectAndDrawSms(cfg *Config) int {
     jsonContent := getJsonContent(cfg)
-    rawImgs, err := drawSmsFrJson(jsonContent, true)
+    rawImgs, err := drawSmsFrJson(jsonContent, true, false)
     if err != nil {
         log.Println("Error drawing SMS:", err)
         return 0
@@ -74,7 +74,7 @@ func getJsonContent(cfg *Config) string {
 }
 
 
-func drawSmsFrJson(jsonContent string, savePng bool) (imgs []image.Image, err error) {
+func drawSmsFrJson(jsonContent string, savePng bool, drawPageNum bool) (imgs []image.Image, err error) {
 	var smsData struct {
 		Msg []SMS `json:"msg"`
 	}
@@ -328,18 +328,20 @@ func drawSmsFrJson(jsonContent string, savePng bool) (imgs []image.Image, err er
 	pageNumFontSize := 10.0
 	total := len(imgs)
     for i, im := range imgs {
-        pageStr := fmt.Sprintf("%d/%d", i+1, total)
-        facePN := truetype.NewFace(fnt, &truetype.Options{Size: pageNumFontSize, DPI: 72, Hinting: font.HintingFull})
-        dr := &font.Drawer{
-            Dst:  im.(draw.Image), // assert back to draw.Image
-            Src:  image.NewUniform(color.RGBA{200, 200, 200, 255}),
-            Face: facePN,
-        }
-        w := int(dr.MeasureString(pageStr) >> 6)
-        x := width/2 - w/2 //center
-        y := height - margin/2
-        dr.Dot = fixed.P(x, y)
-        dr.DrawString(pageStr)
+		if drawPageNum {
+			pageStr := fmt.Sprintf("%d/%d", i+1, total)
+			facePN := truetype.NewFace(fnt, &truetype.Options{Size: pageNumFontSize, DPI: 72, Hinting: font.HintingFull})
+			dr := &font.Drawer{
+				Dst:  im.(draw.Image), // assert back to draw.Image
+				Src:  image.NewUniform(color.RGBA{200, 200, 200, 255}),
+				Face: facePN,
+			}
+			w := int(dr.MeasureString(pageStr) >> 6)
+			x := width/2 - w/2 //center
+			y := height - margin/2
+			dr.Dot = fixed.P(x, y)
+			dr.DrawString(pageStr)
+		}
 
 		if savePng {
 			fname := fmt.Sprintf("page_%d.png", i)

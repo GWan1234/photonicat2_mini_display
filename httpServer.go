@@ -6,7 +6,7 @@ import (
 	"image/png"
 	"log"
 	"strconv"
-
+	"time"
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -77,6 +77,15 @@ func indexHandler(c *fiber.Ctx) error {
 	return c.SendFile("assets/html/index.html")
 }
 
+func changePage(c *fiber.Ctx) error {
+	lastActivityMu.Lock()
+	httpChangePageTriggered = true
+	lastActivity = time.Now()
+	lastActivityMu.Unlock()
+
+	return c.SendString("Page changed")
+}
+
 func httpServer() {
 	app := fiber.New()
 
@@ -84,6 +93,7 @@ func httpServer() {
 	app.Get("/", indexHandler)
 	app.Get("/frame", serveFrame)
 	app.Post("/data", updateData)
+	app.Get("/changePage", changePage)
 
 	// Start server
 	port := ":8081"
