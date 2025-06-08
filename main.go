@@ -113,7 +113,8 @@ var (
 	mu          sync.Mutex
     lastLogical int         // last requested brightness (0–100)
     offTimer    *time.Timer // timer that will write 0 after delay
-	
+
+	smsPagesImage *image.RGBA
 )
 
 // ImageBuffer holds a 1D slice of pixels for the display area.
@@ -163,6 +164,8 @@ type Config struct {
 	Site0           string          `json:"site0"`
 	Site1           string          `json:"site1"`
 	DisplayTemplate DisplayTemplate `json:"display_template"`
+	ShowSms         bool            `json:"show_sms"`
+	ModemPort       string          `json:"modem_port"`
 }
 
 // FontConfig holds parameters for a font.
@@ -246,6 +249,9 @@ func main() {
 	//load json config
 	if _, err := os.Stat("config.json"); err == nil {
 		localConfigExists = true
+		log.Println("Local config found at config.json")
+	}else{
+		log.Println("No local config found, try to use /etc/pcat2_mini_display-config.json")
 	}
 	
 	if localConfigExists {
@@ -330,7 +336,7 @@ func main() {
 	//signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
 
-	go func() {
+	go func() { //register ciao screen when sigterm
 		sig := <-sigs
 		log.Printf("Received signal: %v", sig)
 		weAreRunning=false
@@ -345,13 +351,31 @@ func main() {
 
 	// Main loop: you could update dynamic data and re-render pages as needed.
 	stitchedFrame := image.NewRGBA(image.Rect(0, 0, middleFrameWidth * 2, middleFrameHeight))
+	
+	totalNumPages := cfg.NumPages
+
+	log.Println("Show SMS:", cfg.ShowSms)
+	if cfg.ShowSms {
+		go func() {
+			for {
+				log.Println("Collecting SMS")
+				numSmsPages := collectAndDrawSms(&cfg)
+				if numSmsPages > 0 {
+					totalNumPages = cfg.NumPages + numSmsPages
+				}
+				time.Sleep(60 * time.Second)
+			}
+		}()
+	}
+
+
 
 	//main loop
 	for weAreRunning {
 		start := time.Now()
-		if changePageTriggered {
+		if changePageTriggered { //changeing page
 			
-			nextPageIdx := (currPageIdx + 1) % cfg.NumPages
+			nextPageIdx := (currPageIdx + 1) % totalNumPages
 			log.Println("Change Page!: Current Page:", currPageIdx, "Next Page:", nextPageIdx)
 			
 			nextPageIdxFrameBuffer = image.NewRGBA(image.Rect(0, 0, middleFrameWidth, middleFrameHeight))
@@ -360,6 +384,7 @@ func main() {
 			
 			clearFrame(middleFramebuffers[(middleFrames+1)%2], middleFrameWidth, middleFrameHeight)
 			renderMiddle(middleFramebuffers[(middleFrames+1)%2], &cfg, currPageIdx)
+
 			copyImageToImageAt(stitchedFrame, middleFramebuffers[(middleFrames+1)%2], 0, 0)
 			copyImageToImageAt(stitchedFrame, nextPageIdxFrameBuffer, middleFrameWidth, 0)			
 
@@ -368,7 +393,7 @@ func main() {
 					currPageIdx = nextPageIdx
 				}
 
-				drawFooter(display, footerFramebuffers[middleFrames%2], currPageIdx, cfg.NumPages)
+				drawFooter(display, footerFramebuffers[middleFrames%2], currPageIdx, totalNumPages)
 				
 				//page transition
 				t := float64(i) / float64(numIntermediatePages)      // 0 -> 1
@@ -391,7 +416,7 @@ func main() {
 				stitchedFrames++
 			}
 			changePageTriggered = false
-		}else{
+		}else{ //normal page rendering
 			drawTopBar(display, topBarFramebuffers[topFrames%2])
 			drawFooter(display, footerFramebuffers[middleFrames%2], currPageIdx, cfg.NumPages)
 			//draw middle

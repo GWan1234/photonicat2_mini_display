@@ -2,6 +2,8 @@
     "num_pages": 4,
     "site0": "taobao.com",
     "site1": "photonicat.com",
+    "show_sms": true,
+    "modem_port": "/dev/ttyUSB2",
     "display_template": {
         "elements": {
             "page0": [ 
