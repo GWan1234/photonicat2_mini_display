@@ -355,15 +355,18 @@ func main() {
 	stitchedFrame := image.NewRGBA(image.Rect(0, 0, middleFrameWidth * 2, middleFrameHeight))
 	
 	totalNumPages := cfg.NumPages
+	lenSmsPagesImages := 1
 
 	log.Println("Show SMS:", cfg.ShowSms)
 	if cfg.ShowSms {
 		go func() {
 			for {
 				log.Println("Collecting SMS")
-				numSmsPages := collectAndDrawSms(&cfg)
-				if numSmsPages > 0 {
-					totalNumPages = cfg.NumPages + numSmsPages
+				lenSmsPagesImages = collectAndDrawSms(&cfg)
+				if lenSmsPagesImages > 0 {
+					totalNumPages = cfg.NumPages + lenSmsPagesImages
+				}else{
+					totalNumPages = cfg.NumPages + 1
 				}
 				time.Sleep(60 * time.Second)
 			}
@@ -375,6 +378,7 @@ func main() {
 	nextPageIdx := 0
 	isNextPageSMS := false
 	nextPageIdxFrameBuffer = image.NewRGBA(image.Rect(0, 0, middleFrameWidth, middleFrameHeight))
+
 
 	//logic
 	// first x pages are json defined pages
@@ -404,7 +408,7 @@ func main() {
 
 			if currPageIdx + 2 > jsonNumPages {
 				isNextPageSMS = true
-				nextLocalIdx = (currPageIdx + 1 - jsonNumPages) % len(smsPagesImages)
+				nextLocalIdx = (currPageIdx + 1 - jsonNumPages) % lenSmsPagesImages
 			}else{
 				isNextPageSMS = false
 				nextLocalIdx = (currPageIdx + 1) % jsonNumPages
@@ -415,7 +419,7 @@ func main() {
 				nextLocalIdx = (currPageIdx + 1) % totalNumPages
 			}
 
-			log.Println("currPageIdx:", currPageIdx, "json/sms/total:", jsonNumPages, len(smsPagesImages), totalNumPages, "localIdx:", localIdx, "nextLocalIdx:", nextLocalIdx, "isSMS:", isSMS)
+			log.Println("currPageIdx:", currPageIdx, "json/sms/total:", jsonNumPages, lenSmsPagesImages, totalNumPages, "localIdx:", localIdx, "nextLocalIdx:", nextLocalIdx, "isSMS:", isSMS)
 			
 			//log.Println("Change Page!: Current Page:", currPageIdx, "Next Page:", nextPageIdx, "isSMS:", isSMS, "pageIdx:", pageIdx)
 			clearFrame(nextPageIdxFrameBuffer, middleFrameWidth, middleFrameHeight)
@@ -440,7 +444,7 @@ func main() {
 				}
 
 				if isSMS {
-					drawFooter(display, footerFramebuffers[middleFrames%2], localIdx, len(smsPagesImages), isSMS)
+					drawFooter(display, footerFramebuffers[middleFrames%2], localIdx, lenSmsPagesImages, isSMS)
 				}else{
 					drawFooter(display, footerFramebuffers[middleFrames%2], localIdx, cfg.NumPages, isSMS)
 				}

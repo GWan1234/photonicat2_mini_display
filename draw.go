@@ -929,7 +929,14 @@ func showWelcome(display gc9307.Device, width, height int, duration time.Duratio
 		return
 	}
 	logoY := height/2 - (h+spaceBetweenLogoAndBar+barHeight)/2
-	copyImageToImageAt(frame, welcomeLogo, width/2 - w/2, logoY ) 
+	x0 := width/2 - w/2
+	y0 := logoY
+	log.Printf("Welcome logo at: x0: %d, y0: %d, w: %d, h: %d", x0, y0, w, h)
+	copyImageToImageAt(frame, welcomeLogo, x0, y0 ) 
+	//save this frame to png
+	saveFrameToPng(frame, "/tmp/welcome.png")
+	copyImageToImageAt(frame, welcomeLogo, x0, y0 ) 
+
 	var bufBack bytes.Buffer
 	canvas := svg.New(&bufBack)
 	canvas.Start(barWidth, barHeight)

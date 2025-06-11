@@ -32,9 +32,23 @@ type SMS struct {
 	Content   string `json:"content"`
 }
 
+var(
+	lastSmsJsonContent string
+	lastNumPages int
+)
+
 func collectAndDrawSms(cfg *Config) int {
     jsonContent := getJsonContent(cfg)
-    rawImgs, err := drawSmsFrJson(jsonContent, true, false)
+	if jsonContent == lastSmsJsonContent {
+		log.Println("collectAndDrawSms: No new SMS.")
+		return lastNumPages
+	}
+	lastSmsJsonContent = jsonContent
+	lastNumPages = 0
+
+
+	log.Println("jsonContent:", jsonContent)
+    rawImgs, err := drawSmsFrJson(jsonContent, false, false)
     if err != nil {
         log.Println("Error drawing SMS:", err)
         return 0
@@ -55,8 +69,10 @@ func collectAndDrawSms(cfg *Config) int {
         }
         smsPagesImages[i] = rgba
     }
+	numPages := len(smsPagesImages)
+	lastNumPages = numPages
 
-    return len(smsPagesImages)
+    return numPages
 }
 
 
@@ -140,6 +156,15 @@ func drawSmsFrJson(jsonContent string, savePng bool, drawPageNum bool) (imgs []i
 		} else {
 			singles = append(singles, msg)
 		}
+	}
+
+	if len(grouped) == 0  && len(singles) == 0 {
+		//make a single page with the text "No SMS found"
+		singles = append(singles, SMS{
+			Sender:    "",
+			Timestamp: time.Now().Format(layout),
+			Content:   "No SMS  -  无短消息",
+		})
 	}
 
 	var mergedMsgs []SMS
