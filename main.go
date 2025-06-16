@@ -51,6 +51,7 @@ const (
 	KEYBOARD_DEBOUNCE_TIME = 200 * time.Millisecond
 	ZERO_BACKLIGHT_DELAY = 5 * time.Second
 	OFF_TIMEOUT = 3 * time.Second
+	INTERVAL_SMS_COLLECT = 60 * time.Second
 )
 
 var (
@@ -82,7 +83,6 @@ var (
 	imageCache 	map[string]*image.RGBA
 	cfg 			Config	
 	currPageIdx	 	int
-	//globalData 	map[string]interface{}
 	fonts 		map[string]FontConfig
 	assetsPrefix ="."
 	globalData sync.Map
@@ -91,7 +91,6 @@ var (
     lastActivity   = time.Now()
     lastActivityMu sync.Mutex
 
-	//flip page
 	numIntermediatePages = 16
 
     // configuration for idle fade
@@ -214,11 +213,6 @@ func main() {
 		addr = fmt.Sprintf("127.0.0.1:%d", *port)     // localhost only
 	}
 
-	var (
-		localConfigExists = false
-		cfg Config
-	)
-
 	//rm pcat_display_initialized
 	os.Remove("/tmp/pcat_display_initialized")
 	// Initialize board.
@@ -233,7 +227,7 @@ func main() {
 	}
 	defer spiPort.Close()
 
-	conn, err := spiPort.Connect(100000*physic.KiloHertz, spi.Mode0, 8)
+	conn, err := spiPort.Connect(80000*physic.KiloHertz, spi.Mode0, 8)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -325,33 +319,25 @@ func main() {
 	}()
 	
 	go collectFixedData() 
+	go getSmsPages()
 	go httpServer(addr) //listen local for http request
     go monitorKeyboard(&changePageTriggered) // Start keyboard monitoring in a goroutine
 	go idleDimmer() //control backlight
-
-
-	middleFramebuffers = append(middleFramebuffers, image.NewRGBA(image.Rect(0, 0, middleFrameWidth, middleFrameHeight)))
-	middleFramebuffers = append(middleFramebuffers, image.NewRGBA(image.Rect(0, 0, middleFrameWidth, middleFrameHeight)))
-	clearFrame(middleFramebuffers[0], middleFrameWidth, middleFrameHeight)
-	clearFrame(middleFramebuffers[1], middleFrameWidth, middleFrameHeight)
-
 	
-	topBarFramebuffers = append(topBarFramebuffers, image.NewRGBA(image.Rect(0, 0, topBarFrameWidth, topBarFrameHeight)))
-	topBarFramebuffers = append(topBarFramebuffers, image.NewRGBA(image.Rect(0, 0, topBarFrameWidth, topBarFrameHeight)))
-	clearFrame(topBarFramebuffers[0], topBarFrameWidth, topBarFrameHeight)
-	clearFrame(topBarFramebuffers[1], topBarFrameWidth, topBarFrameHeight)
+	registerExitHandler() 	//catch sigterm
+	
+	showWelcome(display, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT, 5 * time.Second)
 
-	footerFramebuffers = append(footerFramebuffers, image.NewRGBA(image.Rect(0, 0, footerFrameWidth, footerFrameHeight)))
-	footerFramebuffers = append(footerFramebuffers, image.NewRGBA(image.Rect(0, 0, footerFrameWidth, footerFrameHeight)))
-	clearFrame(footerFramebuffers[0], footerFrameWidth, footerFrameHeight)
-	clearFrame(footerFramebuffers[1], footerFrameWidth, footerFrameHeight)
-	
-	
-	// 4) Catch SIGINT/SIGTERM so we can show the shutdown image.
+	init3FrameBuffers()
+
+	mainLoop()	//main loop
+
+	select{} //blocking for sigterm processing
+}
+
+func registerExitHandler() {
 	sigs := make(chan os.Signal, 1)
-	//signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
-
 	go func() { //register ciao screen when sigterm
 		sig := <-sigs
 		log.Printf("Received signal: %v", sig)
@@ -362,46 +348,45 @@ func main() {
 		time.Sleep(OFF_TIMEOUT)
 		os.Exit(0)
 	}()
-	
-	showWelcome(display, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT, 5 * time.Second)
-
-	// Main loop: you could update dynamic data and re-render pages as needed.
-	stitchedFrame = image.NewRGBA(image.Rect(0, 0, middleFrameWidth * 2, middleFrameHeight))
-	
-	totalNumPages = cfg.NumPages
-	lenSmsPagesImages = 1
-
-	log.Println("Show SMS:", cfg.ShowSms)
-	if cfg.ShowSms {
-		go func() {
-			for {
-				log.Println("Collecting SMS")
-				lenSmsPagesImages = collectAndDrawSms(&cfg)
-				if lenSmsPagesImages > 0 {
-					totalNumPages = cfg.NumPages + lenSmsPagesImages
-				}else{
-					totalNumPages = cfg.NumPages + 1
-				}
-				time.Sleep(60 * time.Second)
-			}
-		}()
-	}
-
-
-	//logic
-	// first x pages are json defined pages
-	// next y pages are sms pages
-	// currPageIdx is the index of the total current page
-	// pageIdx is the index of the SMS OR JSON defined page
-	// isSMS is true if the current page is a SMS page
-	
-	//main loop
-	mainLoop()
-	select{} //blocking for sigterm processing
 }
 
+func getSmsPages() {
+	if cfg.ShowSms {
+		for {
+			log.Println("Collecting SMS")
+			lenSmsPagesImages = collectAndDrawSms(&cfg)
+			if lenSmsPagesImages > 0 {
+				totalNumPages = cfg.NumPages + lenSmsPagesImages
+			}else{
+				totalNumPages = cfg.NumPages + 1
+			}
+			time.Sleep(INTERVAL_SMS_COLLECT)
+		}
+	}	
+}
+
+func init3FrameBuffers() {
+	middleFramebuffers = append(middleFramebuffers, image.NewRGBA(image.Rect(0, 0, middleFrameWidth, middleFrameHeight)))
+	middleFramebuffers = append(middleFramebuffers, image.NewRGBA(image.Rect(0, 0, middleFrameWidth, middleFrameHeight)))
+	clearFrame(middleFramebuffers[0], middleFrameWidth, middleFrameHeight)
+	clearFrame(middleFramebuffers[1], middleFrameWidth, middleFrameHeight)
+
+	topBarFramebuffers = append(topBarFramebuffers, image.NewRGBA(image.Rect(0, 0, topBarFrameWidth, topBarFrameHeight)))
+	topBarFramebuffers = append(topBarFramebuffers, image.NewRGBA(image.Rect(0, 0, topBarFrameWidth, topBarFrameHeight)))
+	clearFrame(topBarFramebuffers[0], topBarFrameWidth, topBarFrameHeight)
+	clearFrame(topBarFramebuffers[1], topBarFrameWidth, topBarFrameHeight)
+
+	footerFramebuffers = append(footerFramebuffers, image.NewRGBA(image.Rect(0, 0, footerFrameWidth, footerFrameHeight)))
+	footerFramebuffers = append(footerFramebuffers, image.NewRGBA(image.Rect(0, 0, footerFrameWidth, footerFrameHeight)))
+	clearFrame(footerFramebuffers[0], footerFrameWidth, footerFrameHeight)
+	clearFrame(footerFramebuffers[1], footerFrameWidth, footerFrameHeight)
+}
 
 func mainLoop() {
+	log.Println("Main loop started")
+	stitchedFrame = image.NewRGBA(image.Rect(0, 0, middleFrameWidth * 2, middleFrameHeight))
+	totalNumPages = cfg.NumPages
+	lenSmsPagesImages = 1
 	localIdx := 0
 	nextLocalIdx := 0
 	isSMS := false
@@ -413,7 +398,7 @@ func mainLoop() {
 		log.Fatalf("Failed to load font: %v", err)
 	}
 	
-    if weAreRunning {
+    for weAreRunning {
 		start := time.Now()
 		if changePageTriggered || httpChangePageTriggered { //chang./cing page
 			httpChangePageTriggered = false
@@ -446,7 +431,6 @@ func mainLoop() {
 
 			log.Println("currPageIdx:", currPageIdx, "json/sms/total:", jsonNumPages, lenSmsPagesImages, totalNumPages, "localIdx:", localIdx, "nextLocalIdx:", nextLocalIdx, "isSMS:", isSMS)
 			
-			//log.Println("Change Page!: Current Page:", currPageIdx, "Next Page:", nextPageIdx, "isSMS:", isSMS, "pageIdx:", pageIdx)
 			clearFrame(nextPageIdxFrameBuffer, middleFrameWidth, middleFrameHeight)
 			renderMiddle(nextPageIdxFrameBuffer, &cfg, isSMS, localIdx)
 			
@@ -479,7 +463,6 @@ func mainLoop() {
 
 				et3 := 1 - math.Pow(1-t, 4) //use quartic
 
-				//log.Println("EaseT, t0, t1, t2, t3:",  et0, et1, et2, et3)
 				xPos  := int(et3 * float64(middleFrameWidth))
 
 				croppedFrame := cropImageAt(stitchedFrame, xPos, 0, middleFrameWidth, middleFrameHeight)
@@ -495,8 +478,6 @@ func mainLoop() {
 				stitchedFrames++
 			}
 		}else{ //normal page rendering
-			//log.Println("NORMAL:currPageIdx:", currPageIdx, "totalNumPages:", totalNumPages, "len(smsPagesImages):", len(smsPagesImages), "localIdx:", localIdx, "nextLocalIdx:", nextLocalIdx, "isSMS:", isSMS)
-			
 			drawTopBar(display, topBarFramebuffers[topFrames%2])
 			if isSMS {
 				drawFooter(display, footerFramebuffers[middleFrames%2], localIdx, len(smsPagesImages), isSMS)
