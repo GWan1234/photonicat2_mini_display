@@ -7,8 +7,15 @@ import (
 	"log"
 	"strconv"
 	"time"
+	"math"
+	"sync"
+	"math/rand"
+	"image/color"
+
 	"github.com/gofiber/fiber/v2"
 )
+
+var drawMu sync.Mutex
 
 var webFrame *image.RGBA
 
@@ -121,7 +128,110 @@ func resetConfig(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
+// hsvToRgb converts h∈[0,1], s∈[0,1], v∈[0,1] to r,g,b∈[0,1].
+func hsvToRgb(h, s, v float64) (r, g, b float64) {
+    i := int(h * 6)
+    f := h*6 - float64(i)
+    p := v * (1 - s)
+    q := v * (1 - f*s)
+    t := v * (1 - (1-f)*s)
+    switch i % 6 {
+    case 0:
+        r, g, b = v, t, p
+    case 1:
+        r, g, b = q, v, p
+    case 2:
+        r, g, b = p, v, t
+    case 3:
+        r, g, b = p, q, v
+    case 4:
+        r, g, b = t, p, v
+    case 5:
+        r, g, b = v, p, q
+    }
+    return
+}
 
+func httpDrawText(c *fiber.Ctx) error {
+    // Acquire lock (blocks if another request is drawing)
+	now := time.Now().Format("2025-01-01 15:04:05")
+    drawMu.Lock()
+    defer drawMu.Unlock()
+
+    // 1) Grab the "text" query (empty if missing)
+    text := c.Query("text", "")
+
+    // 2) Load your tiny font
+    faceTiny, _, err := getFontFace("tiny")
+    if err != nil {
+        log.Fatalf("Failed to load font: %v", err)
+    }
+
+	faceHuge, _, err := getFontFace("huge")
+    if err != nil {
+        log.Fatalf("Failed to load font: %v", err)
+    }
+	
+	
+    // 3) Pause your main‐loop so it won’t overwrite
+    runMainLoop = false
+
+    // 4) Prepare a blank frame
+    width, height := 172, 320
+    frame := image.NewRGBA(image.Rect(0, 0, width, height))
+
+    if text != "" {
+        // Draw the provided text centered
+        drawText(frame, text, width/2, height/2, faceHuge, PCAT_WHITE, true)
+    } else {
+        // Seed randomness for a fresh pattern
+        rand.Seed(time.Now().UnixNano())
+        hueOffset := rand.Float64()
+        phase     := rand.Float64() * 2 * math.Pi
+        freq      := 0.01 + rand.Float64()*0.09
+
+        cx, cy := float64(width)/2, float64(height)/2
+        for x := 0; x < width; x++ {
+            for y := 0; y < height; y++ {
+                dx, dy := float64(x)-cx, float64(y)-cy
+                angle   := math.Atan2(dy, dx)
+                hue     := math.Mod((angle+math.Pi)/(2*math.Pi)+hueOffset, 1.0)
+                dist    := math.Hypot(dx, dy)
+                val     := 0.5 + 0.5*math.Sin(dist*freq+phase)
+
+                rF, gF, bF := hsvToRgb(hue, 1.0, val)
+                frame.Set(x, y, color.RGBA{
+                    R: uint8(rF * 255),
+                    G: uint8(gF * 255),
+                    B: uint8(bF * 255),
+                    A: 255,
+                })
+            }
+        }
+
+        // Overlay current time
+        
+		drawText(frame, "no text provided", width/2, height/2-20, faceTiny, PCAT_WHITE, true)
+        drawText(frame, now, width/2, height/2, faceTiny, PCAT_WHITE, true)
+    }
+
+    // 5) Push to display
+	time.Sleep(50 * time.Millisecond) //wait other goroutine to finish, TODO use mutex
+    sendFull(display, frame)
+
+    // 6) JSON response
+    return c.JSON(fiber.Map{
+        "status": "ok",
+        "text":   text,
+		"time":   now,
+    })
+}
+
+func makeItRun(c *fiber.Ctx) error {
+	weAreRunning = true
+	runMainLoop = true
+	return c.JSON(fiber.Map{"status": "ok"})
+}
 
 
 func httpServer(port string) {
@@ -138,6 +248,9 @@ func httpServer(port string) {
 	app.Get("/api/v1/get_config.json", getConfig)
 	app.Post("/api/v1/set_config.json", setConfig)
 	app.Get("/api/v1/get_status.json", getStatus)
+	
+	app.Get("/api/v1/display_text.json", httpDrawText)
+	app.Get("/api/v1/make_it_run", makeItRun)
 
 	app.Get("/api/v1/reset_config", resetConfig)
 
