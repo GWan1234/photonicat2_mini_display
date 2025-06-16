@@ -45,7 +45,8 @@ const (
 	STATE_FADE_IN = 2
 	STATE_FADE_OUT = 3
 	STATE_OFF = 4
-	DEFAULT_FPS = 5
+
+	DEFAULT_FPS = 3
 	DEFAULT_IDLE_TIMEOUT = 60 * time.Second
 	ON_CHARGING_IDLE_TIMEOUT = 365 * 86400 * time.Second
 	KEYBOARD_DEBOUNCE_TIME = 200 * time.Millisecond
@@ -202,6 +203,7 @@ type FontConfig struct {
 }
 
 func main() {
+	var wg sync.WaitGroup
 	all := flag.Bool("all", false, "if set, listen on all network interfaces (0.0.0.0)")
 	port := flag.Int("port", 8081, "TCP port to listen on")
 	flag.Parse()
@@ -271,6 +273,14 @@ func main() {
 		UseCS:        false,
 	})
 
+
+	wg.Add(1)
+    go func() {
+        defer wg.Done()
+        showWelcome(display, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT, 5*time.Second)
+    }()
+
+
 	//load json config
 	if _, err := os.Stat("config.json"); err == nil {
 		localConfigExists = true
@@ -325,6 +335,7 @@ func main() {
 			collectWANNetworkSpeed()
 		}
 	}()
+
 	
 	go collectFixedData() 
 	go getSmsPages()
@@ -333,10 +344,12 @@ func main() {
 	go idleDimmer() //control backlight
 	
 	registerExitHandler() 	//catch sigterm
-	
-	showWelcome(display, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT, 5 * time.Second)
 
 	init3FrameBuffers()
+
+	prepareMainLoop()
+	
+	wg.Wait()
 
 	mainLoop()	//main loop
 
@@ -390,9 +403,13 @@ func init3FrameBuffers() {
 	clearFrame(footerFramebuffers[1], footerFrameWidth, footerFrameHeight)
 }
 
+func prepareMainLoop() {
+	stitchedFrame = image.NewRGBA(image.Rect(0, 0, middleFrameWidth * 2, middleFrameHeight))
+	nextPageIdxFrameBuffer = image.NewRGBA(image.Rect(0, 0, middleFrameWidth, middleFrameHeight))
+}
+
 func mainLoop() {
 	log.Println("Main loop started")
-	stitchedFrame = image.NewRGBA(image.Rect(0, 0, middleFrameWidth * 2, middleFrameHeight))
 	totalNumPages = cfg.NumPages
 	lenSmsPagesImages = 1
 	localIdx := 0
@@ -400,7 +417,6 @@ func mainLoop() {
 	isSMS := false
 	nextPageIdx := 0
 	isNextPageSMS := false
-	nextPageIdxFrameBuffer = image.NewRGBA(image.Rect(0, 0, middleFrameWidth, middleFrameHeight))
 	faceTiny, _, err := getFontFace("tiny")
 	if err != nil {
 		log.Fatalf("Failed to load font: %v", err)
