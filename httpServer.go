@@ -11,13 +11,21 @@ import (
 	"sync"
 	"math/rand"
 	"image/color"
+	"encoding/json"
+	"io/ioutil"
 
 	"github.com/gofiber/fiber/v2"
 )
 
-var drawMu sync.Mutex
 
-var webFrame *image.RGBA
+var (
+	drawMu sync.Mutex
+	webFrame *image.RGBA
+	configMutex   sync.RWMutex
+	defaultConfig Config                  // loaded from default_config.json
+	userOverrides map[string]interface{}  // raw overrides from user_config.json
+)
+
 
 func serveFrame(c *fiber.Ctx) error {
 	var err error
@@ -60,26 +68,6 @@ func serveFrame(c *fiber.Ctx) error {
 	return c.Send(buf.Bytes())
 }
 
-func updateData(c *fiber.Ctx) error {
-	if c.Method() != fiber.MethodPost {
-		return c.Status(fiber.StatusMethodNotAllowed).SendString("Method not allowed")
-	}
-
-	var data map[string]string
-	err := c.BodyParser(&data)
-	if err != nil {
-		return c.Status(fiber.StatusBadRequest).SendString("Invalid JSON")
-	}
-
-	dataMutex.Lock()
-	for k, v := range data {
-		dynamicData[k] = v
-	}
-	dataMutex.Unlock()
-
-	return c.SendString("Data updated")
-}
-
 // simple index
 func indexHandler(c *fiber.Ctx) error {
 	return c.SendFile("assets/html/index.html")
@@ -96,28 +84,136 @@ func changePage(c *fiber.Ctx) error {
 
 // GET  /api/v1/data.json
 func getData(c *fiber.Ctx) error {
-	dataMutex.RLock()
-	defer dataMutex.RUnlock()
-	return c.JSON(globalData)
+    // 1) Build a plain map from the sync.Map
+    out := make(map[string]interface{})
+
+    globalData.Range(func(key, value interface{}) bool {
+        // assume your keys are strings
+        if ks, ok := key.(string); ok {
+            out[ks] = value
+        }
+        return true // continue iteration
+    })
+
+    // 2) Return that map as JSON
+    return c.JSON(out)
 }
 
+// POST /api/v1/data
+func updateData(c *fiber.Ctx) error {
+    // 1. Parse the JSON body into a map[string]string
+    var payload map[string]string
+    if err := c.BodyParser(&payload); err != nil {
+        return c.
+            Status(fiber.StatusBadRequest).
+            JSON(fiber.Map{"error": "invalid JSON"})
+    }
+
+    // 2. Store each entry into the sync.Map
+    for k, v := range payload {
+        globalData.Store(k, v)
+    }
+
+    // 3. Return a success response
+    return c.JSON(fiber.Map{"status": "ok"})
+}
 
 func getDefaultConfig(c *fiber.Ctx) error {
 	return c.JSON(cfg)
 }
 
+// mergeConfig rebuilds `cfg` by overlaying userOverrides on defaultConfig.
+func mergeConfig() {
+	// Convert defaultConfig struct to a map
+	defMap := make(map[string]interface{})
+	b, _ := json.Marshal(defaultConfig)
+	json.Unmarshal(b, &defMap)
+
+	// Deep-merge overrides into that map
+	mergedMap := deepMerge(defMap, userOverrides)
+
+	// Marshal back into Config struct
+	b2, err := json.Marshal(mergedMap)
+	if err != nil {
+		log.Printf("warning: could not marshal merged config: %v", err)
+		return
+	}
+	if err := json.Unmarshal(b2, &cfg); err != nil {
+		log.Printf("warning: could not unmarshal merged config into struct: %v", err)
+	}
+}
+
+// GET /api/v1/get_config.json
 func getConfig(c *fiber.Ctx) error {
+	configMutex.RLock()
+	defer configMutex.RUnlock()
 	return c.JSON(cfg)
 }
 
+// POST /api/v1/set_config.json
 func setConfig(c *fiber.Ctx) error {
-	var payload map[string]string
+	// Parse incoming JSON as generic map
+	var payload map[string]interface{}
 	if err := c.BodyParser(&payload); err != nil {
-		return c.Status(fiber.StatusBadRequest).SendString("Invalid JSON")
+		return c.Status(fiber.StatusBadRequest).
+			JSON(fiber.Map{"error": "invalid JSON"})
 	}
-	//cfg = payload
+
+	configMutex.Lock()
+	defer configMutex.Unlock()
+
+	// Merge new values into overrides
+	userOverrides = deepMerge(userOverrides, payload)
+
+	// Persist userOverrides back to disk
+	if raw, err := json.MarshalIndent(userOverrides, "", "  "); err != nil {
+		log.Printf("warning: could not marshal user_config.json: %v", err)
+	} else if err := ioutil.WriteFile("config/user_config.json", raw, 0644); err != nil {
+		log.Printf("warning: could not write user_config.json: %v", err)
+	}
+
+	// Rebuild merged cfg
+	mergeConfig()
+
 	return c.JSON(fiber.Map{"status": "ok"})
 }
+
+// deepMerge merges src into dest (in-place) for nested maps
+// deepMerge merges src into dest (in-place) for nested maps, initializing dest if nil
+func deepMerge(dest, src map[string]interface{}) map[string]interface{} {
+	if dest == nil {
+		dest = make(map[string]interface{}, len(src))
+	}
+	for k, v := range src {
+		if vMap, ok := v.(map[string]interface{}); ok {
+			// merge nested map
+			nested, found := dest[k].(map[string]interface{})
+			if !found || nested == nil {
+				nested = make(map[string]interface{}, len(vMap))
+			}
+			dest[k] = deepMerge(nested, vMap)
+		} else {
+			// override primitive or slice
+			dest[k] = v
+		}
+	}
+	return dest
+}
+
+// deepCopy returns a deep copy of a map[string]interface{}
+func deepCopy(src map[string]interface{}) map[string]interface{} {
+	copy := make(map[string]interface{}, len(src))
+	for k, v := range src {
+		if m, ok := v.(map[string]interface{}); ok {
+			copy[k] = deepCopy(m)
+		} else {
+			copy[k] = v
+		}
+	}
+	return copy
+}
+
+
 
 func getStatus(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"status": "ok"})
@@ -240,8 +336,8 @@ func httpServer(port string) {
 	// Routes
 	app.Get("/", indexHandler)
 	app.Get("/api/v1/frame.png", serveFrame)
-	app.Get("/api/v1/data.json", getData)
-	app.Post("/api/v1/data.json", updateData)
+	app.Get("/api/v1/data.json", getData) //TODO: add content
+	app.Post("/api/v1/data.json", updateData) //TODO: add content
 	app.Get("/api/v1/changePage", changePage)
 	//new
 	app.Get("/api/v1/get_default_config.json", getDefaultConfig)

@@ -58,6 +58,7 @@ const (
 
 var (
 	weAreRunning 	= true
+	runMainLoop 	= true
 	offTime			= time.Now()
 	PCAT_YELLOW     = color.RGBA{255, 229, 0, 255}
 	PCAT_WHITE      = color.RGBA{255, 255, 255, 255}
@@ -280,7 +281,6 @@ func main() {
         showWelcome(display, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT, 5*time.Second)
     }()
 
-
 	//load json config
 	if _, err := os.Stat("config.json"); err == nil {
 		localConfigExists = true
@@ -423,115 +423,119 @@ func mainLoop() {
 	}
 	
     for weAreRunning {
-		start := time.Now()
-		if changePageTriggered || httpChangePageTriggered { //chang./cing page
-			httpChangePageTriggered = false
-			changePageTriggered = false
+		if runMainLoop {
+			start := time.Now()
+			if changePageTriggered || httpChangePageTriggered { //chang./cing page
+				httpChangePageTriggered = false
+				changePageTriggered = false
 
-			jsonNumPages := cfg.NumPages 
-			currPageIdx = currPageIdx % totalNumPages
-			nextPageIdx = (currPageIdx + 1) % totalNumPages
+				jsonNumPages := cfg.NumPages 
+				currPageIdx = currPageIdx % totalNumPages
+				nextPageIdx = (currPageIdx + 1) % totalNumPages
 
-			if currPageIdx + 1 > jsonNumPages {
-				isSMS = true
-				localIdx = currPageIdx - jsonNumPages
-			}else{
-				isSMS = false
-				localIdx = currPageIdx
-			}
-
-			if currPageIdx + 2 > jsonNumPages {
-				isNextPageSMS = true
-				nextLocalIdx = (currPageIdx + 1 - jsonNumPages) % lenSmsPagesImages
-			}else{
-				isNextPageSMS = false
-				nextLocalIdx = (currPageIdx + 1) % jsonNumPages
-			}
-
-			if currPageIdx + 2 > totalNumPages {
-				isNextPageSMS = false
-				nextLocalIdx = (currPageIdx + 1) % totalNumPages
-			}
-
-			log.Println("currPageIdx:", currPageIdx, "json/sms/total:", jsonNumPages, lenSmsPagesImages, totalNumPages, "localIdx:", localIdx, "nextLocalIdx:", nextLocalIdx, "isSMS:", isSMS)
-			
-			clearFrame(nextPageIdxFrameBuffer, middleFrameWidth, middleFrameHeight)
-			renderMiddle(nextPageIdxFrameBuffer, &cfg, isSMS, localIdx)
-			
-			clearFrame(middleFramebuffers[(middleFrames+1)%2], middleFrameWidth, middleFrameHeight)
-			renderMiddle(middleFramebuffers[(middleFrames+1)%2], &cfg, isNextPageSMS, nextLocalIdx)
-
-			copyImageToImageAt(stitchedFrame, nextPageIdxFrameBuffer, 0, 0)
-			copyImageToImageAt(stitchedFrame, middleFramebuffers[(middleFrames+1)%2], middleFrameWidth, 0)
-			
-
-			for i := 0; i < numIntermediatePages; i++ {
-				if i <= numIntermediatePages / 2 { //recheck here
-					localIdx = nextLocalIdx
-					currPageIdx = nextPageIdx
-				}
 				if currPageIdx + 1 > jsonNumPages {
 					isSMS = true
+					localIdx = currPageIdx - jsonNumPages
 				}else{
 					isSMS = false
+					localIdx = currPageIdx
 				}
 
+				if currPageIdx + 2 > jsonNumPages {
+					isNextPageSMS = true
+					nextLocalIdx = (currPageIdx + 1 - jsonNumPages) % lenSmsPagesImages
+				}else{
+					isNextPageSMS = false
+					nextLocalIdx = (currPageIdx + 1) % jsonNumPages
+				}
+
+				if currPageIdx + 2 > totalNumPages {
+					isNextPageSMS = false
+					nextLocalIdx = (currPageIdx + 1) % totalNumPages
+				}
+
+				log.Println("currPageIdx:", currPageIdx, "json/sms/total:", jsonNumPages, lenSmsPagesImages, totalNumPages, "localIdx:", localIdx, "nextLocalIdx:", nextLocalIdx, "isSMS:", isSMS)
+				
+				clearFrame(nextPageIdxFrameBuffer, middleFrameWidth, middleFrameHeight)
+				renderMiddle(nextPageIdxFrameBuffer, &cfg, isSMS, localIdx)
+				
+				clearFrame(middleFramebuffers[(middleFrames+1)%2], middleFrameWidth, middleFrameHeight)
+				renderMiddle(middleFramebuffers[(middleFrames+1)%2], &cfg, isNextPageSMS, nextLocalIdx)
+
+				copyImageToImageAt(stitchedFrame, nextPageIdxFrameBuffer, 0, 0)
+				copyImageToImageAt(stitchedFrame, middleFramebuffers[(middleFrames+1)%2], middleFrameWidth, 0)
+				
+
+				for i := 0; i < numIntermediatePages; i++ {
+					if i <= numIntermediatePages / 2 { //recheck here
+						localIdx = nextLocalIdx
+						currPageIdx = nextPageIdx
+					}
+					if currPageIdx + 1 > jsonNumPages {
+						isSMS = true
+					}else{
+						isSMS = false
+					}
+
+					if isSMS {
+						drawFooter(display, footerFramebuffers[middleFrames%2], localIdx, lenSmsPagesImages, isSMS)
+					}else{
+						drawFooter(display, footerFramebuffers[middleFrames%2], localIdx, cfg.NumPages, isSMS)
+					}
+					
+					//page transition
+					t := float64(i) / float64(numIntermediatePages)      // 0 -> 1
+
+					et3 := 1 - math.Pow(1-t, 4) //use quartic
+
+					xPos  := int(et3 * float64(middleFrameWidth))
+
+					croppedFrame := cropImageAt(stitchedFrame, xPos, 0, middleFrameWidth, middleFrameHeight)
+					if showFPS {	
+						now := time.Now()
+						fps = 1 / now.Sub(lastUpdate).Seconds()
+						lastUpdate = now
+
+						drawText(croppedFrame, "FPS:" + strconv.Itoa(int(fps)) + ", " + strconv.Itoa(middleFrames), 10, 240, faceTiny, PCAT_RED, false)
+					}
+					sendMiddle(display, croppedFrame)
+					middleFrames++
+					stitchedFrames++
+				}
+			}else{ //normal page rendering
+				drawTopBar(display, topBarFramebuffers[topFrames%2])
 				if isSMS {
-					drawFooter(display, footerFramebuffers[middleFrames%2], localIdx, lenSmsPagesImages, isSMS)
+					drawFooter(display, footerFramebuffers[middleFrames%2], localIdx, len(smsPagesImages), isSMS)
 				}else{
 					drawFooter(display, footerFramebuffers[middleFrames%2], localIdx, cfg.NumPages, isSMS)
 				}
-				
-				//page transition
-				t := float64(i) / float64(numIntermediatePages)      // 0 -> 1
-
-				et3 := 1 - math.Pow(1-t, 4) //use quartic
-
-				xPos  := int(et3 * float64(middleFrameWidth))
-
-				croppedFrame := cropImageAt(stitchedFrame, xPos, 0, middleFrameWidth, middleFrameHeight)
-				if showFPS {	
-					now := time.Now()
-					fps = 1 / now.Sub(lastUpdate).Seconds()
-					lastUpdate = now
-
-					drawText(croppedFrame, "FPS:" + strconv.Itoa(int(fps)) + ", " + strconv.Itoa(middleFrames), 10, 240, faceTiny, PCAT_RED, false)
+				//draw middle
+				clearFrame(middleFramebuffers[middleFrames%2], middleFrameWidth, middleFrameHeight)
+				renderMiddle(middleFramebuffers[middleFrames%2], &cfg, isSMS, localIdx)
+				//draw fps
+				if showFPS {
+					drawText(middleFramebuffers[middleFrames%2], "FPS:" + strconv.Itoa(int(fps)) + ", " + strconv.Itoa(middleFrames), 10, 240, faceTiny, PCAT_RED, false)
 				}
-				sendMiddle(display, croppedFrame)
-				middleFrames++
-				stitchedFrames++
-			}
-		}else{ //normal page rendering
-			drawTopBar(display, topBarFramebuffers[topFrames%2])
-			if isSMS {
-				drawFooter(display, footerFramebuffers[middleFrames%2], localIdx, len(smsPagesImages), isSMS)
-			}else{
-				drawFooter(display, footerFramebuffers[middleFrames%2], localIdx, cfg.NumPages, isSMS)
-			}
-			//draw middle
-			clearFrame(middleFramebuffers[middleFrames%2], middleFrameWidth, middleFrameHeight)
-			renderMiddle(middleFramebuffers[middleFrames%2], &cfg, isSMS, localIdx)
-			//draw fps
-			if showFPS {
-				drawText(middleFramebuffers[middleFrames%2], "FPS:" + strconv.Itoa(int(fps)) + ", " + strconv.Itoa(middleFrames), 10, 240, faceTiny, PCAT_RED, false)
-			}
-			sendMiddle(display, middleFramebuffers[middleFrames%2])
-			middleFrames++	
+				sendMiddle(display, middleFramebuffers[middleFrames%2])
+				middleFrames++	
 
-			// stable‐FPS sleep
-			if delta := (time.Second / time.Duration(desiredFPS) - time.Since(start)); delta > 0 {
-				time.Sleep(time.Duration(float64(delta) * 0.99))
+				// stable‐FPS sleep
+				if delta := (time.Second / time.Duration(desiredFPS) - time.Since(start)); delta > 0 {
+					time.Sleep(time.Duration(float64(delta) * 0.99))
+				}
 			}
-		}
-		
-		if middleFrames % 100 == 0 {
-			if autoRotatePages {
-				changePageTriggered = true
+			
+			if middleFrames % 100 == 0 {
+				if autoRotatePages {
+					changePageTriggered = true
+				}
+				now := time.Now()
+				fps = 100 / now.Sub(lastUpdate).Seconds()
+				log.Printf("FPS: %0.1f, Total Frames: %d\n", fps, middleFrames)
+				lastUpdate = now
 			}
-			now := time.Now()
-			fps = 100 / now.Sub(lastUpdate).Seconds()
-			log.Printf("FPS: %0.1f, Total Frames: %d\n", fps, middleFrames)
-			lastUpdate = now
+		}else{
+			time.Sleep(50 * time.Millisecond) //not inf loop
 		}
 	}
 }
