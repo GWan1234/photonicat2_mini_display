@@ -35,34 +35,63 @@ func loadConfig(path string) (Config, error) {
 	return cfg, err
 }
 
-// getFontFace loads the font based on our mapping.
+var (
+    fontCache   = make(map[string]struct {
+        face       font.Face
+        fontHeight int
+    })
+    fontCacheMu sync.Mutex
+)
+
+// getFontFace loads (or returns cached) font.Face + its height.
 func getFontFace(fontName string) (font.Face, int, error) {
-	cfg, ok := fonts[fontName]
-	if !ok {
-		return nil, 0, fmt.Errorf("font %s not found in mapping", fontName)
-	}
-	fontBytes, err := ioutil.ReadFile(cfg.FontPath)
-	if err != nil {
-		return nil, 0, fmt.Errorf("error reading font file: %v", err)
-	}
-	ttfFont, err := opentype.Parse(fontBytes)
-	if err != nil {
-		return nil, 0, fmt.Errorf("error parsing font: %v", err)
-	}
-	face, err := opentype.NewFace(ttfFont, &opentype.FaceOptions{
-		Size:    cfg.FontSize,
-		DPI:     72,
-		Hinting: font.HintingFull,
-	})
-	if err != nil {
-		return nil, 0, err
-	}
-	
-	// Calculate font height using the ascent and descent metrics.
-	metrics := face.Metrics()
-	fontHeight := metrics.Ascent.Round() + metrics.Descent.Round()
-	
-	return face, fontHeight, nil
+    // 1) Check cache
+    fontCacheMu.Lock()
+    if entry, ok := fontCache[fontName]; ok {
+        fontCacheMu.Unlock()
+        return entry.face, entry.fontHeight, nil
+    }
+    fontCacheMu.Unlock()
+
+    // 2) Not cached: load config
+    cfg, ok := fonts[fontName]
+    if !ok {
+        return nil, 0, fmt.Errorf("font %s not found in mapping", fontName)
+    }
+
+    // 3) Read & parse the TTF
+    fontBytes, err := ioutil.ReadFile(cfg.FontPath)
+    if err != nil {
+        return nil, 0, fmt.Errorf("error reading font file: %v", err)
+    }
+    ttfFont, err := opentype.Parse(fontBytes)
+    if err != nil {
+        return nil, 0, fmt.Errorf("error parsing font: %v", err)
+    }
+
+    // 4) Create the face
+    face, err := opentype.NewFace(ttfFont, &opentype.FaceOptions{
+        Size:    cfg.FontSize,
+        DPI:     72,
+        Hinting: font.HintingFull,
+    })
+    if err != nil {
+        return nil, 0, err
+    }
+
+    // 5) Measure height
+    metrics := face.Metrics()
+    fontHeight := metrics.Ascent.Round() + metrics.Descent.Round()
+
+    // 6) Store in cache
+    fontCacheMu.Lock()
+    fontCache[fontName] = struct {
+        face       font.Face
+        fontHeight int
+    }{face: face, fontHeight: fontHeight}
+    fontCacheMu.Unlock()
+
+    return face, fontHeight, nil
 }
 
 func clearFrame(frame *image.RGBA, width int, height int) {

@@ -119,6 +119,29 @@ var (
 	smsPagesImages []*image.RGBA
 
 	httpChangePageTriggered = false
+	changePageTriggered = false
+	nextPageIdxFrameBuffer *image.RGBA
+	showFPS = false
+	fps = 0.0
+	lastUpdate = time.Now()
+	topFrames = 0
+	middleFrames = 0
+	stitchedFrames = 0	
+	localConfigExists = false
+	stitchedFrame *image.RGBA
+	totalNumPages = -1
+
+	topBarFrameWidth = PCAT2_LCD_WIDTH
+	topBarFrameHeight = PCAT2_TOP_BAR_HEIGHT
+	
+	middleFrameWidth = PCAT2_LCD_WIDTH
+	middleFrameHeight = PCAT2_LCD_HEIGHT - PCAT2_TOP_BAR_HEIGHT - PCAT2_FOOTER_HEIGHT
+
+	footerFrameWidth = PCAT2_LCD_WIDTH
+	footerFrameHeight = PCAT2_FOOTER_HEIGHT
+
+	lenSmsPagesImages = -1
+	display gc9307.Device
 )
 
 // ImageBuffer holds a 1D slice of pixels for the display area.
@@ -192,15 +215,6 @@ func main() {
 	}
 
 	var (
-		changePageTriggered = false
-		nextPageIdxFrameBuffer *image.RGBA
-		currPageIdx = 0
-		showFPS = false
-		fps float64
-		lastUpdate = time.Now()
-		topFrames = 0
-		middleFrames = 0
-		stitchedFrames = 0
 		localConfigExists = false
 		cfg Config
 	)
@@ -250,7 +264,7 @@ func main() {
 	imageCache = make(map[string]*image.RGBA)
 
 	// Setup display.
-	display := gc9307.New(conn, gpioreg.ByName(RST_PIN), gpioreg.ByName(DC_PIN), gpioreg.ByName(CS_PIN), gpioreg.ByName(BL_PIN))
+	display = gc9307.New(conn, gpioreg.ByName(RST_PIN), gpioreg.ByName(DC_PIN), gpioreg.ByName(CS_PIN), gpioreg.ByName(BL_PIN))
 	display.Configure(gc9307.Config{
 		Width:        PCAT2_LCD_WIDTH,
 		Height:       PCAT2_LCD_HEIGHT,
@@ -315,16 +329,6 @@ func main() {
     go monitorKeyboard(&changePageTriggered) // Start keyboard monitoring in a goroutine
 	go idleDimmer() //control backlight
 
-	// init 3 framebuffers, top, middle, footer
-	topBarFrameWidth := PCAT2_LCD_WIDTH
-	topBarFrameHeight := PCAT2_TOP_BAR_HEIGHT
-	
-	middleFrameWidth := PCAT2_LCD_WIDTH
-	middleFrameHeight := PCAT2_LCD_HEIGHT - PCAT2_TOP_BAR_HEIGHT - PCAT2_FOOTER_HEIGHT
-
-	footerFrameWidth := PCAT2_LCD_WIDTH
-	footerFrameHeight := PCAT2_FOOTER_HEIGHT
-
 
 	middleFramebuffers = append(middleFramebuffers, image.NewRGBA(image.Rect(0, 0, middleFrameWidth, middleFrameHeight)))
 	middleFramebuffers = append(middleFramebuffers, image.NewRGBA(image.Rect(0, 0, middleFrameWidth, middleFrameHeight)))
@@ -342,12 +346,8 @@ func main() {
 	clearFrame(footerFramebuffers[0], footerFrameWidth, footerFrameHeight)
 	clearFrame(footerFramebuffers[1], footerFrameWidth, footerFrameHeight)
 	
-	faceTiny, _, err := getFontFace("tiny")
-	if err != nil {
-		log.Fatalf("Failed to load font: %v", err)
-	}
 	
-	// 4) Catch SIGINT/SIGTERM so we can show the shutdown image.
+	// 4) Catch SIGINT/SIGTERM so we can show the shutdown image.
 	sigs := make(chan os.Signal, 1)
 	//signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
@@ -366,10 +366,10 @@ func main() {
 	showWelcome(display, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT, 5 * time.Second)
 
 	// Main loop: you could update dynamic data and re-render pages as needed.
-	stitchedFrame := image.NewRGBA(image.Rect(0, 0, middleFrameWidth * 2, middleFrameHeight))
+	stitchedFrame = image.NewRGBA(image.Rect(0, 0, middleFrameWidth * 2, middleFrameHeight))
 	
-	totalNumPages := cfg.NumPages
-	lenSmsPagesImages := 1
+	totalNumPages = cfg.NumPages
+	lenSmsPagesImages = 1
 
 	log.Println("Show SMS:", cfg.ShowSms)
 	if cfg.ShowSms {
@@ -386,12 +386,6 @@ func main() {
 			}
 		}()
 	}
-	localIdx := 0
-	nextLocalIdx := 0
-	isSMS := false
-	nextPageIdx := 0
-	isNextPageSMS := false
-	nextPageIdxFrameBuffer = image.NewRGBA(image.Rect(0, 0, middleFrameWidth, middleFrameHeight))
 
 
 	//logic
@@ -402,7 +396,24 @@ func main() {
 	// isSMS is true if the current page is a SMS page
 	
 	//main loop
-	for weAreRunning {
+	mainLoop()
+	select{} //blocking for sigterm processing
+}
+
+
+func mainLoop() {
+	localIdx := 0
+	nextLocalIdx := 0
+	isSMS := false
+	nextPageIdx := 0
+	isNextPageSMS := false
+	nextPageIdxFrameBuffer = image.NewRGBA(image.Rect(0, 0, middleFrameWidth, middleFrameHeight))
+	faceTiny, _, err := getFontFace("tiny")
+	if err != nil {
+		log.Fatalf("Failed to load font: %v", err)
+	}
+	
+    if weAreRunning {
 		start := time.Now()
 		if changePageTriggered || httpChangePageTriggered { //chang./cing page
 			httpChangePageTriggered = false
@@ -518,5 +529,4 @@ func main() {
 			lastUpdate = now
 		}
 	}
-	select{} //blocking for sigterm processing
 }
