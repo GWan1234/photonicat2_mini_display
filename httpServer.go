@@ -11,6 +11,7 @@ import (
 	"sync"
 	"math/rand"
 	"image/color"
+	"os"
 	"encoding/json"
 	"io/ioutil"
 
@@ -20,6 +21,7 @@ import (
 
 var (
 	drawMu sync.Mutex
+	cfgMu      sync.Mutex
 	webFrame *image.RGBA
 	configMutex   sync.RWMutex
 	defaultConfig Config                  // loaded from default_config.json
@@ -99,6 +101,53 @@ func getData(c *fiber.Ctx) error {
     return c.JSON(out)
 }
 
+
+// loadUserConfig reads existing file into globalData
+func loadUserConfig() {
+    path := "/etc/pcat2-user_config.json"
+    raw, err := ioutil.ReadFile(path)
+    if err != nil {
+        if os.IsNotExist(err) {
+            log.Printf("no existing user config at %s, starting fresh", path)
+        } else {
+            log.Printf("error reading user config: %v", err)
+        }
+        return
+    }
+
+    var m map[string]string
+    if err := json.Unmarshal(raw, &m); err != nil {
+        log.Printf("error parsing user config JSON: %v", err)
+        return
+    }
+
+    for k, v := range m {
+        globalData.Store(k, v)
+    }
+    log.Printf("loaded %d entries from user config", len(m))
+}
+
+// saveUserConfig writes the payload map back to disk
+func saveUserConfig(payload map[string]string) {
+    path := "/etc/pcat2-user_config.json"
+
+    // marshal with nice indentation
+    data, err := json.MarshalIndent(payload, "", "  ")
+    if err != nil {
+        log.Printf("could not marshal user config: %v", err)
+        return
+    }
+
+    // write atomically
+    tmp := path + ".tmp"
+    if err := ioutil.WriteFile(tmp, data, 0644); err != nil {
+        log.Printf("could not write temp user config: %v", err)
+        return
+    }
+    if err := os.Rename(tmp, path); err != nil {
+        log.Printf("could not rename temp config file: %v", err)
+    }
+}
 // POST /api/v1/data
 func updateData(c *fiber.Ctx) error {
     // 1. Parse the JSON body into a map[string]string
@@ -113,6 +162,8 @@ func updateData(c *fiber.Ctx) error {
     for k, v := range payload {
         globalData.Store(k, v)
     }
+
+	saveUserConfig(payload)
 
     // 3. Return a success response
     return c.JSON(fiber.Map{"status": "ok"})
