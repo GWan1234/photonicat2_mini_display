@@ -34,7 +34,7 @@
 </head>
 <body>
     <h1>Photonicat2 Live LCD Display 2x zoom view</h1>
-    <img id="frame" src="/frame" alt="Current Frame from Display">
+    <img id="frame" src="/api/v1/frame.png" alt="Current Frame from Display">
     <div id="last-updated" id="last-updated">Last Updated: Loading...</div>
 
     <script>
@@ -72,7 +72,7 @@
         
         // Update the DOM elements
         document.getElementById("last-updated").textContent = "Last Updated: " + formattedDate;
-        document.getElementById("frame").src = "/frame?" + new Date().getTime();
+        document.getElementById("frame").src = "/api/v1/frame.png?" + new Date().getTime();
     }, 1000);
     </script>
 </body>

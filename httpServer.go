@@ -73,30 +73,76 @@ func updateData(c *fiber.Ctx) error {
 	return c.SendString("Data updated")
 }
 
+// simple index
 func indexHandler(c *fiber.Ctx) error {
 	return c.SendFile("assets/html/index.html")
 }
 
+// GET  /api/v1/changePage
 func changePage(c *fiber.Ctx) error {
 	lastActivityMu.Lock()
 	httpChangePageTriggered = true
 	lastActivity = time.Now()
 	lastActivityMu.Unlock()
-
-	return c.SendString("Page changed")
+	return c.JSON(fiber.Map{"status": "page change triggered"})
 }
 
-func httpServer() {
+// GET  /api/v1/data.json
+func getData(c *fiber.Ctx) error {
+	dataMutex.RLock()
+	defer dataMutex.RUnlock()
+	return c.JSON(globalData)
+}
+
+
+func getDefaultConfig(c *fiber.Ctx) error {
+	return c.JSON(cfg)
+}
+
+func getConfig(c *fiber.Ctx) error {
+	return c.JSON(cfg)
+}
+
+func setConfig(c *fiber.Ctx) error {
+	var payload map[string]string
+	if err := c.BodyParser(&payload); err != nil {
+		return c.Status(fiber.StatusBadRequest).SendString("Invalid JSON")
+	}
+	//cfg = payload
+	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+func getStatus(c *fiber.Ctx) error {
+	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+func resetConfig(c *fiber.Ctx) error {
+	//TODO: cfg = defaultConfig
+	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+
+
+
+func httpServer(port string) {
 	app := fiber.New()
 
 	// Routes
 	app.Get("/", indexHandler)
-	app.Get("/frame", serveFrame)
-	app.Post("/data", updateData)
-	app.Get("/changePage", changePage)
+	app.Get("/api/v1/frame.png", serveFrame)
+	app.Get("/api/v1/data.json", getData)
+	app.Post("/api/v1/data.json", updateData)
+	app.Get("/api/v1/changePage", changePage)
+	//new
+	app.Get("/api/v1/get_default_config.json", getDefaultConfig)
+	app.Get("/api/v1/get_config.json", getConfig)
+	app.Post("/api/v1/set_config.json", setConfig)
+	app.Get("/api/v1/get_status.json", getStatus)
+
+	app.Get("/api/v1/reset_config", resetConfig)
+
 
 	// Start server
-	port := ":8081"
 	log.Println("Starting Fiber server on", port)
 	log.Fatal(app.Listen(port))
 }

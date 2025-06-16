@@ -12,6 +12,8 @@ import (
 	"sync"
 	"math"
 	"os"
+	"flag"
+	"fmt"
 
 	gc9307 "github.com/photonicat/periph.io-gc9307"
 
@@ -177,6 +179,18 @@ type FontConfig struct {
 }
 
 func main() {
+	all := flag.Bool("all", false, "if set, listen on all network interfaces (0.0.0.0)")
+	port := flag.Int("port", 8081, "TCP port to listen on")
+	flag.Parse()
+
+	// Build the listen address:
+	var addr string
+	if *all {
+		addr = fmt.Sprintf(":%d", *port)              // all interfaces
+	} else {
+		addr = fmt.Sprintf("127.0.0.1:%d", *port)     // localhost only
+	}
+
 	var (
 		changePageTriggered = false
 		nextPageIdxFrameBuffer *image.RGBA
@@ -297,7 +311,7 @@ func main() {
 	}()
 	
 	go collectFixedData() 
-	go httpServer() //listen local for http request
+	go httpServer(addr) //listen local for http request
     go monitorKeyboard(&changePageTriggered) // Start keyboard monitoring in a goroutine
 	go idleDimmer() //control backlight
 
