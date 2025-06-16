@@ -103,7 +103,11 @@ func collectTopBarData() {
 	//if charging status change, we trigger lastActivity
 	if battChargingStatus != lastChargingStatus {
 		log.Println("Battery charging status changed to: ", battChargingStatus)
-		lastActivity = time.Now() //reset lastActivity for screen to stay on
+		if idleState == STATE_ACTIVE {
+			lastActivity = time.Now().Add(-fadeInDur) //reset lastActivity for screen to stay on, - fadeInDur to send state to active
+		}else{
+			lastActivity = time.Now() //bring back screen with some fade in
+		}
 		lastChargingStatus = battChargingStatus
 		if battChargingStatus == true {
 			idleTimeout = ON_CHARGING_IDLE_TIMEOUT
@@ -112,7 +116,7 @@ func collectTopBarData() {
 		}
 	}
     
-	getInfoFromPcatWeb()
+	
 	time.Sleep(1 * time.Second)
 }
 
@@ -1010,7 +1014,7 @@ func getLocalIPv4() (string, error) {
     for _, name := range candidates {
         iface, err := net.InterfaceByName(name)
         if err != nil {
-            // interface doesn’t exist
+            // interface doesn't exist
             continue
         }
         // skip if interface is down
