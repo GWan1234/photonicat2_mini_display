@@ -53,7 +53,7 @@ const (
 	ZERO_BACKLIGHT_DELAY = 5 * time.Second
 	OFF_TIMEOUT = 3 * time.Second
 	INTERVAL_SMS_COLLECT = 60 * time.Second
-	INTERVAL_PCAT_WEB_COLLECT = 10 * time.Second
+	INTERVAL_PCAT_WEB_COLLECT = 5 * time.Second
 )
 
 var (
