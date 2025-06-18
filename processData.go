@@ -84,11 +84,11 @@ type NetworkSpeed struct {
 	DownloadMbps float64
 }
 
-func collectTopBarData() {
+func collectBatteryData() {
 	var err error
 	if battSOC, err = getBatterySoc(); err != nil {
 		fmt.Printf("Could not get battery soc: %v\n", err)
-		globalData.Store("BatterySoc", -9999)
+		globalData.Store("BatterySoc", -1)
 	} else {
 		globalData.Store("BatterySoc", battSOC)
 	}
@@ -115,9 +115,6 @@ func collectTopBarData() {
 			idleTimeout = DEFAULT_IDLE_TIMEOUT
 		}
 	}
-    
-	
-	time.Sleep(1 * time.Second)
 }
 
 

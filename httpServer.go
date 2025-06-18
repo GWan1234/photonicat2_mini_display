@@ -26,6 +26,7 @@ var (
 	configMutex   sync.RWMutex
 	defaultConfig Config                  // loaded from default_config.json
 	userOverrides map[string]interface{}  // raw overrides from user_config.json
+	userJsonConfig = ""
 )
 
 
@@ -103,32 +104,41 @@ func getData(c *fiber.Ctx) error {
 
 
 // loadUserConfig reads existing file into globalData
-func loadUserConfig() {
+func loadUserConfig() string {
+	if userJsonConfig != "" {
+		return userJsonConfig
+	}
     path := "/etc/pcat2-user_config.json"
     raw, err := ioutil.ReadFile(path)
+	
     if err != nil {
         if os.IsNotExist(err) {
             log.Printf("no existing user config at %s, starting fresh", path)
         } else {
             log.Printf("error reading user config: %v", err)
         }
-        return
+		userJsonConfig = "{}"
+        return "{}"
     }
 
     var m map[string]string
     if err := json.Unmarshal(raw, &m); err != nil {
         log.Printf("error parsing user config JSON: %v", err)
-        return
+		userJsonConfig = "{}"
+		return "{}"
     }
 
     for k, v := range m {
         globalData.Store(k, v)
     }
     log.Printf("loaded %d entries from user config", len(m))
+	userJsonConfig = string(raw)
+	return userJsonConfig
 }
 
 // saveUserConfig writes the payload map back to disk
 func saveUserConfig(payload map[string]string) {
+	return //not using this now.
     path := "/etc/pcat2-user_config.json"
 
     // marshal with nice indentation
@@ -148,6 +158,14 @@ func saveUserConfig(payload map[string]string) {
         log.Printf("could not rename temp config file: %v", err)
     }
 }
+
+func saveUserConfigToFile(raw string) {
+	path := "/etc/pcat2-user_config.json"
+	if err := ioutil.WriteFile(path, []byte(raw), 0644); err != nil {
+		log.Printf("could not write user config: %v", err)
+	}
+}
+
 // POST /api/v1/data
 func updateData(c *fiber.Ctx) error {
     // 1. Parse the JSON body into a map[string]string
@@ -171,6 +189,51 @@ func updateData(c *fiber.Ctx) error {
 
 func getDefaultConfig(c *fiber.Ctx) error {
 	return c.JSON(cfg)
+}
+
+// GET  /api/v1/get_user_config.json
+func getUserConfig(c *fiber.Ctx) error {
+    configMutex.RLock()
+    defer configMutex.RUnlock()
+
+    // Return the raw overrides that the user has set
+    return c.SendString(loadUserConfig())
+}
+
+// POST /api/v1/set_user_config.json
+func setUserConfig(c *fiber.Ctx) error {
+    // 1) Parse incoming JSON into a generic map
+    var payload map[string]interface{}
+    if err := c.BodyParser(&payload); err != nil {
+        return c.
+            Status(fiber.StatusBadRequest).
+            JSON(fiber.Map{"error": "invalid JSON"})
+    }
+
+    // 2) Merge into the in-memory overrides under lock
+    configMutex.Lock()
+    userOverrides = deepMerge(userOverrides, payload)
+    configMutex.Unlock()
+
+    // 3) Persist back to disk
+    raw, err := json.MarshalIndent(userOverrides, "", "  ")
+    if err != nil {
+        log.Printf("warning: could not marshal user_config.json: %v", err)
+        return c.
+            Status(fiber.StatusInternalServerError).
+            JSON(fiber.Map{"error": "could not save config"})
+    }
+    if err := ioutil.WriteFile("config/user_config.json", raw, 0644); err != nil {
+        log.Printf("warning: could not write user_config.json: %v", err)
+        return c.
+            Status(fiber.StatusInternalServerError).
+            JSON(fiber.Map{"error": "could not save config"})
+    }
+
+    // 4) Rebuild merged cfg
+    mergeConfig()
+
+    return c.JSON(fiber.Map{"status": "ok"})
 }
 
 // mergeConfig rebuilds `cfg` by overlaying userOverrides on defaultConfig.
@@ -386,20 +449,22 @@ func httpServer(port string) {
 
 	// Routes
 	app.Get("/", indexHandler)
-	app.Get("/api/v1/frame.png", serveFrame)
-	app.Get("/api/v1/data.json", getData) //TODO: add content
-	app.Post("/api/v1/data.json", updateData) //TODO: add content
-	app.Get("/api/v1/changePage", changePage)
+	app.Get("/api/v1/go_frame.png", serveFrame)
+	app.Get("/api/v1/go_data.json", getData) //TODO: add content
+	app.Post("/api/v1/go_data.json", updateData) //TODO: add content
+	app.Get("/api/v1/go_changePage", changePage)
 	//new
-	app.Get("/api/v1/get_default_config.json", getDefaultConfig)
-	app.Get("/api/v1/get_config.json", getConfig)
-	app.Post("/api/v1/set_config.json", setConfig)
-	app.Get("/api/v1/get_status.json", getStatus)
+	app.Get("/api/v1/go_get_default_config.json", getDefaultConfig)
+	app.Get("/api/v1/go_get_config.json", getConfig)
+	app.Post("/api/v1/go_set_config.json", setConfig)
+	app.Get("/api/v1/go_get_user_config.json", getUserConfig)
+	app.Post("/api/v1/go_set_user_config.json", setUserConfig)
+	app.Get("/api/v1/go_get_status.json", getStatus)
 	
-	app.Get("/api/v1/display_text.json", httpDrawText)
-	app.Get("/api/v1/make_it_run", makeItRun)
+	app.Get("/api/v1/go_display_text.json", httpDrawText)
+	app.Get("/api/v1/go_make_it_run", makeItRun)
 
-	app.Get("/api/v1/reset_config", resetConfig)
+	app.Get("/api/v1/go_reset_config", resetConfig)
 
 
 	// Start server
