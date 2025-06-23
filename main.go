@@ -304,7 +304,7 @@ func main() {
 	//collect data for middle and footer, non-blocking
 	go func() {
 		for {
-			collectData(cfg)
+			collectLinuxData(cfg)
 			time.Sleep(dataGatherInterval)
 		}
 	}()
@@ -372,10 +372,12 @@ func registerExitHandler() {
 }
 
 func getSmsPages() {
+
 	if cfg.ShowSms {
 		for {
-			log.Println("Collecting SMS")
+			//log.Println("Collecting SMS")
 			lenSmsPagesImages = collectAndDrawSms(&cfg)
+			log.Println("collect lenSmsPagesImages:", lenSmsPagesImages)
 			if lenSmsPagesImages > 0 {
 				totalNumPages = cfg.NumPages + lenSmsPagesImages
 			}else{
@@ -410,8 +412,9 @@ func prepareMainLoop() {
 
 func mainLoop() {
 	log.Println("Main loop started")
-	totalNumPages = cfg.NumPages
-	lenSmsPagesImages = 1
+	if lenSmsPagesImages == -1 {
+		lenSmsPagesImages = 1
+	}
 	localIdx := 0
 	nextLocalIdx := 0
 	isSMS := false
@@ -533,6 +536,7 @@ func mainLoop() {
 				fps = 100 / now.Sub(lastUpdate).Seconds()
 				log.Printf("FPS: %0.1f, Total Frames: %d\n", fps, middleFrames)
 				lastUpdate = now
+				log.Println("totalNumPages:", totalNumPages, "currPageIdx:", currPageIdx, "lenSmsPagesImages:", lenSmsPagesImages)
 			}
 		}else{
 			time.Sleep(50 * time.Millisecond) //not inf loop

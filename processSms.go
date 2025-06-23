@@ -13,8 +13,10 @@ import (
 	"time"
 	"unicode"
 	"sort"
-	"os/exec"
+	//"os/exec"
 	"log"
+	"net/http"
+	"io"
 
 	"github.com/golang/freetype"
 	"github.com/golang/freetype/truetype"
@@ -76,21 +78,34 @@ func collectAndDrawSms(cfg *Config) int {
 }
 
 
-func getJsonContent(cfg *Config) string {
-    // exec.Command takes the program name, then each arg as its own string
-    cmd := exec.Command("/usr/bin/sms_tool", "-j", "-d", cfg.ModemPort, "recv")
-	log.Println(cmd)
-    // it’s often helpful to capture stderr too
-    output, err := cmd.CombinedOutput()
-    if err != nil {
-        log.Printf("sms_tool failed: %v\noutput: %s", err, output)
-        return ""
-    }
-    return strings.TrimSpace(string(output))
+func getJsonContent(_ *Config) string {
+	// 1. Make the request
+	resp, err := http.Get("http://localhost/api/v2/sms/list.json?n=10")
+	if err != nil {
+		log.Printf("GET /sms/list.json failed: %v", err)
+		return ""
+	}
+	defer resp.Body.Close()
+
+	// 2. Check HTTP status
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("unexpected HTTP status: %s", resp.Status)
+		return ""
+	}
+
+	// 3. Read the body
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("reading response body failed: %v", err)
+		return ""
+	}
+
+	return string(data)
 }
 
 
 func drawSmsFrJson(jsonContent string, savePng bool, drawPageNum bool) (imgs []image.Image, err error) {
+	
 	var smsData struct {
 		Msg []SMS `json:"msg"`
 	}
@@ -122,7 +137,7 @@ func drawSmsFrJson(jsonContent string, savePng bool, drawPageNum bool) (imgs []i
 	maxHeight := height - 8 // Adjusted for padding
 	topPadding := 3.0
 	xStart := 4
-	layout := "01/02/06 15:04:05"
+	layout := "2006-01-02 15:04:05"
 
 	// Create font context
 	fc := freetype.NewContext()
@@ -139,51 +154,6 @@ func drawSmsFrJson(jsonContent string, savePng bool, drawPageNum bool) (imgs []i
 	fcTitle.SetSrc(image.NewUniform(color.RGBA{255, 255, 255, 255}))
 	fcTitle.SetHinting(font.HintingFull)
 
-	// Combine multipart messages
-	type MsgKey struct {
-		Sender    string
-		Timestamp string
-		Reference int
-	}
-
-	grouped := map[MsgKey][]SMS{}
-	singles := []SMS{}
-
-	for _, msg := range smsData.Msg {
-		if msg.Total > 1 {
-			key := MsgKey{msg.Sender, msg.Timestamp, msg.Reference}
-			grouped[key] = append(grouped[key], msg)
-		} else {
-			singles = append(singles, msg)
-		}
-	}
-
-	if len(grouped) == 0  && len(singles) == 0 {
-		//make a single page with the text "No SMS found"
-		singles = append(singles, SMS{
-			Sender:    "",
-			Timestamp: time.Now().Format(layout),
-			Content:   "No SMS  -  无短消息",
-		})
-	}
-
-	var mergedMsgs []SMS
-	for key, parts := range grouped {
-		sort.Slice(parts, func(i, j int) bool {
-			return parts[i].Part < parts[j].Part
-		})
-		full := ""
-		for _, p := range parts {
-			full += p.Content
-		}
-		mergedMsgs = append(mergedMsgs, SMS{
-			Sender:    key.Sender,
-			Timestamp: key.Timestamp,
-			Content:   full,
-		})
-	}
-
-	smsData.Msg = append(singles, mergedMsgs...)
 
 	// Sort messages by timestamp descending
 	sort.Slice(smsData.Msg, func(i, j int) bool {

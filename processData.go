@@ -268,7 +268,7 @@ func collectFixedData(){
 }
 
 // collectData gathers several pieces of system and network information and stores them in globalData.
-func collectData(cfg Config) {
+func collectLinuxData(cfg Config) {
 	if uptime, err := getUptime(); err != nil {
 		fmt.Printf("Could not get uptime: %v\n", err)
 		globalData.Store("Uptime", "N/A")
@@ -349,7 +349,9 @@ func collectData(cfg Config) {
 }
 
 func collectNetworkData(cfg Config) {
-	if !isOpenWRT(){
+	if isOpenWRT(){
+		//we have aonther func to get data from pcat-manager-web
+	}else{
 		if sessionDataUsage, err := getSessionDataUsageGB(wanInterface); err != nil {
 			fmt.Printf("Could not get session data usage: %v\n", err)
 			globalData.Store("SessionDataUsage", nil)
