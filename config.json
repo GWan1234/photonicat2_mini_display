@@ -316,7 +316,7 @@
                 },
                 {
                     "type": "fixed_text",
-                    "label": "Kernel",
+                    "label": "OS Version",
                     "position": {"x": 10, "y": 160},
                     "font": "unit",
                     "color": [255, 229, 0],
@@ -324,11 +324,11 @@
                 },
                 {
                     "type": "text",
-                    "label": "Kernel",
+                    "label": "OS Version",
                     "position": {"x": 10, "y": 178},
-                    "font": "thin",
+                    "font": "unit",
                     "color": [255, 229, 255],
-                    "data_key": "Kernel",
+                    "data_key": "OSVersion",
                     "units_font": "unit",
                     "enable": 1
                 },
@@ -364,8 +364,18 @@
                 },
                 {
                     "type": "text",
-                    "label": "Cell Num",
+                    "label": "Cell Band",
                     "position": {"x": 10, "y": 29},
+                    "font": "unit",
+                    "color": [255, 229, 255],
+                    "data_key": "ModemNetworkInfo",
+                    "units_font": "unit",
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "Cell Num",
+                    "position": {"x": 10, "y": 52},
                     "font": "unit",
                     "color": [255, 229, 255],
                     "data_key": "SimNumber",
@@ -374,26 +384,8 @@
                 },
                 {
                     "type": "fixed_text",
-                    "label": "SIM:",
-                    "position": {"x": 10, "y": 75},
-                    "font": "unit",
-                    "color": [255, 229, 0],
-                    "enable": 1
-                },
-                {
-                    "type": "text",
-                    "label": "SIM:",
-                    "position": {"x": 110, "y": 75},
-                    "font": "unit",
-                    "color": [255, 229, 255],
-                    "data_key": "SimState",
-                    "units_font": "unit",
-                    "enable": 1
-                },
-                {
-                    "type": "fixed_text",
                     "label": "Cell Dev:",
-                    "position": {"x": 10, "y": 52},
+                    "position": {"x": 10, "y": 75},
                     "font": "unit",
                     "color": [255, 229, 0],
                     "enable": 0
@@ -401,7 +393,7 @@
                 {
                     "type": "text",
                     "label": "celldev",
-                    "position": {"x": 10, "y": 52},
+                    "position": {"x": 10, "y": 75},
                     "font": "unit",
                     "color": [255, 229, 255],
                     "data_key": "ModemModel",
@@ -410,7 +402,7 @@
                 },
                 {
                     "type": "fixed_text",
-                    "label": "WiFi C/s:",
+                    "label": "SIM:",
                     "position": {"x": 10, "y": 98},
                     "font": "unit",
                     "color": [255, 229, 0],
@@ -418,8 +410,26 @@
                 },
                 {
                     "type": "text",
-                    "label": "WiFi C/s:",
+                    "label": "SIM:",
                     "position": {"x": 110, "y": 98},
+                    "font": "unit",
+                    "color": [255, 229, 255],
+                    "data_key": "SimState",
+                    "units_font": "unit",
+                    "enable": 1
+                },
+                {
+                    "type": "fixed_text",
+                    "label": "WiFi C/s:",
+                    "position": {"x": 10, "y": 121},
+                    "font": "unit",
+                    "color": [255, 229, 0],
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "WiFi C/s:",
+                    "position": {"x": 110, "y": 121},
                     "font": "unit",
                     "color": [255, 229, 255],
                     "data_key": "WiFiClientsCount",
@@ -429,7 +439,7 @@
                 {
                     "type": "fixed_text",
                     "label": "DHCP C/s:",
-                    "position": {"x": 10, "y": 121},
+                    "position": {"x": 10, "y": 144},
                     "font": "unit",
                     "color": [255, 229, 0],
                     "enable": 1
@@ -437,7 +447,7 @@
                 {
                     "type": "text",
                     "label": "DHCP C/s:",
-                    "position": {"x": 110, "y": 121},
+                    "position": {"x": 110, "y": 144},
                     "font": "unit",
                     "color": [255, 229, 255],
                     "data_key": "DHCPClientsCount",
@@ -477,7 +487,7 @@
                     "position": {"x": 110, "y": 190},
                     "font": "unit",
                     "color": [255, 229, 255],
-                    "data_key": "Fan",
+                    "data_key": "FanRPM",
                     "units_font": "unit",
                     "enable": 1
                 },
@@ -502,22 +512,22 @@
                 },
                 {
                     "type": "fixed_text",
-                    "label": "CPU C°:",
+                    "label": "Fan RPM:",
                     "position": {"x": 10, "y": 236},
                     "font": "unit",
                     "color": [255, 229, 0],
-                    "enable": 1
+                    "enable": 0
                 },
                 {
                     "type": "text",
-                    "label": "Temp",
+                    "label": "Fan RPM",
                     "position": {"x": 110, "y": 236},
                     "font": "unit",
                     "color": [255, 229, 255],
-                    "data_key": "CpuTemp",
+                    "data_key": "FanRPM",
                     "units_font": "unit",
-                    "units": " C",
-                    "enable": 1
+                    "units": "",
+                    "enable": 0
                 }
             ]
         }
