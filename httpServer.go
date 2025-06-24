@@ -14,6 +14,7 @@ import (
 	"os"
 	"encoding/json"
 	"io/ioutil"
+    "net"
 
 	"github.com/gofiber/fiber/v2"
 )
@@ -467,7 +468,19 @@ func httpServer(port string) {
 	app.Get("/api/v1/go_reset_config", resetConfig)
 
 
-	// Start server
-	log.Println("Starting Fiber server on", port)
-	log.Fatal(app.Listen(port))
+	// Start server, retry if failed
+	var ln net.Listener
+    var err error
+    for {
+        ln, err = net.Listen("tcp", port)
+        if err != nil {
+            log.Printf("cannot bind to %s: %v — retrying in 2s…", port, err)
+            time.Sleep(2 * time.Second)
+            continue
+        }
+        break
+    }
+
+    log.Println("Successfully bound to", port)
+    log.Fatal(app.Listener(ln))
 }
