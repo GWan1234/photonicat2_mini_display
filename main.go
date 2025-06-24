@@ -142,7 +142,7 @@ var (
 	footerFrameWidth = PCAT2_LCD_WIDTH
 	footerFrameHeight = PCAT2_FOOTER_HEIGHT
 
-	lenSmsPagesImages = -1
+	lenSmsPagesImages = 1
 	display gc9307.Device
 )
 
@@ -377,6 +377,9 @@ func getSmsPages() {
 		for {
 			//log.Println("Collecting SMS")
 			lenSmsPagesImages = collectAndDrawSms(&cfg)
+			if lenSmsPagesImages == 0 {
+				lenSmsPagesImages = 1
+			}
 			log.Println("collect lenSmsPagesImages:", lenSmsPagesImages)
 			if lenSmsPagesImages > 0 {
 				totalNumPages = cfg.NumPages + lenSmsPagesImages
@@ -412,9 +415,6 @@ func prepareMainLoop() {
 
 func mainLoop() {
 	log.Println("Main loop started")
-	if lenSmsPagesImages == -1 {
-		lenSmsPagesImages = 1
-	}
 	localIdx := 0
 	nextLocalIdx := 0
 	isSMS := false
@@ -446,6 +446,9 @@ func mainLoop() {
 
 				if currPageIdx + 2 > jsonNumPages {
 					isNextPageSMS = true
+					if lenSmsPagesImages <= 0 {
+						lenSmsPagesImages = 1
+					}
 					nextLocalIdx = (currPageIdx + 1 - jsonNumPages) % lenSmsPagesImages
 				}else{
 					isNextPageSMS = false
