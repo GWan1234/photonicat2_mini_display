@@ -193,7 +193,7 @@ func monitorKeyboard(changePageTriggered *bool) {
     name, _ := keyboard.Name()
     log.Printf("using input device: %s (%s)", devPath, name)
 
-    var lastKeyPress time.Time
+    
     for {
         ev, err := keyboard.ReadOne()
         if err != nil {
@@ -205,6 +205,23 @@ func monitorKeyboard(changePageTriggered *bool) {
         now := time.Now()
         if ev.Type == evdev.EV_KEY && ev.Code == evdev.KEY_POWER {
             switch ev.Value {
+                case 1: // key press
+                    log.Println("POWER pressed, state =", stateName(idleState))
+                    if idleState == STATE_ACTIVE || idleState == STATE_FADE_IN {
+                        swippingScreen = true
+                        *changePageTriggered = true
+                    }
+                    lastActivityMu.Lock()
+                    lastActivity = now
+                    lastActivityMu.Unlock()
+    
+                case 0: // key release
+                    // just update lastActivity; no page-change here
+                    lastActivityMu.Lock()
+                    lastActivity = now
+                    lastActivityMu.Unlock()
+
+            /* //var lastKeyPress time.Time
             case 1: // key press
                 log.Println("POWER pressed, state =", stateName(idleState))
                 if idleState == STATE_ACTIVE || idleState == STATE_FADE_IN {
@@ -227,7 +244,7 @@ func monitorKeyboard(changePageTriggered *bool) {
                     lastActivityMu.Lock()
                     lastActivity = now
                     lastActivityMu.Unlock()
-                }
+                }*/
             }
         }
     }
