@@ -41,15 +41,16 @@ var(
 
 func collectAndDrawSms(cfg *Config) int {
     jsonContent := getJsonContent(cfg)
-	log.Println("jsonContent:", jsonContent)
-	if len(jsonContent) == 0 {
+	
+	if len(jsonContent) < 50 { //dummy message
 		jsonContent = fmt.Sprintf("{\"msg\":[{\"sender\":\"System\",\"timestamp\":\"%s\",\"content\":\"No SMS - 无消息\"}]}", time.Now().Format("2006-01-02 15:04:05"))
 	}
-	log.Println("jsonContent:", jsonContent)
+
 	if jsonContent == lastSmsJsonContent {
 		log.Println("collectAndDrawSms: No new SMS, lastNumPages:", lastNumPages)
 		return lastNumPages
 	}
+	
 	lastSmsJsonContent = jsonContent
 	lastNumPages = 0
 
@@ -58,7 +59,7 @@ func collectAndDrawSms(cfg *Config) int {
         log.Println("Error drawing SMS:", err)
         return 0
     }
-	log.Println("here here here:", jsonContent)
+	
     // prepare the global slice
     smsPagesImages = make([]*image.RGBA, len(rawImgs))
     for i, img := range rawImgs {
