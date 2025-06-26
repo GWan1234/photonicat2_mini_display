@@ -54,6 +54,9 @@ const (
 	OFF_TIMEOUT = 3 * time.Second
 	INTERVAL_SMS_COLLECT = 60 * time.Second
 	INTERVAL_PCAT_WEB_COLLECT = 5 * time.Second
+
+	ETC_USER_CONFIG_PATH = "/etc/pcat2_mini_display-user_config.json"
+	ETC_CONFIG_PATH = "/etc/pcat2_mini_display-config.json"
 )
 
 var (
@@ -84,7 +87,9 @@ var (
     dataMutex    sync.RWMutex
     dynamicData  map[string]string
 	imageCache 	map[string]*image.RGBA
-	cfg 			Config	
+	cfg 			Config
+	dftCfg          Config
+	userCfg         Config	
 	currPageIdx	 	int
 	fonts 		map[string]FontConfig
 	assetsPrefix ="."
@@ -144,6 +149,8 @@ var (
 
 	lenSmsPagesImages = 1
 	display gc9307.Device
+
+	cfgNumPages = 0
 )
 
 // ImageBuffer holds a 1D slice of pixels for the display area.
@@ -189,12 +196,14 @@ type DisplayTemplate struct {
 
 // Config represents the overall config JSON.
 type Config struct {
-	NumPages        int             `json:"num_pages"`
-	Site0           string          `json:"site0"`
-	Site1           string          `json:"site1"`
-	DisplayTemplate DisplayTemplate `json:"display_template"`
-	ShowSms         bool            `json:"show_sms"`
-	ModemPort       string          `json:"modem_port"`
+	ScreenDimmerTimeOnBatterySeconds int   	`json:"screen_dimmer_time_on_battery_seconds"`
+	ScreenDimmerTimeOnDCSeconds int        	`json:"screen_dimmer_time_on_dc_seconds"`
+	ScreenMaxBrightness int                	`json:"screen_max_brightness"`
+	ScreenMinBrightness int                	`json:"screen_min_brightness"`
+	PingSite0       string          		`json:"ping_site0"`
+	PingSite1       string          		`json:"ping_site1"`
+	DisplayTemplate DisplayTemplate 		`json:"display_template"`
+	ShowSms         bool           			`json:"show_sms"`
 }
 
 // FontConfig holds parameters for a font.
@@ -275,31 +284,13 @@ func main() {
 	})
 
 
-	wg.Add(1)
+	wg.Add(1) //first show welcome and do some other things and wait
     go func() {
         defer wg.Done()
         showWelcome(display, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT, 5*time.Second)
     }()
 
-	//load json config
-	if _, err := os.Stat("config.json"); err == nil {
-		localConfigExists = true
-		log.Println("Local config found at config.json")
-	}else{
-		log.Println("No local config found, try to use /etc/pcat2_mini_display-config.json")
-	}
-	
-	if localConfigExists {
-		cfg, err = loadConfig("config.json")
-	}else{
-		cfg, err = loadConfig("/etc/pcat2_mini_display-config.json")
-	}
-
-	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
-	}else{
-		log.Println("CFG: READ SUCCESS")
-	}
+	loadAllConfigsToVariables() //load user, default configs
 
 	//collect data for middle and footer, non-blocking
 	go func() {
@@ -382,9 +373,9 @@ func getSmsPages() {
 			}
 			log.Println("collect lenSmsPagesImages:", lenSmsPagesImages)
 			if lenSmsPagesImages > 0 {
-				totalNumPages = cfg.NumPages + lenSmsPagesImages
+				totalNumPages = cfgNumPages + lenSmsPagesImages
 			}else{
-				totalNumPages = cfg.NumPages + 1
+				totalNumPages = cfgNumPages + 1
 			}
 			time.Sleep(INTERVAL_SMS_COLLECT)
 		}
@@ -432,7 +423,7 @@ func mainLoop() {
 				httpChangePageTriggered = false
 				changePageTriggered = false
 
-				jsonNumPages := cfg.NumPages 
+				jsonNumPages := cfgNumPages 
 				currPageIdx = currPageIdx % totalNumPages
 				nextPageIdx = (currPageIdx + 1) % totalNumPages
 
@@ -486,7 +477,7 @@ func mainLoop() {
 					if isSMS {
 						drawFooter(display, footerFramebuffers[middleFrames%2], localIdx, lenSmsPagesImages, isSMS)
 					}else{
-						drawFooter(display, footerFramebuffers[middleFrames%2], localIdx, cfg.NumPages, isSMS)
+						drawFooter(display, footerFramebuffers[middleFrames%2], localIdx, cfgNumPages, isSMS)
 					}
 					
 					//page transition
@@ -513,7 +504,7 @@ func mainLoop() {
 				if isSMS {
 					drawFooter(display, footerFramebuffers[middleFrames%2], localIdx, len(smsPagesImages), isSMS)
 				}else{
-					drawFooter(display, footerFramebuffers[middleFrames%2], localIdx, cfg.NumPages, isSMS)
+					drawFooter(display, footerFramebuffers[middleFrames%2], localIdx, cfgNumPages, isSMS)
 				}
 				//draw middle
 				clearFrame(middleFramebuffers[middleFrames%2], middleFrameWidth, middleFrameHeight)

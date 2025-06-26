@@ -15,6 +15,8 @@ import (
 	"encoding/json"
 	"io/ioutil"
     "net"
+    "slices"
+    "strings"
 
 	"github.com/gofiber/fiber/v2"
 )
@@ -22,7 +24,6 @@ import (
 
 var (
 	drawMu sync.Mutex
-	cfgMu      sync.Mutex
 	webFrame *image.RGBA
 	configMutex   sync.RWMutex
 	defaultConfig Config                  // loaded from default_config.json
@@ -109,7 +110,7 @@ func loadUserConfig() string {
 	if userJsonConfig != "" {
 		return userJsonConfig
 	}
-    path := "/etc/pcat2-user_config.json"
+    path := ETC_USER_CONFIG_PATH
     raw, err := ioutil.ReadFile(path)
 	
     if err != nil {
@@ -119,6 +120,7 @@ func loadUserConfig() string {
             log.Printf("error reading user config: %v", err)
         }
 		userJsonConfig = "{}"
+        userCfg = Config{}
         return "{}"
     }
 
@@ -126,6 +128,7 @@ func loadUserConfig() string {
     if err := json.Unmarshal(raw, &m); err != nil {
         log.Printf("error parsing user config JSON: %v", err)
 		userJsonConfig = "{}"
+        userCfg = Config{}
 		return "{}"
     }
 
@@ -138,9 +141,9 @@ func loadUserConfig() string {
 }
 
 // saveUserConfig writes the payload map back to disk
-func saveUserConfig(payload map[string]string) {
+func saveUserConfigFromWeb(payload map[string]string) {
 	return //not using this now.
-    path := "/etc/pcat2-user_config.json"
+    path := ETC_USER_CONFIG_PATH
 
     // marshal with nice indentation
     data, err := json.MarshalIndent(payload, "", "  ")
@@ -160,12 +163,6 @@ func saveUserConfig(payload map[string]string) {
     }
 }
 
-func saveUserConfigToFile(raw string) {
-	path := "/etc/pcat2-user_config.json"
-	if err := ioutil.WriteFile(path, []byte(raw), 0644); err != nil {
-		log.Printf("could not write user config: %v", err)
-	}
-}
 
 // POST /api/v1/data
 func updateData(c *fiber.Ctx) error {
@@ -181,8 +178,6 @@ func updateData(c *fiber.Ctx) error {
     for k, v := range payload {
         globalData.Store(k, v)
     }
-
-	saveUserConfig(payload)
 
     // 3. Return a success response
     return c.JSON(fiber.Map{"status": "ok"})
@@ -200,6 +195,9 @@ func getUserConfig(c *fiber.Ctx) error {
     // Return the raw overrides that the user has set
     return c.SendString(loadUserConfig())
 }
+
+
+
 
 // POST /api/v1/set_user_config.json
 func setUserConfig(c *fiber.Ctx) error {
@@ -232,31 +230,11 @@ func setUserConfig(c *fiber.Ctx) error {
     }
 
     // 4) Rebuild merged cfg
-    mergeConfig()
+    mergeConfigs()
 
     return c.JSON(fiber.Map{"status": "ok"})
 }
 
-// mergeConfig rebuilds `cfg` by overlaying userOverrides on defaultConfig.
-func mergeConfig() {
-	// Convert defaultConfig struct to a map
-	defMap := make(map[string]interface{})
-	b, _ := json.Marshal(defaultConfig)
-	json.Unmarshal(b, &defMap)
-
-	// Deep-merge overrides into that map
-	mergedMap := deepMerge(defMap, userOverrides)
-
-	// Marshal back into Config struct
-	b2, err := json.Marshal(mergedMap)
-	if err != nil {
-		log.Printf("warning: could not marshal merged config: %v", err)
-		return
-	}
-	if err := json.Unmarshal(b2, &cfg); err != nil {
-		log.Printf("warning: could not unmarshal merged config into struct: %v", err)
-	}
-}
 
 // GET /api/v1/get_config.json
 func getConfig(c *fiber.Ctx) error {
@@ -288,7 +266,7 @@ func setConfig(c *fiber.Ctx) error {
 	}
 
 	// Rebuild merged cfg
-	mergeConfig()
+	mergeConfigs()
 
 	return c.JSON(fiber.Map{"status": "ok"})
 }
@@ -445,6 +423,60 @@ func makeItRun(c *fiber.Ctx) error {
 }
 
 
+func setPingSites(c *fiber.Ctx) error {
+    // update in-memory
+    configMutex.Lock()
+    userCfg.PingSite0 = c.FormValue("ping_site0")
+    userCfg.PingSite1 = c.FormValue("ping_site1")
+    saveUserConfigToFile()     // persist
+    configMutex.Unlock()
+
+    return c.JSON(fiber.Map{"status": "ok"})
+}
+
+func setScreenDimmerTime(c *fiber.Ctx) error {
+    onBatterySeconds := c.FormValue("screen_dimmer_time_on_battery_seconds")
+    onDCSeconds := c.FormValue("screen_dimmer_time_on_dc_seconds")
+
+    onBatterySecondsInt, err := strconv.Atoi(onBatterySeconds)
+    if err != nil {
+        return c.Status(400).JSON(fiber.Map{"status": "error", "message": "Invalid screen_dimmer_time_on_battery_seconds"})
+    }
+
+    onDCSecondsInt, err := strconv.Atoi(onDCSeconds)
+    if err != nil {
+        return c.Status(400).JSON(fiber.Map{"status": "error", "message": "Invalid screen_dimmer_time_on_dc_seconds"})
+    }
+
+    configMutex.Lock()
+    userCfg.ScreenDimmerTimeOnBatterySeconds = onBatterySecondsInt
+    userCfg.ScreenDimmerTimeOnDCSeconds = onDCSecondsInt
+    saveUserConfigToFile()
+    configMutex.Unlock()
+
+    return c.JSON(fiber.Map{"status": "ok"})
+}
+
+func setShowSMS(c *fiber.Ctx) error {
+    raw := c.FormValue("showSMS")
+    
+    valid_values := []string{"true", "false"}
+
+    if !slices.Contains(valid_values, raw) {
+        return c.Status(400).JSON(fiber.Map{
+            "status":  "error",
+            "message": "showSMS must be boolean",
+        })
+    }
+
+    configMutex.Lock()
+    userCfg.ShowSms = (strings.ToLower(raw) == "true")
+    saveUserConfigToFile()
+    configMutex.Unlock()
+
+    return c.JSON(fiber.Map{"status": "ok", "showSMS": raw})
+}
+
 func httpServer(port string) {
 	app := fiber.New()
 
@@ -454,19 +486,20 @@ func httpServer(port string) {
 	app.Get("/api/v1/go_data.json", getData) //TODO: add content
 	app.Post("/api/v1/go_data.json", updateData) //TODO: add content
 	app.Get("/api/v1/go_changePage", changePage)
-	//new
+    app.Get("/api/v1/go_display_text.json", httpDrawText)
+	app.Get("/api/v1/go_make_it_run", makeItRun)
+	//get/set configs (json)
 	app.Get("/api/v1/go_get_default_config.json", getDefaultConfig)
 	app.Get("/api/v1/go_get_config.json", getConfig)
-	app.Post("/api/v1/go_set_config.json", setConfig)
 	app.Get("/api/v1/go_get_user_config.json", getUserConfig)
 	app.Post("/api/v1/go_set_user_config.json", setUserConfig)
 	app.Get("/api/v1/go_get_status.json", getStatus)
+    app.Get("/api/v1/go_reset_config", resetConfig)
 	
-	app.Get("/api/v1/go_display_text.json", httpDrawText)
-	app.Get("/api/v1/go_make_it_run", makeItRun)
-
-	app.Get("/api/v1/go_reset_config", resetConfig)
-
+    //get/set individual configs
+    app.Post("/api/v1/go_set_ping_sites", setPingSites)
+    app.Post("/api/v1/go_set_screen_dimmer_time", setScreenDimmerTime)
+    app.Post("/api/v1/go_set_show_sms", setShowSMS)
 
 	// Start server, retry if failed
 	var ln net.Listener

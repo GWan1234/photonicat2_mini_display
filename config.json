@@ -1,9 +1,11 @@
 {
-    "num_pages": 4,
-    "site0": "taobao.com",
-    "site1": "photonicat.com",
+    "ping_site0": "taobao.com",
+    "ping_site1": "photonicat.com",
     "show_sms": true,
-    "modem_port": "/dev/ttyUSB2",
+    "screen_dimmer_time_on_battery_seconds": 60,
+    "screen_dimmer_time_on_dc_seconds": 86400,
+    "screen_max_brightness": 100,
+    "screen_min_brightness": 0,
     "display_template": {
         "elements": {
             "page0": [ 
@@ -142,7 +144,7 @@
             "page1": [
                 {
                     "type": "fixed_text",
-                    "label": "ping: taobao.com",
+                    "label": "ping: [ping_site0]",
                     "position": {"x": 6, "y": 4},
                     "font": "tiny",
                     "color": [255, 229, 0],
@@ -161,7 +163,7 @@
                 },
                 {
                     "type": "fixed_text",
-                    "label": "ping: photonicat.com",
+                    "label": "ping: [ping_site1]",
                     "position": {"x": 6, "y":49},
                     "font": "tiny",
                     "color": [255, 229, 0],

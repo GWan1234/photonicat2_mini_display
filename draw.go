@@ -18,6 +18,7 @@ import (
 	"strings"
 	"strconv"
 	"path/filepath"
+	"regexp"
 	gc9307 "github.com/photonicat/periph.io-gc9307"
 
 	"golang.org/x/image/font"
@@ -732,6 +733,8 @@ func saveFrameToPng(frame *image.RGBA, filename string) {
 }
 
 func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
+	var placeholderRe = regexp.MustCompile(`\[(\w+)\]`)
+
 	if isSMS {
 		copyImageToImageAt(frame, smsPagesImages[pageIdx], 0, 0)
 		return
@@ -838,20 +841,34 @@ func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
 				log.Printf("Error getting font face for %s: %v", element.Font, err)
 				continue
 			}
+			// pick a default white if no color
 			var clr color.RGBA
 			if len(element.Color) >= 3 {
-				clr = color.RGBA{
-					R: uint8(element.Color[0]),
-					G: uint8(element.Color[1]),
-					B: uint8(element.Color[2]),
-					A: 255,
-				}
+				clr = color.RGBA{uint8(element.Color[0]), uint8(element.Color[1]), uint8(element.Color[2]), 255}
 			} else {
-				// Default color: white.
 				clr = color.RGBA{255, 255, 255, 255}
 			}
+		
+			// replace [key] → cfg.Field
+			label := placeholderRe.ReplaceAllStringFunc(element.Label, func(tok string) string {
+				key := tok[1 : len(tok)-1] // strip brackets
+				switch key {
+				case "ping_site0":
+					return cfg.PingSite0
+				case "ping_site1":
+					return cfg.PingSite1
+				/*case "screen_dimmer_time_on_battery_seconds":
+					return strconv.Itoa(cfg.ScreenDimmerTimeOnBatterySeconds)
+				case "screen_dimmer_time_on_dc_seconds":
+					return strconv.Itoa(cfg.ScreenDimmerTimeOnDCSeconds)*/
+				// add more fields here if you ever parameterize them in fixed_text
+				default:
+					return tok
+				}
+			})
+		
 
-			drawText(frame, element.Label, element.Position.X, element.Position.Y, face, clr, false)
+			drawText(frame, label, element.Position.X, element.Position.Y, face, clr, false)
 
 		default:
 			log.Printf("Unknown element type: %s", element.Type)

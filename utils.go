@@ -401,3 +401,179 @@ func stateName(s int) string {
         return "UNKNOWN"
     }
 }
+
+
+// mergeConfigs rebuilds `cfg` by overlaying userCfg on top of dftCfg.
+// It returns an error if any validation fails.
+func mergeConfigs() error {
+    configMutex.Lock()
+    defer configMutex.Unlock()
+
+    // 1. Shallow copy defaults into cfg
+    cfg = dftCfg
+
+    // 2. Deep-copy the default template map so we don't mutate dftCfg
+    newElems := make(map[string][]DisplayElement, len(dftCfg.DisplayTemplate.Elements))
+    for page, elems := range dftCfg.DisplayTemplate.Elements {
+        copySlice := make([]DisplayElement, len(elems))
+        copy(copySlice, elems)
+        newElems[page] = copySlice
+    }
+
+    // 3. Overlay any user-provided pages/elements
+    if userCfg.DisplayTemplate.Elements != nil {
+        for page, elems := range userCfg.DisplayTemplate.Elements {
+            copySlice := make([]DisplayElement, len(elems))
+            copy(copySlice, elems)
+            newElems[page] = copySlice
+        }
+    }
+    cfg.DisplayTemplate.Elements = newElems
+
+    // 4. Override scalar fields if userCfg set them
+    if userCfg.ScreenDimmerTimeOnBatterySeconds != 0 {
+        cfg.ScreenDimmerTimeOnBatterySeconds = userCfg.ScreenDimmerTimeOnBatterySeconds
+    }
+    if userCfg.ScreenDimmerTimeOnDCSeconds != 0 {
+        cfg.ScreenDimmerTimeOnDCSeconds = userCfg.ScreenDimmerTimeOnDCSeconds
+    }
+    if userCfg.ScreenMaxBrightness != 0 {
+        cfg.ScreenMaxBrightness = userCfg.ScreenMaxBrightness
+    }
+    if userCfg.ScreenMinBrightness != 0 {
+        cfg.ScreenMinBrightness = userCfg.ScreenMinBrightness
+    }
+    if userCfg.PingSite0 != "" {
+        cfg.PingSite0 = userCfg.PingSite0
+    }
+    if userCfg.PingSite1 != "" {
+        cfg.PingSite1 = userCfg.PingSite1
+    }
+    // always override boolean
+    cfg.ShowSms = userCfg.ShowSms
+
+    // 5. Validation
+    if cfg.ScreenDimmerTimeOnBatterySeconds < 0 {
+        return fmt.Errorf("screen_dimmer_time_on_battery_seconds must be ≥ 0, got %d",
+            cfg.ScreenDimmerTimeOnBatterySeconds)
+    }
+    if cfg.ScreenDimmerTimeOnDCSeconds < 0 {
+        return fmt.Errorf("screen_dimmer_time_on_dc_seconds must be ≥ 0, got %d",
+            cfg.ScreenDimmerTimeOnDCSeconds)
+    }
+    if cfg.ScreenMinBrightness < 0 || cfg.ScreenMinBrightness > 100 {
+        return fmt.Errorf("screen_min_brightness must be in [0,100], got %d",
+            cfg.ScreenMinBrightness)
+    }
+    if cfg.ScreenMaxBrightness < 0 || cfg.ScreenMaxBrightness > 100 {
+        return fmt.Errorf("screen_max_brightness must be in [0,100], got %d",
+            cfg.ScreenMaxBrightness)
+    }
+    if cfg.ScreenMinBrightness > cfg.ScreenMaxBrightness {
+        return fmt.Errorf("screen_min_brightness (%d) cannot exceed screen_max_brightness (%d)",
+            cfg.ScreenMinBrightness, cfg.ScreenMaxBrightness)
+    }
+    /*
+    for name, site := range map[string]string{"ping_site0": cfg.PingSite0, "ping_site1": cfg.PingSite1} {
+        if site != "" {
+            if u, err := url.ParseRequestURI(site); err != nil || u.Scheme == "" && u.Host == "" {
+                return fmt.Errorf("invalid %s: %q", name, site)
+            }
+        }
+    }*/
+
+    cfgNumPages = len(cfg.DisplayTemplate.Elements)
+
+    return nil
+}
+
+// saveUserConfig writes the userCfg struct to ETC_USER_CONFIG_PATH atomically.
+func saveUserConfigToFile() {
+    // 1) Marshal with indentation
+    data, err := json.MarshalIndent(userCfg, "", "  ")
+    if err != nil {
+        log.Printf("could not marshal user config: %v", err)
+        return
+    }
+
+    // 2) Write to temp file
+    tmp := ETC_USER_CONFIG_PATH + ".tmp"
+    if err := ioutil.WriteFile(tmp, data, 0644); err != nil {
+        log.Printf("could not write temp user config: %v", err)
+        return
+    }
+
+    // 3) Rename temp file into place
+    if err := os.Rename(tmp, ETC_USER_CONFIG_PATH); err != nil {
+        log.Printf("could not rename temp config file: %v", err)
+    }
+}
+
+func loadAllConfigsToVariables() {
+    var err error
+    localConfig := "config.json"
+    userConfig := "user_config.json"
+    
+	if _, err = os.Stat(localConfig); err == nil {
+		localConfigExists = true
+		log.Println("Local config found at", localConfig)
+	}else{
+		log.Println("use", ETC_CONFIG_PATH)
+	}
+	
+	if localConfigExists {
+		cfg, err = loadConfig(localConfig)
+		dftCfg, err = loadConfig(localConfig)
+	}else{
+		cfg, err = loadConfig(ETC_CONFIG_PATH)
+		dftCfg, err = loadConfig(ETC_CONFIG_PATH)
+	}
+
+	if err != nil {
+		log.Fatalf("Failed to load config: %v", err)
+	}else{
+		log.Println("CFG, DFTCFG: READ SUCCESS")
+	}
+	
+	userConfigExists := false
+	if _, err := os.Stat(userConfig); err == nil {
+		userConfigExists = true
+		log.Println("User config found at", userConfig)
+	}else{
+		log.Println("No user config found, try to use", ETC_USER_CONFIG_PATH)
+	}
+
+	if userConfigExists {
+		userCfg, err = loadConfig(userConfig)
+	}else{
+		userCfg, err = loadConfig(ETC_USER_CONFIG_PATH)	
+	}
+
+	if err != nil {
+        //create a empty json file
+        content := "{}"
+        if err := ioutil.WriteFile(ETC_USER_CONFIG_PATH, []byte(content), 0644); err != nil {
+            log.Printf("could not write temp user config: %v", err)
+        }
+        log.Println("Created empty user config file at", ETC_USER_CONFIG_PATH)
+        userCfg, err = loadConfig(ETC_USER_CONFIG_PATH)
+	}else{
+		log.Println("USER CFG: READ SUCCESS")
+	}
+
+	if userConfigExists && localConfigExists {
+		err = mergeConfigs()
+		if err != nil {
+			log.Fatalf("Failed to merge configs: %v, using default config", err)
+			cfg = dftCfg
+		}else{
+			log.Println("MERGE CFG: SUCCESS")
+		}
+	}else{
+		cfg = dftCfg
+		log.Println("NO USER CFG, Not Merging, using default config")
+	}
+
+    mergeConfigs()
+    log.Println("merged configs to cfg", cfg)
+}

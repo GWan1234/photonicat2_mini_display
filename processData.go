@@ -557,16 +557,16 @@ func collectNetworkData(cfg Config) {
 	}
 
 	// Ping Site0 using ICMP.
-	if ping0, err := pingICMP(cfg.Site0); err != nil {
-		fmt.Printf("ICMP ping to %s failed: %v\n", cfg.Site0, err)
+	if ping0, err := pingICMP(cfg.PingSite0); err != nil {
+		fmt.Printf("ICMP ping to %s failed: %v\n", cfg.PingSite0, err)
 		globalData.Store("Ping0", -1) // using -1 to indicate an error
 	} else {
 		globalData.Store("Ping0", ping0)
 	}
 
 	// Ping Site1 using ICMP.
-	if ping1, err := pingICMP(cfg.Site1); err != nil {
-		fmt.Printf("ICMP ping to %s failed: %v\n", cfg.Site1, err)
+	if ping1, err := pingICMP(cfg.PingSite1); err != nil {
+		fmt.Printf("ICMP ping to %s failed: %v\n", cfg.PingSite1, err)
 		globalData.Store("Ping1", -1)
 	} else {
 		globalData.Store("Ping1", ping1)
