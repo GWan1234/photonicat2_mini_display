@@ -487,28 +487,6 @@ func mergeConfigs() error {
     return nil
 }
 
-// saveUserConfig writes the userCfg struct to ETC_USER_CONFIG_PATH atomically.
-func saveUserConfigToFile() {
-    // 1) Marshal with indentation
-    data, err := json.MarshalIndent(userCfg, "", "  ")
-    if err != nil {
-        log.Printf("could not marshal user config: %v", err)
-        return
-    }
-
-    // 2) Write to temp file
-    tmp := ETC_USER_CONFIG_PATH + ".tmp"
-    if err := ioutil.WriteFile(tmp, data, 0644); err != nil {
-        log.Printf("could not write temp user config: %v", err)
-        return
-    }
-
-    // 3) Rename temp file into place
-    if err := os.Rename(tmp, ETC_USER_CONFIG_PATH); err != nil {
-        log.Printf("could not rename temp config file: %v", err)
-    }
-}
-
 func loadAllConfigsToVariables() {
     var err error
     localConfig := "config.json"

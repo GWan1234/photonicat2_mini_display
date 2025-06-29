@@ -17,6 +17,7 @@ import (
     "net"
     "slices"
     "strings"
+    "path/filepath"
 
 	"github.com/gofiber/fiber/v2"
 )
@@ -140,29 +141,75 @@ func loadUserConfig() string {
 	return userJsonConfig
 }
 
-// saveUserConfig writes the payload map back to disk
-func saveUserConfigFromWeb(payload map[string]string) {
-	return //not using this now.
-    path := ETC_USER_CONFIG_PATH
 
-    // marshal with nice indentation
-    data, err := json.MarshalIndent(payload, "", "  ")
+// saveUserConfigToFile writes the userCfg struct to ETC_USER_CONFIG_PATH atomically.
+// Returns true on success, false on any error.
+func saveUserConfigToFile() bool {
+    // 1) Marshal with indentation
+    data, err := json.MarshalIndent(userCfg, "", "  ")
     if err != nil {
         log.Printf("could not marshal user config: %v", err)
-        return
+        return false
     }
 
-    // write atomically
-    tmp := path + ".tmp"
-    if err := ioutil.WriteFile(tmp, data, 0644); err != nil {
+    // 2) Ensure directory exists
+    if err := os.MkdirAll(filepath.Dir(ETC_USER_CONFIG_PATH), 0755); err != nil {
+        log.Printf("could not create config dir: %v", err)
+        return false
+    }
+
+    // 3) Write to temp file
+    tmpPath := ETC_USER_CONFIG_PATH + ".tmp"
+    if err := os.WriteFile(tmpPath, data, 0644); err != nil {
         log.Printf("could not write temp user config: %v", err)
-        return
+        return false
     }
-    if err := os.Rename(tmp, path); err != nil {
+
+    // 4) Rename temp file into place
+    if err := os.Rename(tmpPath, ETC_USER_CONFIG_PATH); err != nil {
         log.Printf("could not rename temp config file: %v", err)
+        return false
     }
+
+    return true
 }
 
+// saveUserConfigFromStr validates the JSON string, pretty‑prints it,
+// updates userCfg, and saves it. Returns true on success, false on any error.
+func saveUserConfigFromStr(str string) bool {
+    // 1) Validate & parse JSON into generic interface
+    var obj interface{}
+    if err := json.Unmarshal([]byte(str), &obj); err != nil {
+        log.Printf("invalid JSON, not saving: %v", err)
+        return false
+    }
+
+    // 2) Pretty‑print with 4‑space indent
+    pretty, err := json.MarshalIndent(obj, "", "    ")
+    if err != nil {
+        log.Printf("could not marshal indent JSON: %v", err)
+        return false
+    }
+
+    // 3) Write the prettified JSON to disk atomically
+    //    (we skip updating userCfg here since you may not have a struct to unmarshal into;
+    //     if you do, unmarshal into it before step 1 and assign to userCfg)
+    tmpPath := ETC_USER_CONFIG_PATH + ".tmp"
+    if err := os.MkdirAll(filepath.Dir(ETC_USER_CONFIG_PATH), 0755); err != nil {
+        log.Printf("could not create config dir: %v", err)
+        return false
+    }
+    if err := os.WriteFile(tmpPath, pretty, 0644); err != nil {
+        log.Printf("could not write temp config: %v", err)
+        return false
+    }
+    if err := os.Rename(tmpPath, ETC_USER_CONFIG_PATH); err != nil {
+        log.Printf("could not rename temp config into place: %v", err)
+        return false
+    }
+
+    return true
+}
 
 // POST /api/v1/data
 func updateData(c *fiber.Ctx) error {
@@ -187,17 +234,43 @@ func getDefaultConfig(c *fiber.Ctx) error {
 	return c.JSON(cfg)
 }
 
-// GET  /api/v1/get_user_config.json
+// GET /api/v1/get_user_config.json
 func getUserConfig(c *fiber.Ctx) error {
-    configMutex.RLock()
-    defer configMutex.RUnlock()
+    // 1) Read the file
+    data, err := os.ReadFile(ETC_USER_CONFIG_PATH)
+    if err != nil {
+        log.Printf("could not read user config: %v", err)
+        return c.
+            Status(fiber.StatusInternalServerError).
+            JSON(fiber.Map{
+                "status":  "error",
+                "message": "unable to load user config",
+            })
+    }
 
-    // Return the raw overrides that the user has set
-    return c.SendString(loadUserConfig())
+    // 2) Return raw JSON, set content-type
+    c.Type("application/json", "utf-8")
+    return c.Send(data)
 }
 
+// saveUserConfigFromWeb handles a JSON payload, validates & saves it,
+// and returns appropriate HTTP statuses.
+func saveUserConfigFromWeb(c *fiber.Ctx) error {
+    body := string(c.Body())
 
+    // Attempt to save; this returns false on any validation/write error.
+    if ok := saveUserConfigFromStr(body); !ok {
+        // Distinguish “invalid JSON” vs “disk/write error”? 
+        // If you need that, change saveUserConfigFromStr to return (bool, error).
+        // For now, we’ll lump all failures under 400 Bad Request.
+        return c.Status(fiber.StatusBadRequest).
+            JSON(fiber.Map{"status": "error", "message": "invalid JSON or unable to save config"})
+    }
 
+    // Success
+    //loadAllConfigsToVariables() //TODO: this is probably not needed, but it's a good idea to reload the configs
+    return c.JSON(fiber.Map{"status": "ok"})
+}
 
 // POST /api/v1/set_user_config.json
 func setUserConfig(c *fiber.Ctx) error {
@@ -313,7 +386,9 @@ func getStatus(c *fiber.Ctx) error {
 }
 
 func resetConfig(c *fiber.Ctx) error {
-	//TODO: cfg = defaultConfig
+	cfg = dftCfg
+    userCfg = Config{}
+    saveUserConfigToFile()
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
@@ -492,6 +567,7 @@ func httpServer(port string) {
 	app.Get("/api/v1/go_get_default_config.json", getDefaultConfig)
 	app.Get("/api/v1/go_get_config.json", getConfig)
 	app.Get("/api/v1/go_get_user_config.json", getUserConfig)
+	app.Post("/api/v1/go_save_user_config.json", saveUserConfigFromWeb)
 	app.Post("/api/v1/go_set_user_config.json", setUserConfig)
 	app.Get("/api/v1/go_get_status.json", getStatus)
     app.Get("/api/v1/go_reset_config", resetConfig)
