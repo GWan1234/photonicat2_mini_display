@@ -9,14 +9,15 @@ import (
 	"image/png"
 	"io/ioutil"
 	"os"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
-	"sort"
+
 	//"os/exec"
+	"io"
 	"log"
 	"net/http"
-	"io"
 
 	"github.com/golang/freetype"
 	"github.com/golang/freetype/truetype"
@@ -34,14 +35,14 @@ type SMS struct {
 	Content   string `json:"content"`
 }
 
-var(
+var (
 	lastSmsJsonContent string
-	lastNumPages int
+	lastNumPages       int
 )
 
 func collectAndDrawSms(cfg *Config) int {
-    jsonContent := getJsonContent(cfg)
-	
+	jsonContent := getJsonContent(cfg)
+
 	if len(jsonContent) < 50 { //dummy message
 		jsonContent = fmt.Sprintf("{\"msg\":[{\"sender\":\"System\",\"timestamp\":\"%s\",\"content\":\"No SMS - 无消息\"}]}", time.Now().Format("2006-01-02 15:04:05"))
 	}
@@ -50,37 +51,36 @@ func collectAndDrawSms(cfg *Config) int {
 		log.Println("collectAndDrawSms: No new SMS, lastNumPages:", lastNumPages)
 		return lastNumPages
 	}
-	
+
 	lastSmsJsonContent = jsonContent
 	lastNumPages = 0
 
-    rawImgs, err := drawSmsFrJson(jsonContent, false, false)
-    if err != nil {
-        log.Println("Error drawing SMS:", err)
-        return 0
-    }
-	
-    // prepare the global slice
-    smsPagesImages = make([]*image.RGBA, len(rawImgs))
-    for i, img := range rawImgs {
-        // try a direct cast
-        rgba, ok := img.(*image.RGBA)
-        if !ok {
-            log.Printf("Image %d is not *image.RGBA, converting…", i)
-            // convert by drawing into a new RGBA
-            b := img.Bounds()
-            r := image.NewRGBA(b)
-            draw.Draw(r, b, img, b.Min, draw.Src)
-            rgba = r
-        }
-        smsPagesImages[i] = rgba
-    }
+	rawImgs, err := drawSmsFrJson(jsonContent, false, false)
+	if err != nil {
+		log.Println("Error drawing SMS:", err)
+		return 0
+	}
+
+	// prepare the global slice
+	smsPagesImages = make([]*image.RGBA, len(rawImgs))
+	for i, img := range rawImgs {
+		// try a direct cast
+		rgba, ok := img.(*image.RGBA)
+		if !ok {
+			log.Printf("Image %d is not *image.RGBA, converting…", i)
+			// convert by drawing into a new RGBA
+			b := img.Bounds()
+			r := image.NewRGBA(b)
+			draw.Draw(r, b, img, b.Min, draw.Src)
+			rgba = r
+		}
+		smsPagesImages[i] = rgba
+	}
 	numPages := len(smsPagesImages)
 	lastNumPages = numPages
 
-    return numPages
+	return numPages
 }
-
 
 func getJsonContent(_ *Config) string {
 	// 1. Make the request
@@ -107,9 +107,8 @@ func getJsonContent(_ *Config) string {
 	return string(data)
 }
 
-
 func drawSmsFrJson(jsonContent string, savePng bool, drawPageNum bool) (imgs []image.Image, err error) {
-	
+
 	var smsData struct {
 		Msg []SMS `json:"msg"`
 	}
@@ -137,7 +136,7 @@ func drawSmsFrJson(jsonContent string, savePng bool, drawPageNum bool) (imgs []i
 	fontSize := 12.0
 	fontSizeTitle := 11.0
 	lineSpacing := 1.2
-	maxWidth := width - 8 // Adjusted for padding
+	maxWidth := width - 8   // Adjusted for padding
 	maxHeight := height - 8 // Adjusted for padding
 	topPadding := 3.0
 	xStart := 4
@@ -158,7 +157,6 @@ func drawSmsFrJson(jsonContent string, savePng bool, drawPageNum bool) (imgs []i
 	fcTitle.SetSrc(image.NewUniform(color.RGBA{255, 255, 255, 255}))
 	fcTitle.SetHinting(font.HintingFull)
 
-
 	// Sort messages by timestamp descending
 	sort.Slice(smsData.Msg, func(i, j int) bool {
 		ti, err1 := time.Parse(layout, smsData.Msg[i].Timestamp)
@@ -171,8 +169,8 @@ func drawSmsFrJson(jsonContent string, savePng bool, drawPageNum bool) (imgs []i
 
 	// Prepare pagination
 	type Line struct {
-		Text      string
-		IsTitle   bool
+		Text    string
+		IsTitle bool
 	}
 
 	type Page struct {
@@ -283,7 +281,7 @@ func drawSmsFrJson(jsonContent string, savePng bool, drawPageNum bool) (imgs []i
 				}
 				timeDisplay := timePrefix + " " + timeStr
 				if len(sender) > 15 {
-					sender = sender[:8] + "**" + sender[len(sender)- 2:]
+					sender = sender[:8] + "**" + sender[len(sender)-2:]
 				}
 				// Draw sender left-aligned
 				ptSender := freetype.Pt(xStart, int(y+fontSizeTitle))
@@ -321,12 +319,12 @@ func drawSmsFrJson(jsonContent string, savePng bool, drawPageNum bool) (imgs []i
 			}
 		}
 		imgs = append(imgs, img)
-		
+
 	}
 	margin := 4 // margin from the right and bottom
 	pageNumFontSize := 10.0
 	total := len(imgs)
-    for i, im := range imgs {
+	for i, im := range imgs {
 		if drawPageNum {
 			pageStr := fmt.Sprintf("%d/%d", i+1, total)
 			facePN := truetype.NewFace(fnt, &truetype.Options{Size: pageNumFontSize, DPI: 72, Hinting: font.HintingFull})
@@ -355,18 +353,18 @@ func drawSmsFrJson(jsonContent string, savePng bool, drawPageNum bool) (imgs []i
 			f.Close()
 			fmt.Printf("Generated %s\n", fname)
 		}
-    }
+	}
 
-    return imgs, nil
+	return imgs, nil
 }
 
 // isCJK reports whether r belongs to a CJK script.
 func isCJK(r rune) bool {
-    return unicode.In(r,
-        unicode.Han,       // Chinese characters
-        unicode.Hiragana,  // Japanese hiragana
-        unicode.Katakana,  // Japanese katakana
-        unicode.Hangul)    // Korean hangul
+	return unicode.In(r,
+		unicode.Han,      // Chinese characters
+		unicode.Hiragana, // Japanese hiragana
+		unicode.Katakana, // Japanese katakana
+		unicode.Hangul)   // Korean hangul
 }
 
 // wrapText splits text into lines that fit within maxWidth.
@@ -374,99 +372,118 @@ func isCJK(r rune) bool {
 // - A single word that is too wide gets hyphenated.
 // - CJK characters may break anywhere, and never get spaces around them.
 func wrapText(text string, maxWidth int, face font.Face) []string {
-    // Helper to detect CJK runes
-    isCJK := func(r rune) bool {
-        return unicode.In(r, unicode.Han, unicode.Hiragana, unicode.Katakana, unicode.Hangul)
-    }
+	// Helper to detect CJK runes
+	isCJK := func(r rune) bool {
+		return unicode.In(r, unicode.Han, unicode.Hiragana, unicode.Katakana, unicode.Hangul)
+	}
 
-    // 1) Tokenize into either:
-    //    - runs of non-CJK (i.e. potential words)
-    //    - single CJK runes
-    var tokens []string
-    var buf []rune
-    flush := func() {
-        if len(buf)>0 {
-            tokens = append(tokens, string(buf))
-            buf = buf[:0]
-        }
-    }
+	// 1) Tokenize into either:
+	//    - runs of non-CJK (i.e. potential words)
+	//    - single CJK runes
+	var tokens []string
+	var buf []rune
+	flush := func() {
+		if len(buf) > 0 {
+			tokens = append(tokens, string(buf))
+			buf = buf[:0]
+		}
+	}
 
-    for _, r := range text {
-        if unicode.IsSpace(r) {
-            flush()
-        } else if isCJK(r) {
-            flush()
-            tokens = append(tokens, string(r))
-        } else {
-            buf = append(buf, r)
-        }
-    }
-    flush()
+	for _, r := range text {
+		if unicode.IsSpace(r) {
+			flush()
+		} else if isCJK(r) {
+			flush()
+			tokens = append(tokens, string(r))
+		} else {
+			buf = append(buf, r)
+		}
+	}
+	flush()
 
-    // 2) Build lines
-    var lines []string
-    drawer := &font.Drawer{Face: face}
-    current := ""
+	// 2) Build lines
+	var lines []string
+	drawer := &font.Drawer{Face: face}
+	current := ""
 
-    for _, tok := range tokens {
-        // decide separator: only a space if both neighbors are non-CJK
-        sep := ""
-        if current != "" {
-            first := []rune(tok)[0]
-            last  := []rune(current)[len([]rune(current))-1]
-            if !isCJK(first) && !isCJK(last) {
-                sep = " "
-            }
-        }
+	for _, tok := range tokens {
+		// decide separator: only a space if both neighbors are non-CJK
+		sep := ""
+		if current != "" {
+			first := []rune(tok)[0]
+			last := []rune(current)[len([]rune(current))-1]
+			if !isCJK(first) && !isCJK(last) {
+				sep = " "
+			}
+		}
 
-        candidate := current + sep + tok
-        if int(drawer.MeasureString(candidate)>>6) <= maxWidth {
-            current = candidate
-            continue
-        }
+		candidate := current + sep + tok
+		if int(drawer.MeasureString(candidate)>>6) <= maxWidth {
+			current = candidate
+			continue
+		}
 
-        // if overflow
-        if current != "" {
-            lines = append(lines, current)
-            current = ""
-        }
+		// if overflow
+		if current != "" {
+			lines = append(lines, current)
+			current = ""
+		}
 
-        // tok alone too wide?
-        if int(drawer.MeasureString(tok)>>6) <= maxWidth {
-            current = tok
-        } else {
-            // hyphenate non-CJK words, else break CJK one rune at a time
-            runes := []rune(tok)
-            if !isCJK(runes[0]) && len(runes)>1 {
-                // hyphenate
-                for i:=1; i<len(runes); i++ {
-                    part := string(runes[:i]) + "-"
-                    if int(drawer.MeasureString(part)>>6) > maxWidth {
-                        lines = append(lines, string(runes[:i-1])+"-")
-                        current = string(runes[i-1:])
-                        break
-                    }
-                }
-            } else {
-                // CJK or single rune: char-by-char
-                for _, r := range runes {
-                    s := string(r)
-                    if current=="" {
-                        current = s
-                    } else if int(drawer.MeasureString(current+s)>>6) <= maxWidth {
-                        current += s
-                    } else {
-                        lines = append(lines, current)
-                        current = s
-                    }
-                }
-            }
-        }
-    }
+		// tok alone too wide?
+		if int(drawer.MeasureString(tok)>>6) <= maxWidth {
+			current = tok
+		} else {
+			// hyphenate non-CJK words, else break CJK one rune at a time
+			runes := []rune(tok)
+			if !isCJK(runes[0]) && len(runes) > 1 {
+				// hyphenate
+				for i := 1; i < len(runes); i++ {
+					part := string(runes[:i]) + "-"
+					if int(drawer.MeasureString(part)>>6) > maxWidth {
+						lines = append(lines, string(runes[:i-1])+"-")
+						current = string(runes[i-1:])
+						break
+					}
+				}
+			} else {
+				// CJK or single rune: char-by-char
+				for _, r := range runes {
+					s := string(r)
+					if current == "" {
+						current = s
+					} else if int(drawer.MeasureString(current+s)>>6) <= maxWidth {
+						current += s
+					} else {
+						lines = append(lines, current)
+						current = s
+					}
+				}
+			}
+		}
+	}
 
-    if current!="" {
-        lines = append(lines, current)
-    }
-    return lines
+	if current != "" {
+		lines = append(lines, current)
+	}
+	return lines
 }
 
+func getSmsPages() {
+
+	if cfg.ShowSms {
+		for {
+			//log.Println("Collecting SMS")
+			lenSmsPagesImages = collectAndDrawSms(&cfg)
+			if lenSmsPagesImages == 0 {
+				lenSmsPagesImages = 1
+			}
+			log.Println("collect lenSmsPagesImages:", lenSmsPagesImages)
+			if lenSmsPagesImages > 0 {
+				totalNumPages = cfgNumPages + lenSmsPagesImages
+			} else {
+				totalNumPages = cfgNumPages + 1
+			}
+			time.Sleep(INTERVAL_SMS_COLLECT)
+		}
+	}
+}

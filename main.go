@@ -361,26 +361,6 @@ func registerExitHandler() {
 	}()
 }
 
-func getSmsPages() {
-
-	if cfg.ShowSms {
-		for {
-			//log.Println("Collecting SMS")
-			lenSmsPagesImages = collectAndDrawSms(&cfg)
-			if lenSmsPagesImages == 0 {
-				lenSmsPagesImages = 1
-			}
-			log.Println("collect lenSmsPagesImages:", lenSmsPagesImages)
-			if lenSmsPagesImages > 0 {
-				totalNumPages = cfgNumPages + lenSmsPagesImages
-			} else {
-				totalNumPages = cfgNumPages + 1
-			}
-			time.Sleep(INTERVAL_SMS_COLLECT)
-		}
-	}
-}
-
 func init3FrameBuffers() {
 	middleFramebuffers = append(middleFramebuffers, image.NewRGBA(image.Rect(0, 0, middleFrameWidth, middleFrameHeight)))
 	middleFramebuffers = append(middleFramebuffers, image.NewRGBA(image.Rect(0, 0, middleFrameWidth, middleFrameHeight)))
