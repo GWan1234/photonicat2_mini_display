@@ -1,17 +1,17 @@
 package main
 
 import (
-	"image"
-	"os"
-	"time"
 	"encoding/json"
+	"fmt"
+	"image"
 	"io/ioutil"
 	"log"
+	"math"
+	"os"
 	"strconv"
-	"fmt"
 	"strings"
 	"sync"
-	"math"
+	"time"
 
 	evdev "github.com/holoplot/go-evdev"
 
@@ -20,9 +20,9 @@ import (
 )
 
 var (
-    fadeMu sync.Mutex
-    fadeCancel chan struct{}
-    swippingScreen bool
+	fadeMu         sync.Mutex
+	fadeCancel     chan struct{}
+	swippingScreen bool
 )
 
 // loadConfig reads and unmarshals the config file.
@@ -36,229 +36,227 @@ func loadConfig(path string) (Config, error) {
 }
 
 var (
-    fontCache   = make(map[string]struct {
-        face       font.Face
-        fontHeight int
-    })
-    fontCacheMu sync.Mutex
+	fontCache = make(map[string]struct {
+		face       font.Face
+		fontHeight int
+	})
+	fontCacheMu sync.Mutex
 )
 
 // getFontFace loads (or returns cached) font.Face + its height.
 func getFontFace(fontName string) (font.Face, int, error) {
-    // 1) Check cache
-    fontCacheMu.Lock()
-    if entry, ok := fontCache[fontName]; ok {
-        fontCacheMu.Unlock()
-        return entry.face, entry.fontHeight, nil
-    }
-    fontCacheMu.Unlock()
+	// 1) Check cache
+	fontCacheMu.Lock()
+	if entry, ok := fontCache[fontName]; ok {
+		fontCacheMu.Unlock()
+		return entry.face, entry.fontHeight, nil
+	}
+	fontCacheMu.Unlock()
 
-    // 2) Not cached: load config
-    cfg, ok := fonts[fontName]
-    if !ok {
-        return nil, 0, fmt.Errorf("font %s not found in mapping", fontName)
-    }
+	// 2) Not cached: load config
+	cfg, ok := fonts[fontName]
+	if !ok {
+		return nil, 0, fmt.Errorf("font %s not found in mapping", fontName)
+	}
 
-    // 3) Read & parse the TTF
-    fontBytes, err := ioutil.ReadFile(cfg.FontPath)
-    if err != nil {
-        return nil, 0, fmt.Errorf("error reading font file: %v", err)
-    }
-    ttfFont, err := opentype.Parse(fontBytes)
-    if err != nil {
-        return nil, 0, fmt.Errorf("error parsing font: %v", err)
-    }
+	// 3) Read & parse the TTF
+	fontBytes, err := ioutil.ReadFile(cfg.FontPath)
+	if err != nil {
+		return nil, 0, fmt.Errorf("error reading font file: %v", err)
+	}
+	ttfFont, err := opentype.Parse(fontBytes)
+	if err != nil {
+		return nil, 0, fmt.Errorf("error parsing font: %v", err)
+	}
 
-    // 4) Create the face
-    face, err := opentype.NewFace(ttfFont, &opentype.FaceOptions{
-        Size:    cfg.FontSize,
-        DPI:     72,
-        Hinting: font.HintingFull,
-    })
-    if err != nil {
-        return nil, 0, err
-    }
+	// 4) Create the face
+	face, err := opentype.NewFace(ttfFont, &opentype.FaceOptions{
+		Size:    cfg.FontSize,
+		DPI:     72,
+		Hinting: font.HintingFull,
+	})
+	if err != nil {
+		return nil, 0, err
+	}
 
-    // 5) Measure height
-    metrics := face.Metrics()
-    fontHeight := metrics.Ascent.Round() + metrics.Descent.Round()
+	// 5) Measure height
+	metrics := face.Metrics()
+	fontHeight := metrics.Ascent.Round() + metrics.Descent.Round()
 
-    // 6) Store in cache
-    fontCacheMu.Lock()
-    fontCache[fontName] = struct {
-        face       font.Face
-        fontHeight int
-    }{face: face, fontHeight: fontHeight}
-    fontCacheMu.Unlock()
+	// 6) Store in cache
+	fontCacheMu.Lock()
+	fontCache[fontName] = struct {
+		face       font.Face
+		fontHeight int
+	}{face: face, fontHeight: fontHeight}
+	fontCacheMu.Unlock()
 
-    return face, fontHeight, nil
+	return face, fontHeight, nil
 }
 
 func clearFrame(frame *image.RGBA, width int, height int) {
-	for i := 0; i < width * height * 4; i += 4 { //clear framebuffer
-		frame.Pix[i] = 0       // R
-		frame.Pix[i+1] = 0     // G
-		frame.Pix[i+2] = 0     // B
-		frame.Pix[i+3] = 255   // A (opaque black)
+	for i := 0; i < width*height*4; i += 4 { //clear framebuffer
+		frame.Pix[i] = 0     // R
+		frame.Pix[i+1] = 0   // G
+		frame.Pix[i+2] = 0   // B
+		frame.Pix[i+3] = 255 // A (opaque black)
 	}
 }
 
 func setBacklight(brightness int) {
-    mu.Lock()
-    defer mu.Unlock()
+	mu.Lock()
+	defer mu.Unlock()
 
-    // clamp into 0..100
-    switch {
-		case brightness < 0:
-			brightness = 0
-		case brightness > 100:
-			brightness = 100
-    }
+	// clamp into 0..100
+	switch {
+	case brightness < cfg.ScreenMinBrightness:
+		brightness = cfg.ScreenMinBrightness
+	case brightness > cfg.ScreenMaxBrightness:
+		brightness = cfg.ScreenMaxBrightness
+	}
 
-    if brightness == lastLogical {
-        return
-    }
-    lastLogical = brightness
+	if brightness == lastLogical {
+		return
+	}
+	lastLogical = brightness
 
-    // cancel any pending off-timer if we're going to >0
-    if brightness > 0 && offTimer != nil {
-        offTimer.Stop()
-        offTimer = nil
-    }
+	// cancel any pending off-timer if we're going to >0
+	if brightness > 0 && offTimer != nil {
+		offTimer.Stop()
+		offTimer = nil
+	}
 
-    // choose what to write right now:
-    phys := brightness
-    if brightness == 0 {
-        phys = 1
-    }
+	// choose what to write right now:
+	phys := brightness
+	if brightness == 0 {
+		phys = 1
+	}
 
-    // perform the write
-    if err := os.WriteFile("/sys/class/backlight/backlight/brightness", []byte(strconv.Itoa(phys)), 0644); err != nil {
-        log.Printf("backlight write error: %v", err)
-    } else {
-        //log.Printf("→ physical backlight %d", phys)
-    }
+	// perform the write
+	if err := os.WriteFile("/sys/class/backlight/backlight/brightness", []byte(strconv.Itoa(phys)), 0644); err != nil {
+		log.Printf("backlight write error: %v", err)
+	} else {
+		//log.Printf("→ physical backlight %d", phys)
+	}
 
-    // if we just handled a logical “0”, schedule the real off in ZERO_BACKLIGHT_DELAY s
-    if brightness == 0 {
-        offTimer = time.AfterFunc(ZERO_BACKLIGHT_DELAY, func() {
-            mu.Lock()
-            defer mu.Unlock()
-            if lastLogical == 0 {
-                // still supposed to be off, so write 0 now
-                if err := os.WriteFile("/sys/class/backlight/backlight/brightness", []byte("1"), 0644); err != nil {
-                    log.Printf("backlight final-off error: %v", err)
-                } else {
-                    log.Println("→ physical backlight OFF")
-                }
-            }
-        })
-    }
+	// if we just handled a logical “0”, schedule the real off in ZERO_BACKLIGHT_DELAY s
+	if brightness == 0 {
+		offTimer = time.AfterFunc(ZERO_BACKLIGHT_DELAY, func() {
+			mu.Lock()
+			defer mu.Unlock()
+			if lastLogical == 0 {
+				// still supposed to be off, so write 0 now
+				if err := os.WriteFile("/sys/class/backlight/backlight/brightness", []byte("1"), 0644); err != nil {
+					log.Printf("backlight final-off error: %v", err)
+				} else {
+					log.Println("→ physical backlight OFF")
+				}
+			}
+		})
+	}
 }
 
 func monitorKeyboard(changePageTriggered *bool) {
-    // 1) find the “rk805 pwrkey” device by name
-    paths, err := evdev.ListDevicePaths()
-    if err != nil {
-        log.Printf("ListDevicePaths error: %v", err)
-        return
-    }
+	// 1) find the “rk805 pwrkey” device by name
+	paths, err := evdev.ListDevicePaths()
+	if err != nil {
+		log.Printf("ListDevicePaths error: %v", err)
+		return
+	}
 
-    var devPath string
-    for _, ip := range paths {
-        if ip.Name == "rk805 pwrkey" {
-            devPath = ip.Path
-            break
-        }
-    }
-    if devPath == "" {
-        log.Println("no EV_KEY device found")
-        return
-    }
+	var devPath string
+	for _, ip := range paths {
+		if ip.Name == "rk805 pwrkey" {
+			devPath = ip.Path
+			break
+		}
+	}
+	if devPath == "" {
+		log.Println("no EV_KEY device found")
+		return
+	}
 
-    // 2) open it
-    keyboard, err := evdev.Open(devPath)
-    if err != nil {
-        log.Printf("Open(%s) error: %v", devPath, err)
-        return
-    }
-    defer keyboard.Ungrab()
+	// 2) open it
+	keyboard, err := evdev.Open(devPath)
+	if err != nil {
+		log.Printf("Open(%s) error: %v", devPath, err)
+		return
+	}
+	defer keyboard.Ungrab()
 
-    // 3) grab for exclusive access
-    if err := keyboard.Grab(); err != nil {
-        log.Printf("warning: failed to grab device: %v", err)
-    }
+	// 3) grab for exclusive access
+	if err := keyboard.Grab(); err != nil {
+		log.Printf("warning: failed to grab device: %v", err)
+	}
 
-    // 4) log what we opened
-    name, _ := keyboard.Name()
-    log.Printf("using input device: %s (%s)", devPath, name)
+	// 4) log what we opened
+	name, _ := keyboard.Name()
+	log.Printf("using input device: %s (%s)", devPath, name)
 
-    
-    for {
-        ev, err := keyboard.ReadOne()
-        if err != nil {
-            log.Printf("read error: %v", err)
-            time.Sleep(100 * time.Millisecond)
-            continue
-        }
+	for {
+		ev, err := keyboard.ReadOne()
+		if err != nil {
+			log.Printf("read error: %v", err)
+			time.Sleep(100 * time.Millisecond)
+			continue
+		}
 
-        now := time.Now()
-        if ev.Type == evdev.EV_KEY && ev.Code == evdev.KEY_POWER {
-            switch ev.Value {
-                case 1: // key press
-                    log.Println("POWER pressed, state =", stateName(idleState))
-                    if idleState == STATE_ACTIVE || idleState == STATE_FADE_IN {
-                        swippingScreen = true
-                        *changePageTriggered = true
-                    }
-                    lastActivityMu.Lock()
-                    lastActivity = now
-                    lastActivityMu.Unlock()
-    
-                case 0: // key release
-                    // just update lastActivity; no page-change here
-                    lastActivityMu.Lock()
-                    lastActivity = now
-                    lastActivityMu.Unlock()
+		now := time.Now()
+		if ev.Type == evdev.EV_KEY && ev.Code == evdev.KEY_POWER {
+			switch ev.Value {
+			case 1: // key press
+				log.Println("POWER pressed, state =", stateName(idleState))
+				if idleState == STATE_ACTIVE || idleState == STATE_FADE_IN {
+					swippingScreen = true
+					*changePageTriggered = true
+				}
+				lastActivityMu.Lock()
+				lastActivity = now
+				lastActivityMu.Unlock()
 
-            /* //var lastKeyPress time.Time
-            case 1: // key press
-                log.Println("POWER pressed, state =", stateName(idleState))
-                if idleState == STATE_ACTIVE || idleState == STATE_FADE_IN {
-                    swippingScreen = true
-                    //*changePageTriggered = true
-                }
-                lastActivityMu.Lock()
-                lastActivity = now
-                lastActivityMu.Unlock()
-                lastKeyPress = now
+			case 0: // key release
+				// just update lastActivity; no page-change here
+				lastActivityMu.Lock()
+				lastActivity = now
+				lastActivityMu.Unlock()
 
-            case 0: // key release
-                // only trigger if it wasn’t a quick tap (<500ms)
-                if now.Sub(lastKeyPress) > KEYBOARD_DEBOUNCE_TIME {
-                    log.Println("POWER released, state =", stateName(idleState))
-                    if idleState == STATE_ACTIVE{
-                        swippingScreen = true
-                        *changePageTriggered = true
-                    }
-                    lastActivityMu.Lock()
-                    lastActivity = now
-                    lastActivityMu.Unlock()
-                }*/
-            }
-        }
-    }
+				/* //var lastKeyPress time.Time
+				   case 1: // key press
+				       log.Println("POWER pressed, state =", stateName(idleState))
+				       if idleState == STATE_ACTIVE || idleState == STATE_FADE_IN {
+				           swippingScreen = true
+				           //*changePageTriggered = true
+				       }
+				       lastActivityMu.Lock()
+				       lastActivity = now
+				       lastActivityMu.Unlock()
+				       lastKeyPress = now
+
+				   case 0: // key release
+				       // only trigger if it wasn’t a quick tap (<500ms)
+				       if now.Sub(lastKeyPress) > KEYBOARD_DEBOUNCE_TIME {
+				           log.Println("POWER released, state =", stateName(idleState))
+				           if idleState == STATE_ACTIVE{
+				               swippingScreen = true
+				               *changePageTriggered = true
+				           }
+				           lastActivityMu.Lock()
+				           lastActivity = now
+				           lastActivityMu.Unlock()
+				       }*/
+			}
+		}
+	}
 }
 
 func getBacklight() int {
-    data, err := ioutil.ReadFile("/sys/class/backlight/backlight/brightness")
-    if err != nil {
-        log.Printf("getBacklight error: %v", err)
-        return 0
-    }
-    return int(data[0])
+	data, err := ioutil.ReadFile("/sys/class/backlight/backlight/brightness")
+	if err != nil {
+		log.Printf("getBacklight error: %v", err)
+		return 0
+	}
+	return int(data[0])
 }
-
 
 func fadeBacklight(wantValue int, timePeriod time.Duration) {
 	// Grab a snapshot of the “current” cancel channel under the fadeMu lock:
@@ -287,7 +285,7 @@ func fadeBacklight(wantValue int, timePeriod time.Duration) {
 		select {
 		case <-cancelChan:
 			// Someone closed fadeCancel → abort immediately
-            log.Println("fadeBacklight: cancel requested")
+			log.Println("fadeBacklight: cancel requested")
 			return
 		case <-ticker.C:
 			frac := float64(i) / float64(steps)
@@ -301,241 +299,240 @@ func fadeBacklight(wantValue int, timePeriod time.Duration) {
 }
 
 func idleDimmer() {
-    ticker := time.NewTicker(100 * time.Millisecond)
-    defer ticker.Stop()
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
 
-    prevState := STATE_UNKNOWN
+	prevState := STATE_UNKNOWN
 
-    for range ticker.C {
-        // 1) Movement/keypress detection
-        data, err := ioutil.ReadFile("/sys/kernel/photonicat-pm/movement_trigger")
-        if err == nil && strings.TrimSpace(string(data)) == "1" {
-            // Reset idle timer, treat screen as already “on”
-            now := time.Now()
-            lastActivityMu.Lock()
-            tempLastActivity := now.Add(-2 * time.Second)
-            if tempLastActivity.After(lastActivity) {   
-                lastActivity = tempLastActivity
-            }
-            lastActivityMu.Unlock()
-        }
+	for range ticker.C {
+		// 1) Movement/keypress detection
+		data, err := ioutil.ReadFile("/sys/kernel/photonicat-pm/movement_trigger")
+		if err == nil && strings.TrimSpace(string(data)) == "1" {
+			// Reset idle timer, treat screen as already “on”
+			now := time.Now()
+			lastActivityMu.Lock()
+			tempLastActivity := now.Add(-2 * time.Second)
+			if tempLastActivity.After(lastActivity) {
+				lastActivity = tempLastActivity
+			}
+			lastActivityMu.Unlock()
+		}
 
-        // 2) Compute idle time
-        lastActivityMu.Lock()
-        idle := time.Since(lastActivity)
-        lastActivityMu.Unlock()
+		// 2) Compute idle time
+		lastActivityMu.Lock()
+		idle := time.Since(lastActivity)
+		lastActivityMu.Unlock()
 
-        var newState int
+		var newState int
 
-        switch {
-        case weAreRunning == false:
-            newState = STATE_OFF
-        case idle < fadeInDur:
-            if swippingScreen {
-                newState = STATE_ACTIVE
-            } else {
-                newState = STATE_FADE_IN
-            }
-        case idle < idleTimeout:
-            newState = STATE_ACTIVE
-            swippingScreen = false
-        case idle < idleTimeout+fadeDuration:
-            newState = STATE_FADE_OUT
-        default:
-            newState = STATE_IDLE
-        }
+		switch {
+		case weAreRunning == false:
+			newState = STATE_OFF
+		case idle < fadeInDur:
+			if swippingScreen {
+				newState = STATE_ACTIVE
+			} else {
+				newState = STATE_FADE_IN
+			}
+		case idle < idleTimeout:
+			newState = STATE_ACTIVE
+			swippingScreen = false
+		case idle < idleTimeout+fadeDuration:
+			newState = STATE_FADE_OUT
+		default:
+			newState = STATE_IDLE
+		}
 
-        if prevState != newState {
-            log.Printf("STATE CHANGED: %s -> %s", stateName(prevState), stateName(newState))
-            idleState = newState
-            prevState = newState
+		if prevState != newState {
+			log.Printf("STATE CHANGED: %s -> %s", stateName(prevState), stateName(newState))
+			idleState = newState
+			prevState = newState
 
-            // ── Cancel any existing fade by closing fadeCancel ──────────
+			// ── Cancel any existing fade by closing fadeCancel ──────────
 			fadeMu.Lock()
-            if fadeCancel != nil {
-                close(fadeCancel)          // signal the currently running fadeBacklight (if any) to stop
-                 // allocate a brand‑new channel
-            }
-            fadeCancel = make(chan struct{})
+			if fadeCancel != nil {
+				close(fadeCancel) // signal the currently running fadeBacklight (if any) to stop
+				// allocate a brand‑new channel
+			}
+			fadeCancel = make(chan struct{})
 			//myCancel := fadeCancel
 			fadeMu.Unlock()
 
-            switch newState {
-            case STATE_OFF:
-                fadeBacklight(10, OFF_TIMEOUT)
-                os.Exit(0)
+			switch newState {
+			case STATE_OFF:
+				fadeBacklight(10, OFF_TIMEOUT)
+				os.Exit(0)
 
-            case STATE_FADE_IN:
-                if !swippingScreen {
-                    go fadeBacklight(maxBacklight, fadeInDur)
-                }
-            case STATE_FADE_OUT:
-                go fadeBacklight(0, fadeDuration)
+			case STATE_FADE_IN:
+				if !swippingScreen {
+					go fadeBacklight(maxBacklight, fadeInDur)
+				}
+			case STATE_FADE_OUT:
+				go fadeBacklight(0, fadeDuration)
 
-            case STATE_ACTIVE:
-                setBacklight(maxBacklight)
-                swippingScreen = false
+			case STATE_ACTIVE:
+				setBacklight(maxBacklight)
+				swippingScreen = false
 
-            case STATE_IDLE:
-                setBacklight(0)
-                desiredFPS = 1
-            }
-        }
-        
-    }
+			case STATE_IDLE:
+				setBacklight(0)
+				desiredFPS = 1
+			}
+		}
+
+	}
 }
 
 func stateName(s int) string {
-    switch s {
-    case STATE_FADE_IN:
-        return "FADE_IN"
-    case STATE_ACTIVE:
-        return "ACTIVE"
-    case STATE_FADE_OUT:
-        return "FADE_OUT"
-    case STATE_IDLE:
-        return "IDLE"
+	switch s {
+	case STATE_FADE_IN:
+		return "FADE_IN"
+	case STATE_ACTIVE:
+		return "ACTIVE"
+	case STATE_FADE_OUT:
+		return "FADE_OUT"
+	case STATE_IDLE:
+		return "IDLE"
 	case STATE_OFF:
 		return "OFF"
-    default:
-        return "UNKNOWN"
-    }
+	default:
+		return "UNKNOWN"
+	}
 }
-
 
 // mergeConfigs rebuilds `cfg` by overlaying userCfg on top of dftCfg.
 // It returns an error if any validation fails.
 func mergeConfigs() error {
-    configMutex.Lock()
-    defer configMutex.Unlock()
+	configMutex.Lock()
+	defer configMutex.Unlock()
 
-    // 1. Shallow copy defaults into cfg
-    cfg = dftCfg
+	// 1. Shallow copy defaults into cfg
+	cfg = dftCfg
 
-    // 2. Deep-copy the default template map so we don't mutate dftCfg
-    newElems := make(map[string][]DisplayElement, len(dftCfg.DisplayTemplate.Elements))
-    for page, elems := range dftCfg.DisplayTemplate.Elements {
-        copySlice := make([]DisplayElement, len(elems))
-        copy(copySlice, elems)
-        newElems[page] = copySlice
-    }
+	// 2. Deep-copy the default template map so we don't mutate dftCfg
+	newElems := make(map[string][]DisplayElement, len(dftCfg.DisplayTemplate.Elements))
+	for page, elems := range dftCfg.DisplayTemplate.Elements {
+		copySlice := make([]DisplayElement, len(elems))
+		copy(copySlice, elems)
+		newElems[page] = copySlice
+	}
 
-    // 3. Overlay any user-provided pages/elements
-    if userCfg.DisplayTemplate.Elements != nil {
-        for page, elems := range userCfg.DisplayTemplate.Elements {
-            copySlice := make([]DisplayElement, len(elems))
-            copy(copySlice, elems)
-            newElems[page] = copySlice
-        }
-    }
-    cfg.DisplayTemplate.Elements = newElems
+	// 3. Overlay any user-provided pages/elements
+	if userCfg.DisplayTemplate.Elements != nil {
+		for page, elems := range userCfg.DisplayTemplate.Elements {
+			copySlice := make([]DisplayElement, len(elems))
+			copy(copySlice, elems)
+			newElems[page] = copySlice
+		}
+	}
+	cfg.DisplayTemplate.Elements = newElems
 
-    // 4. Override scalar fields if userCfg set them
-    if userCfg.ScreenDimmerTimeOnBatterySeconds != 0 {
-        cfg.ScreenDimmerTimeOnBatterySeconds = userCfg.ScreenDimmerTimeOnBatterySeconds
-    }
-    if userCfg.ScreenDimmerTimeOnDCSeconds != 0 {
-        cfg.ScreenDimmerTimeOnDCSeconds = userCfg.ScreenDimmerTimeOnDCSeconds
-    }
-    if userCfg.ScreenMaxBrightness != 0 {
-        cfg.ScreenMaxBrightness = userCfg.ScreenMaxBrightness
-    }
-    if userCfg.ScreenMinBrightness != 0 {
-        cfg.ScreenMinBrightness = userCfg.ScreenMinBrightness
-    }
-    if userCfg.PingSite0 != "" {
-        cfg.PingSite0 = userCfg.PingSite0
-    }
-    if userCfg.PingSite1 != "" {
-        cfg.PingSite1 = userCfg.PingSite1
-    }
-    // always override boolean
-    cfg.ShowSms = userCfg.ShowSms
+	// 4. Override scalar fields if userCfg set them
+	if userCfg.ScreenDimmerTimeOnBatterySeconds != 0 {
+		cfg.ScreenDimmerTimeOnBatterySeconds = userCfg.ScreenDimmerTimeOnBatterySeconds
+	}
+	if userCfg.ScreenDimmerTimeOnDCSeconds != 0 {
+		cfg.ScreenDimmerTimeOnDCSeconds = userCfg.ScreenDimmerTimeOnDCSeconds
+	}
+	if userCfg.ScreenMaxBrightness != 0 {
+		cfg.ScreenMaxBrightness = userCfg.ScreenMaxBrightness
+	}
+	if userCfg.ScreenMinBrightness != 0 {
+		cfg.ScreenMinBrightness = userCfg.ScreenMinBrightness
+	}
+	if userCfg.PingSite0 != "" {
+		cfg.PingSite0 = userCfg.PingSite0
+	}
+	if userCfg.PingSite1 != "" {
+		cfg.PingSite1 = userCfg.PingSite1
+	}
+	// always override boolean
+	cfg.ShowSms = userCfg.ShowSms
 
-    // 5. Validation
-    if cfg.ScreenDimmerTimeOnBatterySeconds < 0 {
-        return fmt.Errorf("screen_dimmer_time_on_battery_seconds must be ≥ 0, got %d",
-            cfg.ScreenDimmerTimeOnBatterySeconds)
-    }
-    if cfg.ScreenDimmerTimeOnDCSeconds < 0 {
-        return fmt.Errorf("screen_dimmer_time_on_dc_seconds must be ≥ 0, got %d",
-            cfg.ScreenDimmerTimeOnDCSeconds)
-    }
-    if cfg.ScreenMinBrightness < 0 || cfg.ScreenMinBrightness > 100 {
-        return fmt.Errorf("screen_min_brightness must be in [0,100], got %d",
-            cfg.ScreenMinBrightness)
-    }
-    if cfg.ScreenMaxBrightness < 0 || cfg.ScreenMaxBrightness > 100 {
-        return fmt.Errorf("screen_max_brightness must be in [0,100], got %d",
-            cfg.ScreenMaxBrightness)
-    }
-    if cfg.ScreenMinBrightness > cfg.ScreenMaxBrightness {
-        return fmt.Errorf("screen_min_brightness (%d) cannot exceed screen_max_brightness (%d)",
-            cfg.ScreenMinBrightness, cfg.ScreenMaxBrightness)
-    }
-    /*
-    for name, site := range map[string]string{"ping_site0": cfg.PingSite0, "ping_site1": cfg.PingSite1} {
-        if site != "" {
-            if u, err := url.ParseRequestURI(site); err != nil || u.Scheme == "" && u.Host == "" {
-                return fmt.Errorf("invalid %s: %q", name, site)
-            }
-        }
-    }*/
+	// 5. Validation
+	if cfg.ScreenDimmerTimeOnBatterySeconds < 0 {
+		return fmt.Errorf("screen_dimmer_time_on_battery_seconds must be ≥ 0, got %d",
+			cfg.ScreenDimmerTimeOnBatterySeconds)
+	}
+	if cfg.ScreenDimmerTimeOnDCSeconds < 0 {
+		return fmt.Errorf("screen_dimmer_time_on_dc_seconds must be ≥ 0, got %d",
+			cfg.ScreenDimmerTimeOnDCSeconds)
+	}
+	if cfg.ScreenMinBrightness < 0 || cfg.ScreenMinBrightness > 100 {
+		return fmt.Errorf("screen_min_brightness must be in [0,100], got %d",
+			cfg.ScreenMinBrightness)
+	}
+	if cfg.ScreenMaxBrightness < 0 || cfg.ScreenMaxBrightness > 100 {
+		return fmt.Errorf("screen_max_brightness must be in [0,100], got %d",
+			cfg.ScreenMaxBrightness)
+	}
+	if cfg.ScreenMinBrightness > cfg.ScreenMaxBrightness {
+		return fmt.Errorf("screen_min_brightness (%d) cannot exceed screen_max_brightness (%d)",
+			cfg.ScreenMinBrightness, cfg.ScreenMaxBrightness)
+	}
+	/*
+	   for name, site := range map[string]string{"ping_site0": cfg.PingSite0, "ping_site1": cfg.PingSite1} {
+	       if site != "" {
+	           if u, err := url.ParseRequestURI(site); err != nil || u.Scheme == "" && u.Host == "" {
+	               return fmt.Errorf("invalid %s: %q", name, site)
+	           }
+	       }
+	   }*/
 
-    cfgNumPages = len(cfg.DisplayTemplate.Elements)
+	cfgNumPages = len(cfg.DisplayTemplate.Elements)
 
-    return nil
+	return nil
 }
 
 func loadAllConfigsToVariables() {
-    var err error
-    localConfig := "config.json"
-    userConfig := "user_config.json"
-    
+	var err error
+	localConfig := "config.json"
+	userConfig := "user_config.json"
+
 	if _, err = os.Stat(localConfig); err == nil {
 		localConfigExists = true
 		log.Println("Local config found at", localConfig)
-	}else{
+	} else {
 		log.Println("use", ETC_CONFIG_PATH)
 	}
-	
+
 	if localConfigExists {
 		cfg, err = loadConfig(localConfig)
 		dftCfg, err = loadConfig(localConfig)
-	}else{
+	} else {
 		cfg, err = loadConfig(ETC_CONFIG_PATH)
 		dftCfg, err = loadConfig(ETC_CONFIG_PATH)
 	}
 
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
-	}else{
+	} else {
 		log.Println("CFG, DFTCFG: READ SUCCESS")
 	}
-	
+
 	userConfigExists := false
 	if _, err := os.Stat(userConfig); err == nil {
 		userConfigExists = true
 		log.Println("User config found at", userConfig)
-	}else{
+	} else {
 		log.Println("No user config found, try to use", ETC_USER_CONFIG_PATH)
 	}
 
 	if userConfigExists {
 		userCfg, err = loadConfig(userConfig)
-	}else{
-		userCfg, err = loadConfig(ETC_USER_CONFIG_PATH)	
+	} else {
+		userCfg, err = loadConfig(ETC_USER_CONFIG_PATH)
 	}
 
 	if err != nil {
-        //create a empty json file
-        content := "{}"
-        if err := ioutil.WriteFile(ETC_USER_CONFIG_PATH, []byte(content), 0644); err != nil {
-            log.Printf("could not write temp user config: %v", err)
-        }
-        log.Println("Created empty user config file at", ETC_USER_CONFIG_PATH)
-        userCfg, err = loadConfig(ETC_USER_CONFIG_PATH)
-	}else{
+		//create a empty json file
+		content := "{}"
+		if err := ioutil.WriteFile(ETC_USER_CONFIG_PATH, []byte(content), 0644); err != nil {
+			log.Printf("could not write temp user config: %v", err)
+		}
+		log.Println("Created empty user config file at", ETC_USER_CONFIG_PATH)
+		userCfg, err = loadConfig(ETC_USER_CONFIG_PATH)
+	} else {
 		log.Println("USER CFG: READ SUCCESS")
 	}
 
@@ -544,14 +541,15 @@ func loadAllConfigsToVariables() {
 		if err != nil {
 			log.Fatalf("Failed to merge configs: %v, using default config", err)
 			cfg = dftCfg
-		}else{
+		} else {
 			log.Println("MERGE CFG: SUCCESS")
 		}
-	}else{
+	} else {
 		cfg = dftCfg
 		log.Println("NO USER CFG, Not Merging, using default config")
 	}
 
-    mergeConfigs()
-    log.Println("merged configs to cfg", cfg)
+	mergeConfigs()
+	log.Println("merged configs to cfg", cfg)
+
 }

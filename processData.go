@@ -139,11 +139,13 @@ func collectBatteryData() {
 			lastActivity = time.Now() //bring back screen with some fade in
 		}
 		lastChargingStatus = battChargingStatus
-		if battChargingStatus == true {
-			idleTimeout = ON_CHARGING_IDLE_TIMEOUT
-		} else {
-			idleTimeout = DEFAULT_IDLE_TIMEOUT
-		}
+
+		log.Printf("idleTimeout: %v", idleTimeout)
+	}
+	if battChargingStatus {
+		idleTimeout = time.Duration(cfg.ScreenDimmerTimeOnDCSeconds) * time.Second
+	} else {
+		idleTimeout = time.Duration(cfg.ScreenDimmerTimeOnBatterySeconds) * time.Second
 	}
 }
 
@@ -340,7 +342,7 @@ func collectWANNetworkSpeed() {
 		upSpeed, ok1 := globalData.Load("UpSpeedBps")
 		downSpeed, ok2 := globalData.Load("DownSpeedBps")
 		if !ok1 || !ok2 {
-			fmt.Printf("Could not get WAN network speed data\n")
+			log.Printf("Could not get WAN network speed data\n")
 			globalData.Store("WanUP", "-")
 			globalData.Store("WanDOWN", "-")
 			globalData.Store("WanUP_Unit", "")
@@ -357,7 +359,7 @@ func collectWANNetworkSpeed() {
 	} else {
 		wanInterface, err = getWANInterface()
 		if err != nil {
-			fmt.Printf("Could not get WAN interface: %v\n", err)
+			log.Printf("Could not get WAN interface: %v\n", err)
 			globalData.Store("WanUP", "0")
 			globalData.Store("WanDOWN", "0")
 			time.Sleep(5 * time.Second) // prevent infinite loop
@@ -365,7 +367,7 @@ func collectWANNetworkSpeed() {
 		}
 		netData, err := getNetworkSpeed(wanInterface)
 		if err != nil {
-			fmt.Printf("Could not get network speed: %v\n", err)
+			log.Printf("Could not get network speed: %v\n", err)
 			globalData.Store("WanUP", "0")
 			globalData.Store("WanDOWN", "0")
 			return
