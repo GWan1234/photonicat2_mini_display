@@ -13,99 +13,99 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
-	"path/filepath"
 
 	"github.com/go-ping/ping"
 )
 
 // WiFiInterface mirrors each element of "wifi_interfaces" in the JSON.
 type WiFiInterface struct {
-	Band            string `json:"band"`
-	Device          string `json:"device"`
-	DeviceType      string `json:"device_type"`
-	Enabled         bool   `json:"enabled"`
-	Encryption      string `json:"encryption"`
-	Exist           bool   `json:"exist"`
-	Hidden          string `json:"hidden"`
-	Htmode          string `json:"htmode"`
-	Password        string `json:"password"`
-	SSID            string `json:"ssid"`
-	Frequency       string `json:"frequency,omitempty"`
+	Band       string `json:"band"`
+	Device     string `json:"device"`
+	DeviceType string `json:"device_type"`
+	Enabled    bool   `json:"enabled"`
+	Encryption string `json:"encryption"`
+	Exist      bool   `json:"exist"`
+	Hidden     string `json:"hidden"`
+	Htmode     string `json:"htmode"`
+	Password   string `json:"password"`
+	SSID       string `json:"ssid"`
+	Frequency  string `json:"frequency,omitempty"`
 }
 
 // DashboardInfo matches the top‐level keys in your sample JSON.
 type DashboardInfo struct {
-	BatteryCurrent     float64          `json:"battery_current"`
-	BatteryWattage     float64          `json:"battery_wattage"`
-	BoardTemperature   int              `json:"board_temperature"`
-	Carrier            string           `json:"carrier"`
-	ChargePercent      int              `json:"charge_percent"`
-	ChargeVoltage      int              `json:"charge_voltage"`
-	Connection         string           `json:"connection"`
-	DHCPClientsCount   int              `json:"dhcp_clients_count"`
-	DownSpeed          float64          `json:"down_speed"`
-	FirmwareVersion    string           `json:"firmware_version"`
-	Hostname           string           `json:"hostname"`
-	ISPName            string           `json:"isp_name"`
-	Kernel             string           `json:"kernel"`
-	Model              string           `json:"model"`
-	ModemModel         string           `json:"modem_model"`
+	BatteryCurrent      float64         `json:"battery_current"`
+	BatteryWattage      float64         `json:"battery_wattage"`
+	BoardTemperature    int             `json:"board_temperature"`
+	Carrier             string          `json:"carrier"`
+	ChargePercent       int             `json:"charge_percent"`
+	ChargeVoltage       int             `json:"charge_voltage"`
+	Connection          string          `json:"connection"`
+	DHCPClientsCount    int             `json:"dhcp_clients_count"`
+	UpSpeedBps          float64         `json:"up_speed"`
+	DownSpeedBps        float64         `json:"down_speed"`
+	FirmwareVersion     string          `json:"firmware_version"`
+	Hostname            string          `json:"hostname"`
+	ISPName             string          `json:"isp_name"`
+	Kernel              string          `json:"kernel"`
+	Model               string          `json:"model"`
+	ModemModel          string          `json:"modem_model"`
 	ModemSignalStrength int             `json:"modem_signal_strength"`
-	OnCharging         bool             `json:"on_charging"`
-	OpenWRTVersion     string           `json:"openwrt_version"`
-	SdState            int              `json:"sd_state"`
-	ServerLocation     string           `json:"server_location"`
-	SimState           string           `json:"sim_state"`
-	SimNumber          string           `json:"sim_number"`
-	UpSpeed            float64          `json:"up_speed"`
-	Uptime             string           `json:"uptime"`
-	Voltage            int              `json:"voltage"`
-	WanIP              string           `json:"wan_ip"`
-	WiFiClientsCount   int              `json:"wifi_clients_count"`
-	WiFiInterfaces     []WiFiInterface  `json:"wifi_interfaces"`
+	OnCharging          bool            `json:"on_charging"`
+	OpenWRTVersion      string          `json:"openwrt_version"`
+	SdState             int             `json:"sd_state"`
+	ServerLocation      string          `json:"server_location"`
+	SimState            string          `json:"sim_state"`
+	SimNumber           string          `json:"sim_number"`
+	Uptime              string          `json:"uptime"`
+	Voltage             int             `json:"voltage"`
+	PublicIP            string          `json:"public_ip"`
+	WiFiClientsCount    int             `json:"wifi_clients_count"`
+	WiFiInterfaces      []WiFiInterface `json:"wifi_interfaces"`
 }
 
 type ModemBasicInfo struct {
-    CellCarrierInfo     string         `json:"cell_carrier_info"`
-    FirmwareVersion     string         `json:"firmware_version"`
-    IMEINum             string         `json:"imei_num"`
-    Messages            []interface{}  `json:"messages"`
-    ModemCellID         string         `json:"modem_cell_id"`
-    ModemCellInfo       string         `json:"modem_cell_info"`
-    ModemCellSignals    string         `json:"modem_cell_signals"`
-    ModemCPIN           string         `json:"modem_cpin"`
-    ModemIspDetails     string         `json:"modem_isp_details"`
-    ModemModel          string         `json:"modem_model"`
-    ModemNetworkInfo    string         `json:"modem_network_info"`
-    ModemRoamPref       string         `json:"modem_roam_pref"`
-    ModemServingInfo    string         `json:"modem_serving_info"`
-    ModemServingQuality string         `json:"modem_serving_quality"`
-    ModemTemperature    map[string]int `json:"modem_temperature"`
-    ModemUSBSpeed       string         `json:"modem_usb_speed"`
-    ModemUSBNetMode     string         `json:"modem_usbnet_mode"`
-    ModemValid          bool           `json:"modem_valid"`
-    PolicyLTEBands      string         `json:"policy_lte_bands"`
-    PolicyNR5GBands     string         `json:"policy_nr5g_bands"`
-    SelectedLTEBands    string         `json:"selected_lte_bands"`
-    SelectedNR5GBands   string         `json:"selected_nr5g_bands"`
-    SimNumber           string         `json:"sim_number"`
-    SimState            string         `json:"sim_state"`
-    SMSCheckInterval    int            `json:"sms_check_interval"`
-    SMSForward          bool           `json:"sms_forward"`
-    SMSForwardTo        string         `json:"sms_forward_to"`
+	CellCarrierInfo     string         `json:"cell_carrier_info"`
+	FirmwareVersion     string         `json:"firmware_version"`
+	IMEINum             string         `json:"imei_num"`
+	Messages            []interface{}  `json:"messages"`
+	ModemCellID         string         `json:"modem_cell_id"`
+	ModemCellInfo       string         `json:"modem_cell_info"`
+	ModemCellSignals    string         `json:"modem_cell_signals"`
+	ModemCPIN           string         `json:"modem_cpin"`
+	ModemIspDetails     string         `json:"modem_isp_details"`
+	ModemModel          string         `json:"modem_model"`
+	ModemNetworkInfo    string         `json:"modem_network_info"`
+	ModemRoamPref       string         `json:"modem_roam_pref"`
+	ModemServingInfo    string         `json:"modem_serving_info"`
+	ModemServingQuality string         `json:"modem_serving_quality"`
+	ModemTemperature    map[string]int `json:"modem_temperature"`
+	ModemUSBSpeed       string         `json:"modem_usb_speed"`
+	ModemUSBNetMode     string         `json:"modem_usbnet_mode"`
+	ModemValid          bool           `json:"modem_valid"`
+	PolicyLTEBands      string         `json:"policy_lte_bands"`
+	PolicyNR5GBands     string         `json:"policy_nr5g_bands"`
+	SelectedLTEBands    string         `json:"selected_lte_bands"`
+	SelectedNR5GBands   string         `json:"selected_nr5g_bands"`
+	SimNumber           string         `json:"sim_number"`
+	SimState            string         `json:"sim_state"`
+	SMSCheckInterval    int            `json:"sms_check_interval"`
+	SMSForward          bool           `json:"sms_forward"`
+	SMSForwardTo        string         `json:"sms_forward_to"`
 }
 
 // NetworkStats matches the keys returned by /api/v1/data_stats.json?network_type=mobile
 type NetworkStats struct {
-    TodayUsed     float64 `json:"today_used"`
-    WeekUsed      float64 `json:"week_used"`
-    MonthUsed     float64 `json:"month_used"`
-    LastMonthUsed float64 `json:"last_month_used"`
+	TodayUsed     float64 `json:"today_used"`
+	WeekUsed      float64 `json:"week_used"`
+	MonthUsed     float64 `json:"month_used"`
+	LastMonthUsed float64 `json:"last_month_used"`
 }
 
 // NetworkSpeed represents upload/download in bytes per second
@@ -135,7 +135,7 @@ func collectBatteryData() {
 		log.Println("Battery charging status changed to: ", battChargingStatus)
 		if idleState == STATE_ACTIVE {
 			lastActivity = time.Now().Add(-fadeInDur) //reset lastActivity for screen to stay on, - fadeInDur to send state to active
-		}else{
+		} else {
 			lastActivity = time.Now() //bring back screen with some fade in
 		}
 		lastChargingStatus = battChargingStatus
@@ -148,155 +148,155 @@ func collectBatteryData() {
 }
 
 func getInfoFromPcatWeb() {
-    dashbarodURL   := "http://localhost:80/api/v1/dashboard.json"
-    networkStatsURL := "http://localhost:80/api/v1/data_stats.json?network_type=mobile"
-	basicURL     := "http://localhost:80/api/v1/modem/basic.json"
+	dashbarodURL := "http://localhost:80/api/v1/dashboard.json"
+	networkStatsURL := "http://localhost:80/api/v1/data_stats.json?network_type=mobile"
+	basicURL := "http://localhost:80/api/v1/modem/basic.json"
 
-    var info DashboardInfo
+	var info DashboardInfo
 
-    // === 1) Fetch dashboard.json ===
-    resp, err := http.Get(dashbarodURL)
-    if err != nil {
-        fmt.Println("Could not get dashboard info:", err)
-    } else {
-        defer resp.Body.Close()
-        body, err := io.ReadAll(resp.Body)
-        if err != nil {
-            fmt.Println("Failed to read dashboard response body:", err)
-        } else {
-            if err2 := json.Unmarshal(body, &info); err2 != nil {
-                fmt.Println("Could not unmarshal dashboard info:", err2)
-            } else {
-                // Store each field into globalData under a sensible key.
-                globalData.Store("BoardTemperature",      info.BoardTemperature)
-                globalData.Store("Carrier",               info.Carrier)
-                globalData.Store("GatewayDevice",         info.Connection)
-                globalData.Store("DHCPClientsCount",      info.DHCPClientsCount)
-                globalData.Store("FirmwareVersion",       info.FirmwareVersion)
-                globalData.Store("ISPName",               info.ISPName)
-                globalData.Store("Model",                 info.Model)
-                globalData.Store("ModemModel",            info.ModemModel)
-                globalData.Store("ModemSignalStrength",   info.ModemSignalStrength)
+	// === 1) Fetch dashboard.json ===
+	resp, err := http.Get(dashbarodURL)
+	if err != nil {
+		fmt.Println("Could not get dashboard info:", err)
+	} else {
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			fmt.Println("Failed to read dashboard response body:", err)
+		} else {
+			if err2 := json.Unmarshal(body, &info); err2 != nil {
+				fmt.Println("Could not unmarshal dashboard info:", err2)
+			} else {
+				// Store each field into globalData under a sensible key.
+				globalData.Store("BoardTemperature", info.BoardTemperature)
+				globalData.Store("Carrier", info.Carrier)
+				globalData.Store("GatewayDevice", info.Connection)
+				globalData.Store("DHCPClientsCount", info.DHCPClientsCount)
+				globalData.Store("FirmwareVersion", info.FirmwareVersion)
+				globalData.Store("ISPName", info.ISPName)
+				globalData.Store("Model", info.Model)
+				globalData.Store("ModemModel", info.ModemModel)
+				globalData.Store("ModemSignalStrength", info.ModemSignalStrength)
 				if info.SdState == 0 {
-					globalData.Store("SdState", "N/A")
+					globalData.Store("SdState", "No")
 				} else {
-					globalData.Store("SdState", "YES")
+					globalData.Store("SdState", "Yes")
 				}
-                globalData.Store("ServerLocation",        info.ServerLocation)
-				globalData.Store("SimNumber",             info.SimNumber)
+				globalData.Store("ServerLocation", info.ServerLocation)
+				globalData.Store("SimNumber", info.SimNumber)
 
-                if info.SimState == "ready" {
-                    globalData.Store("SimState", "Yes")
-                } else {
-                    globalData.Store("SimState", "-")
-                }
+				if info.SimState == "ready" {
+					globalData.Store("SimState", "Yes")
+				} else {
+					globalData.Store("SimState", "No")
+				}
 
-                globalData.Store("WiFiClientsCount", info.WiFiClientsCount)
-                globalData.Store("WiFiInterfaces",   info.WiFiInterfaces)
+				globalData.Store("WiFiClientsCount", info.WiFiClientsCount)
+				globalData.Store("WiFiInterfaces", info.WiFiInterfaces)
+				globalData.Store("PublicIP", info.PublicIP)
+				globalData.Store("UpSpeedBps", info.UpSpeedBps)
+				globalData.Store("DownSpeedBps", info.DownSpeedBps)
 				theOS := ""
 				raw := info.OpenWRTVersion // e.g. "R25.02.0 / r7465-d1ccd1687"
 				parts := strings.SplitN(raw, "/", 2)
 				if len(parts) == 2 {
-					ver := strings.TrimSpace(parts[0])       // "R25.02.0"
-					commit := strings.TrimSpace(parts[1])    // "r7465-d1ccd1687"
+					ver := strings.TrimSpace(parts[0])    // "R25.02.0"
+					commit := strings.TrimSpace(parts[1]) // "r7465-d1ccd1687"
 
 					// remove trailing ".0" from version
-					ver = strings.TrimSuffix(ver, ".0")      // "R25.02"
+					ver = strings.TrimSuffix(ver, ".0") // "R25.02"
 
 					// keep only up to the first dash in commit
 					commit = strings.SplitN(commit, "-", 2)[0] // "r7465"
 
-					theOS = fmt.Sprintf("%s / %s", ver, commit)  // "R25.02 / r7465"
-				}else{
+					theOS = fmt.Sprintf("%s / %s", ver, commit) // "R25.02 / r7465"
+				} else {
 					theOS = raw
 				}
 				globalData.Store("OSVersion", theOS)
 
+				// Build a slice of SSIDs for convenience
+				var ssids []string
+				for _, iface := range info.WiFiInterfaces {
+					ssids = append(ssids, iface.SSID)
+				}
+				globalData.Store("WiFiSSIDs", ssids)
+			}
+		}
+	}
 
-                // Build a slice of SSIDs for convenience
-                var ssids []string
-                for _, iface := range info.WiFiInterfaces {
-                    ssids = append(ssids, iface.SSID)
-                }
-                globalData.Store("WiFiSSIDs", ssids)
-            }
-        }
-    }
+	// === 2) Fetch data_stats.json ===
+	resp2, err := http.Get(networkStatsURL)
+	if err != nil {
+		fmt.Println("Could not get network stats:", err)
+	} else {
+		defer resp2.Body.Close()
+		body2, err := io.ReadAll(resp2.Body)
+		if err != nil {
+			fmt.Println("Failed to read network stats body:", err)
+		} else {
+			var stats NetworkStats
+			if err3 := json.Unmarshal(body2, &stats); err3 != nil {
+				fmt.Println("Could not unmarshal network stats:", err3)
+			} else {
+				// Now store exactly the fields you want:
+				strTodayUsed := fmt.Sprintf("%0.2f", stats.TodayUsed/1024/1024/1024)
+				strWeekUsed := fmt.Sprintf("%0.2f", stats.WeekUsed/1024/1024/1024)
+				strMonthUsed := fmt.Sprintf("%0.2f", stats.MonthUsed/1024/1024/1024)
+				strLastMonthUsed := fmt.Sprintf("%0.2f", stats.LastMonthUsed/1024/1024/1024)
 
-
-    // === 2) Fetch data_stats.json ===
-    resp2, err := http.Get(networkStatsURL)
-    if err != nil {
-        fmt.Println("Could not get network stats:", err)
-    } else {
-        defer resp2.Body.Close()
-        body2, err := io.ReadAll(resp2.Body)
-        if err != nil {
-            fmt.Println("Failed to read network stats body:", err)
-        } else {
-            var stats NetworkStats
-            if err3 := json.Unmarshal(body2, &stats); err3 != nil {
-                fmt.Println("Could not unmarshal network stats:", err3)
-            } else {
-                // Now store exactly the fields you want:
-				strTodayUsed := fmt.Sprintf("%0.2f", stats.TodayUsed / 1024 /1024 / 1024)
-				strWeekUsed := fmt.Sprintf("%0.2f", stats.WeekUsed / 1024 /1024 / 1024)
-				strMonthUsed := fmt.Sprintf("%0.2f", stats.MonthUsed / 1024 /1024 / 1024)
-				strLastMonthUsed := fmt.Sprintf("%0.2f", stats.LastMonthUsed / 1024 /1024 / 1024)
-
-                globalData.Store("DailyDataUsage",   strTodayUsed)
-                globalData.Store("WeeklyDataUsage",  strWeekUsed)
-                globalData.Store("MonthlyDataUsage", strMonthUsed)
-                globalData.Store("LastMonthUsage", strLastMonthUsed)
-            }
-        }
-    }
+				globalData.Store("DailyDataUsage", strTodayUsed)
+				globalData.Store("WeeklyDataUsage", strWeekUsed)
+				globalData.Store("MonthlyDataUsage", strMonthUsed)
+				globalData.Store("LastMonthUsage", strLastMonthUsed)
+			}
+		}
+	}
 
 	// 3) Modem basic
 	if resp, err := http.Get(basicURL); err != nil {
-        fmt.Println("Could not get modem basic info:", err)
-    } else {
-        defer resp.Body.Close()
-        if body, err := io.ReadAll(resp.Body); err != nil {
-            fmt.Println("Failed to read modem basic body:", err)
-        } else {
-            var mb ModemBasicInfo
-            if err := json.Unmarshal(body, &mb); err != nil {
-                fmt.Println("Could not unmarshal modem basic info:", err)
-            } else {
-                globalData.Store("CellCarrierInfo",   mb.CellCarrierInfo)
-                globalData.Store("ModemFirmwareVer",  mb.FirmwareVersion)
-                globalData.Store("IMEINum",           mb.IMEINum)
-                globalData.Store("ModemCellID",       mb.ModemCellID)
-                globalData.Store("ModemCellInfo",     mb.ModemCellInfo)
-                globalData.Store("ModemSignals",      mb.ModemCellSignals)
-                globalData.Store("ModemISPDetails",   mb.ModemIspDetails)
-                
-				//globalData.Store("ModemNetworkInfo",  mb.ModemNetworkInfo)
+		fmt.Println("Could not get modem basic info:", err)
+	} else {
+		defer resp.Body.Close()
+		if body, err := io.ReadAll(resp.Body); err != nil {
+			fmt.Println("Failed to read modem basic body:", err)
+		} else {
+			var mb ModemBasicInfo
+			if err := json.Unmarshal(body, &mb); err != nil {
+				fmt.Println("Could not unmarshal modem basic info:", err)
+			} else {
+				globalData.Store("CellCarrierInfo", mb.CellCarrierInfo)
+				globalData.Store("ModemFirmwareVer", mb.FirmwareVersion)
+				globalData.Store("IMEINum", mb.IMEINum)
+				globalData.Store("ModemCellID", mb.ModemCellID)
+				globalData.Store("ModemCellInfo", mb.ModemCellInfo)
+				globalData.Store("ModemSignals", mb.ModemCellSignals)
+				globalData.Store("ModemISPDetails", mb.ModemIspDetails)
+
 				networkInfo := mb.ModemNetworkInfo
 				if strings.Contains(networkInfo, "BAND ") {
 					networkInfo = strings.ReplaceAll(networkInfo, "BAND ", "B.")
 				}
-				
+
 				globalData.Store("ModemNetworkInfo", networkInfo)
 
-                globalData.Store("ModemRoamPref",     mb.ModemRoamPref)
-                globalData.Store("ModemServingInfo",  mb.ModemServingInfo)
-                globalData.Store("ModemServingQual",  mb.ModemServingQuality)
-                globalData.Store("ModemUSBSpeed",     mb.ModemUSBSpeed)
-                globalData.Store("ModemUSBNetMode",   mb.ModemUSBNetMode)
-                globalData.Store("ModemValid",        mb.ModemValid)
-                globalData.Store("PolicyLTEBands",    mb.PolicyLTEBands)
-                globalData.Store("PolicyNR5GBands",   mb.PolicyNR5GBands)
-                globalData.Store("SelectedLTEBands",  mb.SelectedLTEBands)
-                globalData.Store("SelectedNR5GBands", mb.SelectedNR5GBands)
-                globalData.Store("SMSCheckInterval",  mb.SMSCheckInterval)
-                globalData.Store("SMSForward",        mb.SMSForward)
-                globalData.Store("SMSForwardTo",      mb.SMSForwardTo)
-                globalData.Store("ModemTemperature",  mb.ModemTemperature)
-            }
-        }
-    }
+				globalData.Store("ModemRoamPref", mb.ModemRoamPref)
+				globalData.Store("ModemServingInfo", mb.ModemServingInfo)
+				globalData.Store("ModemServingQual", mb.ModemServingQuality)
+				globalData.Store("ModemUSBSpeed", mb.ModemUSBSpeed)
+				globalData.Store("ModemUSBNetMode", mb.ModemUSBNetMode)
+				globalData.Store("ModemValid", mb.ModemValid)
+				globalData.Store("PolicyLTEBands", mb.PolicyLTEBands)
+				globalData.Store("PolicyNR5GBands", mb.PolicyNR5GBands)
+				globalData.Store("SelectedLTEBands", mb.SelectedLTEBands)
+				globalData.Store("SelectedNR5GBands", mb.SelectedNR5GBands)
+				globalData.Store("SMSCheckInterval", mb.SMSCheckInterval)
+				globalData.Store("SMSForward", mb.SMSForward)
+				globalData.Store("SMSForwardTo", mb.SMSForwardTo)
+				globalData.Store("ModemTemperature", mb.ModemTemperature)
+			}
+		}
+	}
 }
 
 // formatSpeed formats speed into value and units as Mbps
@@ -314,7 +314,7 @@ func formatSpeed(mbps float64) (string, string) {
 }
 
 func getWANInterface() (string, error) {
-	if isOpenWRT(){
+	if isOpenWRT() {
 		return "br-lan", nil
 	}
 	cmd := exec.Command("ip", "route", "show", "default")
@@ -336,30 +336,50 @@ func getWANInterface() (string, error) {
 
 func collectWANNetworkSpeed() {
 	var err error
-	wanInterface, err = getWANInterface()
-	if err != nil {
-		fmt.Printf("Could not get WAN interface: %v\n", err)
-		globalData.Store("WanUP", "0")
-		globalData.Store("WanDOWN", "0")
-		time.Sleep(5 * time.Second) // prevent infinite loop
-		return
+	if isOpenWRT() {
+		upSpeed, ok1 := globalData.Load("UpSpeedBps")
+		downSpeed, ok2 := globalData.Load("DownSpeedBps")
+		if !ok1 || !ok2 {
+			fmt.Printf("Could not get WAN network speed data\n")
+			globalData.Store("WanUP", "-")
+			globalData.Store("WanDOWN", "-")
+			globalData.Store("WanUP_Unit", "")
+			globalData.Store("WanDOWN_Unit", "")
+		} else {
+			wanUPVal, wanUPUnit := formatSpeed(upSpeed.(float64) / 1024 / 1024 * 8)
+			wanDOWNVal, wanDOWNUnit := formatSpeed(downSpeed.(float64) / 1024 / 1024 * 8)
+
+			globalData.Store("WanUP", wanUPVal)
+			globalData.Store("WanDOWN", wanDOWNVal)
+			globalData.Store("WanUP_Unit", wanUPUnit)
+			globalData.Store("WanDOWN_Unit", wanDOWNUnit)
+		}
+	} else {
+		wanInterface, err = getWANInterface()
+		if err != nil {
+			fmt.Printf("Could not get WAN interface: %v\n", err)
+			globalData.Store("WanUP", "0")
+			globalData.Store("WanDOWN", "0")
+			time.Sleep(5 * time.Second) // prevent infinite loop
+			return
+		}
+		netData, err := getNetworkSpeed(wanInterface)
+		if err != nil {
+			fmt.Printf("Could not get network speed: %v\n", err)
+			globalData.Store("WanUP", "0")
+			globalData.Store("WanDOWN", "0")
+			return
+		}
+		wanUPVal, wanUPUnit := formatSpeed(netData.UploadMbps)
+		wanDOWNVal, wanDOWNUnit := formatSpeed(netData.DownloadMbps)
+		globalData.Store("WanUP", wanUPVal)
+		globalData.Store("WanDOWN", wanDOWNVal)
+		globalData.Store("WanUP_Unit", wanUPUnit)
+		globalData.Store("WanDOWN_Unit", wanDOWNUnit)
 	}
-	netData, err := getNetworkSpeed(wanInterface)
-	if err != nil {
-		fmt.Printf("Could not get network speed: %v\n", err)
-		globalData.Store("WanUP", "0")
-		globalData.Store("WanDOWN", "0")
-		return
-	}
-	wanUPVal, wanUPUnit := formatSpeed(netData.UploadMbps)
-	wanDOWNVal, wanDOWNUnit := formatSpeed(netData.DownloadMbps)
-	globalData.Store("WanUP", wanUPVal)
-	globalData.Store("WanDOWN", wanDOWNVal)
-	globalData.Store("WanUP_Unit", wanUPUnit)
-	globalData.Store("WanDOWN_Unit", wanDOWNUnit)
 }
 
-func collectFixedData(){
+func collectFixedData() {
 	kernelDate, _ := getKernelDate()
 	globalData.Store("Kernel", kernelDate)
 	sn, _ := getSN()
@@ -459,38 +479,37 @@ func collectLinuxData(cfg Config) {
 // getFanSpeed scans /sys/class/hwmon/hwmon*/fan1_input and returns the first
 // valid integer it reads.
 func getFanSpeed() (int, error) {
-    // Glob all fan1_input files in hwmon directories
-    paths, err := filepath.Glob("/sys/class/hwmon/hwmon*/fan1_input")
-    if err != nil {
-        return 0, fmt.Errorf("failed to glob hwmon paths: %w", err)
-    }
+	// Glob all fan1_input files in hwmon directories
+	paths, err := filepath.Glob("/sys/class/hwmon/hwmon*/fan1_input")
+	if err != nil {
+		return 0, fmt.Errorf("failed to glob hwmon paths: %w", err)
+	}
 
-    for _, p := range paths {
-        data, err := ioutil.ReadFile(p)
-        if err != nil {
-            // skip files we can't read
-            continue
-        }
-        s := strings.TrimSpace(string(data))
-        if s == "" {
-            continue
-        }
+	for _, p := range paths {
+		data, err := ioutil.ReadFile(p)
+		if err != nil {
+			// skip files we can't read
+			continue
+		}
+		s := strings.TrimSpace(string(data))
+		if s == "" {
+			continue
+		}
 
-        speed, err := strconv.Atoi(s)
-        if err != nil {
-            // skip non-integer contents
-            continue
-        }
-        return speed, nil
-    }
-    return 0, fmt.Errorf("no valid fan1_input found under /sys/class/hwmon")
+		speed, err := strconv.Atoi(s)
+		if err != nil {
+			// skip non-integer contents
+			continue
+		}
+		return speed, nil
+	}
+	return 0, fmt.Errorf("no valid fan1_input found under /sys/class/hwmon")
 }
 
-
 func collectNetworkData(cfg Config) {
-	if isOpenWRT(){
+	if isOpenWRT() {
 		//we have aonther func to get data from pcat-manager-web
-	}else{
+	} else {
 		if sessionDataUsage, err := getSessionDataUsageGB(wanInterface); err != nil {
 			fmt.Printf("Could not get session data usage: %v\n", err)
 			globalData.Store("SessionDataUsage", nil)
@@ -572,13 +591,14 @@ func collectNetworkData(cfg Config) {
 		globalData.Store("Ping1", ping1)
 	}
 
-	// Country based on public IP geolocation.
-	if country, err := getCountry(); err != nil {
-		fmt.Printf("Could not get country: %v\n", err)
-		globalData.Store("Country", "Unknown")
-	} else {
-		globalData.Store("Country", country)
-	}
+	/*
+		// Country based on public IP geolocation.
+		if country, err := getCountry(); err != nil {
+			fmt.Printf("Could not get country: %v\n", err)
+			globalData.Store("Country", "Unknown")
+		} else {
+			globalData.Store("Country", country)
+		}*/
 
 	// IPv6 public IP.
 	if ipv6, err := getIPv6Public(); err != nil {
@@ -590,36 +610,35 @@ func collectNetworkData(cfg Config) {
 }
 
 func getSN() (string, error) {
-    // Read first 500 bytes
-    out, err := exec.Command("head", "-c", "10000", "/dev/mmcblk0boot1").Output()
-    if err != nil {
-        return "", fmt.Errorf("read partition: %w", err)
-    }
+	// Read first 500 bytes
+	out, err := exec.Command("head", "-c", "10000", "/dev/mmcblk0boot1").Output()
+	if err != nil {
+		return "", fmt.Errorf("read partition: %w", err)
+	}
 
-    // Truncate at first 0 byte
-    if idx := bytes.IndexByte(out, 0); idx != -1 {
-        out = out[:idx]
-    }
+	// Truncate at first 0 byte
+	if idx := bytes.IndexByte(out, 0); idx != -1 {
+		out = out[:idx]
+	}
 
-    // Parse JSON
-    var payload map[string]interface{}
-    if err := json.Unmarshal(out, &payload); err != nil {
-        return "", fmt.Errorf("unmarshal JSON: %w", err)
-    }
+	// Parse JSON
+	var payload map[string]interface{}
+	if err := json.Unmarshal(out, &payload); err != nil {
+		return "", fmt.Errorf("unmarshal JSON: %w", err)
+	}
 
-    // Extract "sn"
-    snVal, ok := payload["sn"]
-    if !ok {
-        return "", fmt.Errorf(`key "sn" not found`)
-    }
-    sn, ok := snVal.(string)
-    if !ok {
-        return "", fmt.Errorf(`"sn" is not a string`)
-    }
+	// Extract "sn"
+	snVal, ok := payload["sn"]
+	if !ok {
+		return "", fmt.Errorf(`key "sn" not found`)
+	}
+	sn, ok := snVal.(string)
+	if !ok {
+		return "", fmt.Errorf(`"sn" is not a string`)
+	}
 
-    return sn, nil
+	return sn, nil
 }
-
 
 func getUptime() (string, error) {
 	// Read /proc/uptime
@@ -838,7 +857,7 @@ func getNetworkSpeed(iface string) (NetworkSpeed, error) {
 	}
 
 	downloadMbps := float64(rx2-rx1) / 1024 / 128 / 2
-	uploadMbps := float64(tx2-tx1) / 1024 / 128 / 2 
+	uploadMbps := float64(tx2-tx1) / 1024 / 128 / 2
 
 	return NetworkSpeed{
 		UploadMbps:   uploadMbps,
@@ -847,63 +866,63 @@ func getNetworkSpeed(iface string) (NetworkSpeed, error) {
 }
 
 func getSessionDataUsageGB(iface string) (float64, error) {
-    stats := []string{"rx_bytes", "tx_bytes"}
-    var totalBytes uint64
+	stats := []string{"rx_bytes", "tx_bytes"}
+	var totalBytes uint64
 
-    for _, stat := range stats {
-        // build path: /sys/class/net/<iface>/statistics/<stat>
-        path := filepath.Join("/sys/class/net", iface, "statistics", stat)
+	for _, stat := range stats {
+		// build path: /sys/class/net/<iface>/statistics/<stat>
+		path := filepath.Join("/sys/class/net", iface, "statistics", stat)
 
-        // read the file
-        data, err := os.ReadFile(path)
-        if err != nil {
-            return 0, fmt.Errorf("failed to read %s: %w", path, err)
-        }
+		// read the file
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return 0, fmt.Errorf("failed to read %s: %w", path, err)
+		}
 
-        // parse it as uint64
-        s := strings.TrimSpace(string(data))
-        val, err := strconv.ParseUint(s, 10, 64)
-        if err != nil {
-            return 0, fmt.Errorf("failed to parse %s: %w", path, err)
-        }
+		// parse it as uint64
+		s := strings.TrimSpace(string(data))
+		val, err := strconv.ParseUint(s, 10, 64)
+		if err != nil {
+			return 0, fmt.Errorf("failed to parse %s: %w", path, err)
+		}
 
-        totalBytes += val
-    }
+		totalBytes += val
+	}
 
-    // convert bytes → MiB
-    return float64(totalBytes) / 1024.0 / 1024.0 / 1024.0, nil
+	// convert bytes → MiB
+	return float64(totalBytes) / 1024.0 / 1024.0 / 1024.0, nil
 }
 
 type vnstatJSON struct {
-    Interfaces []struct {
-        Name    string `json:"name"`
-        Traffic struct {
-            // 对应 JSON 中 "traffic":"month":[…]
-            Month []struct {
-                Date struct {
-                    Year  int `json:"year"`
-                    Month int `json:"month"`
-                } `json:"date"`
-                Rx uint64 `json:"rx"`
-                Tx uint64 `json:"tx"`
-            } `json:"month"`
-        } `json:"traffic"`
-    } `json:"interfaces"`
+	Interfaces []struct {
+		Name    string `json:"name"`
+		Traffic struct {
+			// 对应 JSON 中 "traffic":"month":[…]
+			Month []struct {
+				Date struct {
+					Year  int `json:"year"`
+					Month int `json:"month"`
+				} `json:"date"`
+				Rx uint64 `json:"rx"`
+				Tx uint64 `json:"tx"`
+			} `json:"month"`
+		} `json:"traffic"`
+	} `json:"interfaces"`
 }
 
 // getDataUsageMonthlyGB returns the total (rx+tx) traffic for the current calendar
 // month on the given interface, as reported by vnStat, in GiB.
 func getDataUsageMonthlyGB(iface string) (float64, error) {
-    // 1. 调用 vnstat 获取 JSON
-    out, err := exec.Command("vnstat", "-i", iface, "--json").Output()
-    if err != nil {
+	// 1. 调用 vnstat 获取 JSON
+	out, err := exec.Command("vnstat", "-i", iface, "--json").Output()
+	if err != nil {
 		fmt.Printf("failed to run vnstat with default interface: %s, %w", iface, err)
-		iface = "wwan0"	
+		iface = "wwan0"
 		out, err = exec.Command("vnstat", "-i", iface, "--json").Output()
 		if err != nil {
 			fmt.Printf("failed to run vnstat with default interface: %s, %w", iface, err)
 			iface = "br-lan"
-			out, err = exec.Command("vnstat", "-i", iface, "--json").Output()	
+			out, err = exec.Command("vnstat", "-i", iface, "--json").Output()
 			if err != nil {
 				fmt.Printf("failed to run vnstat with default interface: %s, %w", iface, err)
 				return 0, fmt.Errorf("failed to run vnstat with iface: %s, %w", iface, err)
@@ -911,40 +930,40 @@ func getDataUsageMonthlyGB(iface string) (float64, error) {
 		}
 	}
 
-    // 2. 解析 JSON
-    var data vnstatJSON
-    if err := json.Unmarshal(out, &data); err != nil {
-        return 0, fmt.Errorf("failed to parse vnstat JSON: %w", err)
-    }
+	// 2. 解析 JSON
+	var data vnstatJSON
+	if err := json.Unmarshal(out, &data); err != nil {
+		return 0, fmt.Errorf("failed to parse vnstat JSON: %w", err)
+	}
 
-    // 3. 找到对应接口
-    var ifaceData *vnstatJSON
-    var entryIdx int
-    for i, entry := range data.Interfaces {
-        if entry.Name == iface {
-            ifaceData = &data
-            entryIdx = i
-            break
-        }
-    }
-    if ifaceData == nil {
-        return 0, fmt.Errorf("interface %q not found in vnstat output", iface)
-    }
+	// 3. 找到对应接口
+	var ifaceData *vnstatJSON
+	var entryIdx int
+	for i, entry := range data.Interfaces {
+		if entry.Name == iface {
+			ifaceData = &data
+			entryIdx = i
+			break
+		}
+	}
+	if ifaceData == nil {
+		return 0, fmt.Errorf("interface %q not found in vnstat output", iface)
+	}
 
-    // 4. 确定当前年/月
-    now := time.Now()
-    cy, cm := now.Year(), int(now.Month())
-    cmStr := fmt.Sprintf("%02d", cm)
+	// 4. 确定当前年/月
+	now := time.Now()
+	cy, cm := now.Year(), int(now.Month())
+	cmStr := fmt.Sprintf("%02d", cm)
 
-    // 5. 在 traffic.month 数组里找当月条目
-    for _, m := range data.Interfaces[entryIdx].Traffic.Month {
-        if m.Date.Year == cy && m.Date.Month == cm {
-            usedBytes := m.Rx + m.Tx
-            return float64(usedBytes) / (1 << 30), nil // GiB
-        }
-    }
+	// 5. 在 traffic.month 数组里找当月条目
+	for _, m := range data.Interfaces[entryIdx].Traffic.Month {
+		if m.Date.Year == cy && m.Date.Month == cm {
+			usedBytes := m.Rx + m.Tx
+			return float64(usedBytes) / (1 << 30), nil // GiB
+		}
+	}
 
-    return 0, fmt.Errorf("no data for %04d-%s in vnstat output", cy, cmStr)
+	return 0, fmt.Errorf("no data for %04d-%s in vnstat output", cy, cmStr)
 }
 
 // CPUStats represents a CPU usage snapshot.
@@ -1083,7 +1102,7 @@ func getBatteryCharging() (bool, error) {
 			return false, err
 		}
 		return current > 0, nil
-	}else{
+	} else {
 		file, err := os.Open("/sys/class/power_supply/battery/status")
 		if err != nil {
 			return false, err
@@ -1147,34 +1166,34 @@ func getCountry() (string, error) {
 
 // getLocalIPv4 returns eth0 IP on OpenWrt or WAN IP (default route) on Debian.
 func getLocalIPv4() (string, error) {
-    candidates := []string{"eth1", "end1", "end0", "br-lan"}
+	candidates := []string{"eth1", "end1", "end0", "br-lan"}
 
-    for _, name := range candidates {
-        iface, err := net.InterfaceByName(name)
-        if err != nil {
-            // interface doesn't exist
-            continue
-        }
-        // skip if interface is down
-        if iface.Flags&net.FlagUp == 0 {
-            continue
-        }
+	for _, name := range candidates {
+		iface, err := net.InterfaceByName(name)
+		if err != nil {
+			// interface doesn't exist
+			continue
+		}
+		// skip if interface is down
+		if iface.Flags&net.FlagUp == 0 {
+			continue
+		}
 
-        addrs, err := iface.Addrs()
-        if err != nil {
-            continue
-        }
-        for _, addr := range addrs {
-            if ipnet, ok := addr.(*net.IPNet); ok {
-                if ip4 := ipnet.IP.To4(); ip4 != nil {
-                    return ip4.String(), nil
-                }
-            }
-        }
-    }
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			if ipnet, ok := addr.(*net.IPNet); ok {
+				if ip4 := ipnet.IP.To4(); ip4 != nil {
+					return ip4.String(), nil
+				}
+			}
+		}
+	}
 
-    // none of the candidates had a usable IPv4
-    return "LINK DOWN", nil
+	// none of the candidates had a usable IPv4
+	return "LINK DOWN", nil
 }
 
 // getPublicIPv4 makes an HTTP request to a public API to fetch the external IPv4 address.
