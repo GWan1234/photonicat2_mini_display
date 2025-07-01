@@ -469,21 +469,20 @@ func wrapText(text string, maxWidth int, face font.Face) []string {
 }
 
 func getSmsPages() {
-
-	if cfg.ShowSms {
-		for {
+	for {
+		if cfg.ShowSms {
 			//log.Println("Collecting SMS")
 			lenSmsPagesImages = collectAndDrawSms(&cfg)
 			if lenSmsPagesImages == 0 {
 				lenSmsPagesImages = 1
 			}
 			log.Println("collect lenSmsPagesImages:", lenSmsPagesImages)
-			if lenSmsPagesImages > 0 {
-				totalNumPages = cfgNumPages + lenSmsPagesImages
-			} else {
-				totalNumPages = cfgNumPages + 1
-			}
-			time.Sleep(INTERVAL_SMS_COLLECT)
+			totalNumPages = cfgNumPages + lenSmsPagesImages
+		} else {
+			// SMS disabled - only JSON config pages
+			lenSmsPagesImages = 0
+			totalNumPages = cfgNumPages
 		}
+		time.Sleep(INTERVAL_SMS_COLLECT)
 	}
 }
