@@ -239,7 +239,7 @@
                 },
                 {
                     "type": "fixed_text",
-                    "label": "SSID - PICE",
+                    "label": "SSID - PCIE",
                     "position": {"x": 6, "y": 215},
                     "font": "unit",
                     "color": [255, 229, 0],
