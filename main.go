@@ -396,6 +396,9 @@ func mainLoop() {
 	}
 
 	for weAreRunning {
+		if middleFrames%300 == 0 { // Log less frequently
+			log.Println("showsms:", cfg.ShowSms, "totalPages:", totalNumPages, "cfgPages:", cfgNumPages)
+		}
 		if runMainLoop {
 			start := time.Now()
 			if changePageTriggered || httpChangePageTriggered { //chang./cing page
@@ -406,7 +409,7 @@ func mainLoop() {
 				currPageIdx = currPageIdx % totalNumPages
 				nextPageIdx = (currPageIdx + 1) % totalNumPages
 
-				if currPageIdx+1 > jsonNumPages {
+				if cfg.ShowSms && currPageIdx+1 > jsonNumPages {
 					isSMS = true
 					localIdx = currPageIdx - jsonNumPages
 				} else {
@@ -414,7 +417,7 @@ func mainLoop() {
 					localIdx = currPageIdx
 				}
 
-				if currPageIdx+2 > jsonNumPages {
+				if cfg.ShowSms && currPageIdx+2 > jsonNumPages {
 					isNextPageSMS = true
 					if lenSmsPagesImages <= 0 {
 						lenSmsPagesImages = 1
@@ -446,13 +449,13 @@ func mainLoop() {
 						localIdx = nextLocalIdx
 						currPageIdx = nextPageIdx
 					}
-					if currPageIdx+1 > jsonNumPages {
+					if cfg.ShowSms && currPageIdx+1 > jsonNumPages {
 						isSMS = true
 					} else {
 						isSMS = false
 					}
 
-					if isSMS {
+					if cfg.ShowSms && isSMS {
 						drawFooter(display, footerFramebuffers[middleFrames%2], localIdx, lenSmsPagesImages, isSMS)
 					} else {
 						drawFooter(display, footerFramebuffers[middleFrames%2], localIdx, cfgNumPages, isSMS)
@@ -479,7 +482,7 @@ func mainLoop() {
 				}
 			} else { //normal page rendering
 				drawTopBar(display, topBarFramebuffers[topFrames%2])
-				if isSMS {
+				if cfg.ShowSms && isSMS {
 					drawFooter(display, footerFramebuffers[middleFrames%2], localIdx, len(smsPagesImages), isSMS)
 				} else {
 					drawFooter(display, footerFramebuffers[middleFrames%2], localIdx, cfgNumPages, isSMS)
@@ -508,7 +511,8 @@ func mainLoop() {
 				fps = 100 / now.Sub(lastUpdate).Seconds()
 				log.Printf("FPS: %0.1f, Total Frames: %d\n", fps, middleFrames)
 				lastUpdate = now
-				log.Println("totalNumPages:", totalNumPages, "currPageIdx:", currPageIdx, "lenSmsPagesImages:", lenSmsPagesImages)
+				log.Printf("Pages: total=%d, current=%d, cfg=%d, sms=%d, showSms=%t",
+					totalNumPages, currPageIdx, cfgNumPages, lenSmsPagesImages, cfg.ShowSms)
 			}
 		} else {
 			time.Sleep(50 * time.Millisecond) //not inf loop

@@ -481,6 +481,14 @@ func mergeConfigs() error {
 
 	cfgNumPages = len(cfg.DisplayTemplate.Elements)
 
+	// Initialize totalNumPages based on ShowSms setting
+	if cfg.ShowSms {
+		// Will be updated by getSmsPages() goroutine
+		totalNumPages = cfgNumPages + 1 // temporary, will be corrected when SMS data is loaded
+	} else {
+		totalNumPages = cfgNumPages
+	}
+
 	return nil
 }
 
