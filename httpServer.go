@@ -36,8 +36,8 @@ func serveFrame(c *fiber.Ctx) error {
 	var buf bytes.Buffer
 
 	if webFrame == nil {
-		webFrame = image.NewRGBA(image.Rect(0, 0, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT))
-		drawRect(webFrame, 0, 0, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT, PCAT_BLACK)
+		webFrame = GetFrameBuffer(PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT)
+		clearFrame(webFrame, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT)
 	}
 
 	frameMutex.RLock()
@@ -432,9 +432,10 @@ func httpDrawText(c *fiber.Ctx) error {
 	// 3) Pause your main‐loop so it won’t overwrite
 	runMainLoop = false
 
-	// 4) Prepare a blank frame
+	// 4) Prepare a blank frame using pool to reduce allocations
 	width, height := 172, 320
-	frame := image.NewRGBA(image.Rect(0, 0, width, height))
+	frame := GetFrameBuffer(width, height)
+	defer ReturnFrameBuffer(frame)
 
 	if text != "" {
 		// Draw the provided text centered

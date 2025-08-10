@@ -94,13 +94,63 @@ func getFontFace(fontName string) (font.Face, int, error) {
 	return face, fontHeight, nil
 }
 
-func clearFrame(frame *image.RGBA, width int, height int) {
-	for i := 0; i < width*height*4; i += 4 { //clear framebuffer
-		frame.Pix[i] = 0     // R
-		frame.Pix[i+1] = 0   // G
-		frame.Pix[i+2] = 0   // B
-		frame.Pix[i+3] = 255 // A (opaque black)
+// Pre-allocated clear buffer for efficient frame clearing
+var clearBuffer []uint8
+
+// Frame buffer pool for reducing allocations
+var framePool = sync.Pool{
+	New: func() interface{} {
+		return image.NewRGBA(image.Rect(0, 0, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT))
+	},
+}
+
+// GetFrameBuffer gets a reusable frame buffer from the pool
+func GetFrameBuffer(width, height int) *image.RGBA {
+	frame := framePool.Get().(*image.RGBA)
+	// Resize if needed
+	if frame.Bounds().Dx() != width || frame.Bounds().Dy() != height {
+		frame = image.NewRGBA(image.Rect(0, 0, width, height))
 	}
+	return frame
+}
+
+// ReturnFrameBuffer returns a frame buffer to the pool for reuse
+func ReturnFrameBuffer(frame *image.RGBA) {
+	if frame != nil {
+		framePool.Put(frame)
+	}
+}
+
+func clearFrame(frame *image.RGBA, width int, height int) {
+	pixelsNeeded := width * height * 4
+	
+	// Initialize clear buffer once with optimal size
+	if len(clearBuffer) < pixelsNeeded {
+		// Allocate larger buffer to handle future larger frames
+		bufferSize := max(pixelsNeeded, PCAT2_LCD_WIDTH*PCAT2_LCD_HEIGHT*4)
+		clearBuffer = make([]uint8, bufferSize)
+		// Pre-fill with opaque black pixels using efficient pattern
+		pattern := []uint8{0, 0, 0, 255} // R, G, B, A
+		for i := 0; i < len(clearBuffer); i += 4 {
+			copy(clearBuffer[i:i+4], pattern)
+		}
+	}
+	
+	// Ensure frame buffer is correct size
+	if len(frame.Pix) < pixelsNeeded {
+		frame.Pix = make([]uint8, pixelsNeeded)
+	}
+	
+	// Fast bulk copy instead of pixel-by-pixel clearing
+	copy(frame.Pix[:pixelsNeeded], clearBuffer[:pixelsNeeded])
+}
+
+// Helper function for max since Go doesn't have built-in max for int
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func setBacklight(brightness int) {
