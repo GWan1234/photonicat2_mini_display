@@ -496,8 +496,11 @@ func mergeConfigs() error {
 	if userCfg.PingSite1 != "" {
 		cfg.PingSite1 = userCfg.PingSite1
 	}
-	// always override boolean
-	cfg.ShowSms = userCfg.ShowSms
+	// Override ShowSms only if explicitly set in user config
+	// We need to check if the user config file actually contains show_sms field
+	if hasShowSmsInUserConfig() {
+		cfg.ShowSms = userCfg.ShowSms
+	}
 
 	// 5. Validation
 	if cfg.ScreenDimmerTimeOnBatterySeconds < 0 {
@@ -540,6 +543,34 @@ func mergeConfigs() error {
 	}
 
 	return nil
+}
+
+// hasShowSmsInUserConfig checks if the user config file explicitly contains show_sms field
+func hasShowSmsInUserConfig() bool {
+	var userConfigPath string
+	localUserConfig := "user_config.json"
+	
+	// Determine which user config file to check
+	if _, err := os.Stat(localUserConfig); err == nil {
+		userConfigPath = localUserConfig
+	} else {
+		userConfigPath = ETC_USER_CONFIG_PATH
+	}
+	
+	// Read the raw JSON
+	raw, err := ioutil.ReadFile(userConfigPath)
+	if err != nil {
+		return false
+	}
+	
+	// Parse into a generic map to check for presence of show_sms
+	var rawMap map[string]interface{}
+	if err := json.Unmarshal(raw, &rawMap); err != nil {
+		return false
+	}
+	
+	_, exists := rawMap["show_sms"]
+	return exists
 }
 
 func loadAllConfigsToVariables() {
