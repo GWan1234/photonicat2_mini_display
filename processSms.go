@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"image"
 	"image/color"
@@ -84,7 +83,7 @@ func collectAndDrawSms(cfg *Config) int {
 
 func getJsonContent(_ *Config) string {
 	// 1. Make the request
-	resp, err := http.Get("http://localhost/api/v2/sms/list.json?n=10")
+	resp, err := localHTTPClient.Get("http://localhost/api/v2/sms/list.json?n=10")
 	if err != nil {
 		log.Printf("GET /sms/list.json failed: %v", err)
 		return ""
@@ -112,7 +111,7 @@ func drawSmsFrJson(jsonContent string, savePng bool, drawPageNum bool) (imgs []i
 	var smsData struct {
 		Msg []SMS `json:"msg"`
 	}
-	if err := json.Unmarshal([]byte(jsonContent), &smsData); err != nil {
+	if err := secureUnmarshal([]byte(jsonContent), &smsData); err != nil {
 		log.Printf("Error parsing JSON: %v\n", err)
 		return nil, err
 	}

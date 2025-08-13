@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
@@ -21,6 +22,43 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 )
+
+// validateJSON validates that input is proper JSON and doesn't contain suspicious content
+func validateJSON(data []byte) error {
+	if len(data) == 0 {
+		return fmt.Errorf("empty JSON data")
+	}
+	if len(data) > 10*1024*1024 { // 10MB limit
+		return fmt.Errorf("JSON data too large")
+	}
+	
+	// Basic JSON validation
+	var temp interface{}
+	if err := json.Unmarshal(data, &temp); err != nil {
+		return fmt.Errorf("invalid JSON: %w", err)
+	}
+	
+	// Check for potentially malicious patterns
+	dataStr := string(data)
+	suspiciousPatterns := []string{
+		"<script", "</script", "javascript:", "eval(", "document.", "window.",
+	}
+	for _, pattern := range suspiciousPatterns {
+		if strings.Contains(strings.ToLower(dataStr), pattern) {
+			return fmt.Errorf("suspicious content detected")
+		}
+	}
+	
+	return nil
+}
+
+// secureUnmarshal safely unmarshals JSON with validation
+func secureUnmarshal(data []byte, v interface{}) error {
+	if err := validateJSON(data); err != nil {
+		return err
+	}
+	return json.Unmarshal(data, v)
+}
 
 var (
 	drawMu         sync.Mutex
@@ -123,7 +161,7 @@ func loadUserConfig() string {
 	}
 
 	var m map[string]string
-	if err := json.Unmarshal(raw, &m); err != nil {
+	if err := secureUnmarshal(raw, &m); err != nil {
 		log.Printf("error parsing user config JSON: %v", err)
 		userJsonConfig = "{}"
 		userCfg = Config{}
@@ -175,7 +213,7 @@ func saveUserConfigToFile() bool {
 func saveUserConfigFromStr(str string) bool {
 	// 1) Validate & parse JSON into generic interface
 	var obj interface{}
-	if err := json.Unmarshal([]byte(str), &obj); err != nil {
+	if err := secureUnmarshal([]byte(str), &obj); err != nil {
 		log.Printf("invalid JSON, not saving: %v", err)
 		return false
 	}

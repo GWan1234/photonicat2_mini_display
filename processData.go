@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -23,6 +24,62 @@ import (
 	"github.com/go-ping/ping"
 )
 
+// Secure HTTP client with timeouts and proper TLS configuration
+var secureHTTPClient = &http.Client{
+	Timeout: 10 * time.Second,
+	Transport: &http.Transport{
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: false, // Always verify certificates
+			MinVersion:         tls.VersionTLS12,
+		},
+		TLSHandshakeTimeout: 5 * time.Second,
+	},
+}
+
+// Local HTTP client for internal APIs (localhost)
+var localHTTPClient = &http.Client{
+	Timeout: 5 * time.Second,
+}
+
+// sanitizeCommandArg validates and sanitizes command arguments
+func sanitizeCommandArg(arg string) string {
+	// Remove any shell metacharacters and limit to alphanumeric, dash, underscore, dot, slash
+	validPattern := regexp.MustCompile(`^[a-zA-Z0-9._/-]+$`)
+	if !validPattern.MatchString(arg) {
+		return ""
+	}
+	return arg
+}
+
+// secureExecCommand executes a command with sanitized arguments
+func secureExecCommand(command string, args ...string) ([]byte, error) {
+	// Validate command name
+	if sanitizeCommandArg(command) == "" {
+		return nil, fmt.Errorf("invalid command: %s", command)
+	}
+	
+	// Sanitize all arguments
+	sanitizedArgs := make([]string, 0, len(args))
+	for _, arg := range args {
+		if arg == "" {
+			continue
+		}
+		// Allow some special arguments for system commands
+		if arg == "default" || arg == "--json" || arg == "-r" || arg == "-t" || arg == "-f" || 
+		   arg == "-c" || arg == "-v" || strings.HasPrefix(arg, "wireless.@wifi-iface") ||
+		   strings.HasPrefix(arg, "/dev/") || strings.HasPrefix(arg, "-") {
+			sanitizedArgs = append(sanitizedArgs, arg)
+		} else if sanitized := sanitizeCommandArg(arg); sanitized != "" {
+			sanitizedArgs = append(sanitizedArgs, sanitized)
+		} else {
+			return nil, fmt.Errorf("invalid argument: %s", arg)
+		}
+	}
+	
+	return exec.Command(command, sanitizedArgs...).Output()
+}
+
+
 // WiFiInterface mirrors each element of "wifi_interfaces" in the JSON.
 type WiFiInterface struct {
 	Band       string `json:"band"`
@@ -33,7 +90,7 @@ type WiFiInterface struct {
 	Exist      bool   `json:"exist"`
 	Hidden     string `json:"hidden"`
 	Htmode     string `json:"htmode"`
-	Password   string `json:"password"`
+	Password   string `json:"password,omitempty"`
 	SSID       string `json:"ssid"`
 	Frequency  string `json:"frequency,omitempty"`
 }
@@ -157,7 +214,7 @@ func getInfoFromPcatWeb() {
 	var info DashboardInfo
 
 	// === 1) Fetch dashboard.json ===
-	resp, err := http.Get(dashbarodURL)
+	resp, err := localHTTPClient.Get(dashbarodURL)
 	if err != nil {
 		fmt.Println("Could not get dashboard info:", err)
 	} else {
@@ -166,7 +223,7 @@ func getInfoFromPcatWeb() {
 		if err != nil {
 			fmt.Println("Failed to read dashboard response body:", err)
 		} else {
-			if err2 := json.Unmarshal(body, &info); err2 != nil {
+			if err2 := secureUnmarshal(body, &info); err2 != nil {
 				fmt.Println("Could not unmarshal dashboard info:", err2)
 			} else {
 				// Store each field into globalData under a sensible key.
@@ -228,7 +285,7 @@ func getInfoFromPcatWeb() {
 	}
 
 	// === 2) Fetch data_stats.json ===
-	resp2, err := http.Get(networkStatsURL)
+	resp2, err := localHTTPClient.Get(networkStatsURL)
 	if err != nil {
 		fmt.Println("Could not get network stats:", err)
 	} else {
@@ -238,7 +295,7 @@ func getInfoFromPcatWeb() {
 			fmt.Println("Failed to read network stats body:", err)
 		} else {
 			var stats NetworkStats
-			if err3 := json.Unmarshal(body2, &stats); err3 != nil {
+			if err3 := secureUnmarshal(body2, &stats); err3 != nil {
 				fmt.Println("Could not unmarshal network stats:", err3)
 			} else {
 				// Now store exactly the fields you want:
@@ -256,7 +313,7 @@ func getInfoFromPcatWeb() {
 	}
 
 	// 3) Modem basic
-	if resp, err := http.Get(basicURL); err != nil {
+	if resp, err := localHTTPClient.Get(basicURL); err != nil {
 		fmt.Println("Could not get modem basic info:", err)
 	} else {
 		defer resp.Body.Close()
@@ -264,7 +321,7 @@ func getInfoFromPcatWeb() {
 			fmt.Println("Failed to read modem basic body:", err)
 		} else {
 			var mb ModemBasicInfo
-			if err := json.Unmarshal(body, &mb); err != nil {
+			if err := secureUnmarshal(body, &mb); err != nil {
 				fmt.Println("Could not unmarshal modem basic info:", err)
 			} else {
 				globalData.Store("CellCarrierInfo", mb.CellCarrierInfo)
@@ -319,14 +376,12 @@ func getWANInterface() (string, error) {
 	if isOpenWRT() {
 		return "br-lan", nil
 	}
-	cmd := exec.Command("ip", "route", "show", "default")
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	if err := cmd.Run(); err != nil {
+	out, err := secureExecCommand("ip", "route", "show", "default")
+	if err != nil {
 		return "", err
 	}
 
-	fields := strings.Fields(out.String())
+	fields := strings.Fields(string(out))
 	for i, field := range fields {
 		if field == "dev" && (i+1) < len(fields) {
 			return fields[i+1], nil
@@ -613,7 +668,7 @@ func collectNetworkData(cfg Config) {
 
 func getSN() (string, error) {
 	// Read first 500 bytes
-	out, err := exec.Command("head", "-c", "10000", "/dev/mmcblk0boot1").Output()
+	out, err := secureExecCommand("head", "-c", "10000", "/dev/mmcblk0boot1")
 	if err != nil {
 		return "", fmt.Errorf("read partition: %w", err)
 	}
@@ -625,7 +680,7 @@ func getSN() (string, error) {
 
 	// Parse JSON
 	var payload map[string]interface{}
-	if err := json.Unmarshal(out, &payload); err != nil {
+	if err := secureUnmarshal(out, &payload); err != nil {
 		return "", fmt.Errorf("unmarshal JSON: %w", err)
 	}
 
@@ -689,7 +744,7 @@ func getUptime() (string, error) {
 
 func getKernelDate() (string, error) {
 	// get kernel version (release)
-	buildOut, err := exec.Command("uname", "-v").Output()
+	buildOut, err := secureExecCommand("uname", "-v")
 	display_date_str := "unknown-date"
 	if err == nil {
 		raw := strings.TrimSpace(string(buildOut))
@@ -756,7 +811,7 @@ func isOpenWRT() bool {
 func getSSID() (string, error) {
 	// OpenWrt detection
 	if isOpenWRT() {
-		out, err := exec.Command("uci", "get", "wireless.@wifi-iface[0].ssid").Output()
+		out, err := secureExecCommand("uci", "get", "wireless.@wifi-iface[0].ssid")
 		if err != nil {
 			return "", fmt.Errorf("failed to get OpenWrt SSID: %v", err)
 		}
@@ -764,7 +819,7 @@ func getSSID() (string, error) {
 	}
 
 	// Debian/Ubuntu: Try iwgetid first
-	if out, err := exec.Command("iwgetid", "-r").Output(); err == nil {
+	if out, err := secureExecCommand("iwgetid", "-r"); err == nil {
 		ssid := strings.TrimSpace(string(out))
 		if ssid != "" {
 			return ssid, nil
@@ -772,7 +827,7 @@ func getSSID() (string, error) {
 	}
 
 	// Fallback 1: iwconfig
-	if out, err := exec.Command("iwconfig").Output(); err == nil {
+	if out, err := secureExecCommand("iwconfig"); err == nil {
 		re := regexp.MustCompile(`ESSID:"(.*?)"`)
 		matches := re.FindSubmatch(out)
 		if len(matches) >= 2 {
@@ -784,7 +839,7 @@ func getSSID() (string, error) {
 	}
 
 	// Fallback 2: nmcli (NetworkManager)
-	if out, err := exec.Command("nmcli", "-t", "-f", "active,ssid", "dev", "wifi").Output(); err == nil {
+	if out, err := secureExecCommand("nmcli", "-t", "-f", "active,ssid", "dev", "wifi"); err == nil {
 		lines := strings.Split(string(out), "\n")
 		for _, line := range lines {
 			fields := strings.Split(line, ":")
@@ -802,7 +857,7 @@ func getSSID2() (string, error) {
 	// OpenWrt detection
 	if _, err := os.Stat("/etc/openwrt_release"); err == nil {
 		// OpenWrt: Use uci command
-		out, err := exec.Command("uci", "get", "wireless.@wifi-iface[1].ssid").Output()
+		out, err := secureExecCommand("uci", "get", "wireless.@wifi-iface[1].ssid")
 		if err != nil {
 			return "", fmt.Errorf("failed to get OpenWrt SSID: %v", err)
 		}
@@ -810,7 +865,7 @@ func getSSID2() (string, error) {
 	}
 
 	// Debian/Ubuntu: Try iwgetid first
-	if out, err := exec.Command("iwgetid", "-r").Output(); err == nil {
+	if out, err := secureExecCommand("iwgetid", "-r"); err == nil {
 		ssid := strings.TrimSpace(string(out))
 		if ssid != "" {
 			return ssid, nil
@@ -818,7 +873,7 @@ func getSSID2() (string, error) {
 	}
 
 	// Fallback 1: iwconfig
-	if out, err := exec.Command("iwconfig").Output(); err == nil {
+	if out, err := secureExecCommand("iwconfig"); err == nil {
 		re := regexp.MustCompile(`ESSID:"(.*?)"`)
 		matches := re.FindSubmatch(out)
 		if len(matches) >= 2 {
@@ -830,7 +885,7 @@ func getSSID2() (string, error) {
 	}
 
 	// Fallback 2: nmcli (NetworkManager)
-	if out, err := exec.Command("nmcli", "-t", "-f", "active,ssid", "dev", "wifi").Output(); err == nil {
+	if out, err := secureExecCommand("nmcli", "-t", "-f", "active,ssid", "dev", "wifi"); err == nil {
 		lines := strings.Split(string(out), "\n")
 		for _, line := range lines {
 			fields := strings.Split(line, ":")
@@ -916,15 +971,15 @@ type vnstatJSON struct {
 // month on the given interface, as reported by vnStat, in GiB.
 func getDataUsageMonthlyGB(iface string) (float64, error) {
 	// 1. 调用 vnstat 获取 JSON
-	out, err := exec.Command("vnstat", "-i", iface, "--json").Output()
+	out, err := secureExecCommand("vnstat", "-i", iface, "--json")
 	if err != nil {
 		fmt.Printf("failed to run vnstat with default interface: %s, %w", iface, err)
 		iface = "wwan0"
-		out, err = exec.Command("vnstat", "-i", iface, "--json").Output()
+		out, err = secureExecCommand("vnstat", "-i", iface, "--json")
 		if err != nil {
 			fmt.Printf("failed to run vnstat with default interface: %s, %w", iface, err)
 			iface = "br-lan"
-			out, err = exec.Command("vnstat", "-i", iface, "--json").Output()
+			out, err = secureExecCommand("vnstat", "-i", iface, "--json")
 			if err != nil {
 				fmt.Printf("failed to run vnstat with default interface: %s, %w", iface, err)
 				return 0, fmt.Errorf("failed to run vnstat with iface: %s, %w", iface, err)
@@ -934,7 +989,7 @@ func getDataUsageMonthlyGB(iface string) (float64, error) {
 
 	// 2. 解析 JSON
 	var data vnstatJSON
-	if err := json.Unmarshal(out, &data); err != nil {
+	if err := secureUnmarshal(out, &data); err != nil {
 		return 0, fmt.Errorf("failed to parse vnstat JSON: %w", err)
 	}
 
@@ -1151,7 +1206,7 @@ func getBatteryCurrentUA() (float64, error) {
 }
 
 func getCountry() (string, error) {
-	resp, err := http.Get("http://ip-api.com/json/")
+	resp, err := secureHTTPClient.Get("https://ipapi.co/json/")
 	if err != nil {
 		return "", err
 	}
@@ -1200,7 +1255,7 @@ func getLocalIPv4() (string, error) {
 
 // getPublicIPv4 makes an HTTP request to a public API to fetch the external IPv4 address.
 func getPublicIPv4() (string, error) {
-	resp, err := http.Get("https://4.photonicat.com/ip.php")
+	resp, err := secureHTTPClient.Get("https://4.photonicat.com/ip.php")
 	if err != nil {
 		return "", err
 	}
@@ -1224,7 +1279,7 @@ func getPublicIPv4() (string, error) {
 
 // getIPv6Public fetches the public IPv6 address.
 func getIPv6Public() (string, error) {
-	resp, err := http.Get("https://6.photonicat.com/ip.php")
+	resp, err := secureHTTPClient.Get("https://6.photonicat.com/ip.php")
 	if err != nil {
 		return "", err
 	}

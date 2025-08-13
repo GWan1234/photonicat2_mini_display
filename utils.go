@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"image"
 	"io/ioutil"
@@ -19,6 +18,7 @@ import (
 	"golang.org/x/image/font/opentype"
 )
 
+
 var (
 	fadeMu         sync.Mutex
 	fadeCancel     chan struct{}
@@ -31,7 +31,7 @@ func loadConfig(path string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	err = json.Unmarshal(data, &cfg)
+	err = secureUnmarshal(data, &cfg)
 	return cfg, err
 }
 
@@ -565,7 +565,7 @@ func hasShowSmsInUserConfig() bool {
 	
 	// Parse into a generic map to check for presence of show_sms
 	var rawMap map[string]interface{}
-	if err := json.Unmarshal(raw, &rawMap); err != nil {
+	if err := secureUnmarshal(raw, &rawMap); err != nil {
 		return false
 	}
 	
