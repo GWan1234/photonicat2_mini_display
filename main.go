@@ -6,7 +6,6 @@ import (
 	"image"
 	"image/color"
 	"log"
-	"math"
 	"math/rand"
 	"os"
 	"os/signal"
@@ -137,6 +136,12 @@ var (
 	localConfigExists       = false
 	stitchedFrame           *image.RGBA
 	totalNumPages           = -1
+	
+	// Performance optimization buffers
+	croppedFrameBuffer      *image.RGBA
+	easingLookup           []int
+	cachedFPSText          string
+	lastFPSUpdate          time.Time
 
 	topBarFrameWidth  = PCAT2_LCD_WIDTH
 	topBarFrameHeight = PCAT2_TOP_BAR_HEIGHT
@@ -381,6 +386,11 @@ func init3FrameBuffers() {
 func prepareMainLoop() {
 	stitchedFrame = image.NewRGBA(image.Rect(0, 0, middleFrameWidth*2, middleFrameHeight))
 	nextPageIdxFrameBuffer = image.NewRGBA(image.Rect(0, 0, middleFrameWidth, middleFrameHeight))
+	
+	// Initialize performance optimization buffers
+	croppedFrameBuffer = GetFrameBuffer(middleFrameWidth, middleFrameHeight)
+	easingLookup = preCalculateEasing(numIntermediatePages, middleFrameWidth)
+	lastFPSUpdate = time.Now()
 }
 
 func mainLoop() {
@@ -444,39 +454,58 @@ func mainLoop() {
 				copyImageToImageAt(stitchedFrame, nextPageIdxFrameBuffer, 0, 0)
 				copyImageToImageAt(stitchedFrame, middleFramebuffers[(middleFrames+1)%2], middleFrameWidth, 0)
 
+				// Pre-calculate footer rendering variables outside the loop for better performance
+				var footerLocalIdx int
+				var footerPages int
+				var footerIsSMS bool
+				
+				// Cache FPS text to avoid string concatenation every frame
+				if showFPS && time.Since(lastFPSUpdate) > 100*time.Millisecond {
+					now := time.Now()
+					fps = 1 / now.Sub(lastUpdate).Seconds()
+					lastUpdate = now
+					lastFPSUpdate = now
+					cachedFPSText = "FPS:" + strconv.Itoa(int(fps)) + ", " + strconv.Itoa(middleFrames)
+				}
+
 				for i := 0; i < numIntermediatePages; i++ {
-					if i <= numIntermediatePages/2 { //recheck here
+					if i <= numIntermediatePages/2 {
+						footerLocalIdx = nextLocalIdx
 						localIdx = nextLocalIdx
 						currPageIdx = nextPageIdx
+					} else {
+						footerLocalIdx = localIdx
 					}
+					
 					if cfg.ShowSms && currPageIdx+1 > jsonNumPages {
-						isSMS = true
+						footerIsSMS = true
+						footerPages = lenSmsPagesImages
 					} else {
-						isSMS = false
+						footerIsSMS = false
+						footerPages = cfgNumPages
 					}
 
-					if cfg.ShowSms && isSMS {
-						drawFooter(display, footerFramebuffers[middleFrames%2], localIdx, lenSmsPagesImages, isSMS)
-					} else {
-						drawFooter(display, footerFramebuffers[middleFrames%2], localIdx, cfgNumPages, isSMS)
+					// Render footer only when it changes or at key frames for better performance
+					if i == 0 || i == numIntermediatePages/2 {
+						if cfg.ShowSms && footerIsSMS {
+							drawFooter(display, footerFramebuffers[middleFrames%2], footerLocalIdx, footerPages, footerIsSMS)
+						} else {
+							drawFooter(display, footerFramebuffers[middleFrames%2], footerLocalIdx, footerPages, footerIsSMS)
+						}
 					}
 
-					//page transition
-					t := float64(i) / float64(numIntermediatePages) // 0 -> 1
+					// Use pre-calculated easing values instead of math.Pow for better performance
+					xPos := easingLookup[i]
 
-					et3 := 1 - math.Pow(1-t, 4) //use quartic
-
-					xPos := int(et3 * float64(middleFrameWidth))
-
-					croppedFrame := cropImageAt(stitchedFrame, xPos, 0, middleFrameWidth, middleFrameHeight)
-					if showFPS {
-						now := time.Now()
-						fps = 1 / now.Sub(lastUpdate).Seconds()
-						lastUpdate = now
-
-						drawText(croppedFrame, "FPS:"+strconv.Itoa(int(fps))+", "+strconv.Itoa(middleFrames), 10, 240, faceTiny, PCAT_RED, false)
+					// Use efficient region copy instead of cropImageAt to avoid allocations
+					copyImageRegion(croppedFrameBuffer, stitchedFrame, xPos, 0, middleFrameWidth, middleFrameHeight)
+					
+					// Add FPS text only if needed and use cached string
+					if showFPS && cachedFPSText != "" {
+						drawText(croppedFrameBuffer, cachedFPSText, 10, 240, faceTiny, PCAT_RED, false)
 					}
-					sendMiddle(display, croppedFrame)
+					
+					sendMiddle(display, croppedFrameBuffer)
 					middleFrames++
 					stitchedFrames++
 				}
@@ -490,9 +519,16 @@ func mainLoop() {
 				//draw middle
 				clearFrame(middleFramebuffers[middleFrames%2], middleFrameWidth, middleFrameHeight)
 				renderMiddle(middleFramebuffers[middleFrames%2], &cfg, isSMS, localIdx)
-				//draw fps
+				//draw fps - use cached text for better performance
 				if showFPS {
-					drawText(middleFramebuffers[middleFrames%2], "FPS:"+strconv.Itoa(int(fps))+", "+strconv.Itoa(middleFrames), 10, 240, faceTiny, PCAT_RED, false)
+					// Update cached FPS text periodically
+					if time.Since(lastFPSUpdate) > 100*time.Millisecond {
+						lastFPSUpdate = time.Now()
+						cachedFPSText = "FPS:" + strconv.Itoa(int(fps)) + ", " + strconv.Itoa(middleFrames)
+					}
+					if cachedFPSText != "" {
+						drawText(middleFramebuffers[middleFrames%2], cachedFPSText, 10, 240, faceTiny, PCAT_RED, false)
+					}
 				}
 				sendMiddle(display, middleFramebuffers[middleFrames%2])
 				middleFrames++

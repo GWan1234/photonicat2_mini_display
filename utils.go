@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"image"
 	"io/ioutil"
@@ -19,6 +18,7 @@ import (
 	"golang.org/x/image/font/opentype"
 )
 
+
 var (
 	fadeMu         sync.Mutex
 	fadeCancel     chan struct{}
@@ -31,7 +31,7 @@ func loadConfig(path string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	err = json.Unmarshal(data, &cfg)
+	err = secureUnmarshal(data, &cfg)
 	return cfg, err
 }
 
@@ -146,6 +146,54 @@ func clearFrame(frame *image.RGBA, width int, height int) {
 }
 
 // Helper function for max since Go doesn't have built-in max for int
+// copyImageRegion efficiently copies a rectangular region from src to dst
+// This avoids allocating a new image like cropImageAt does
+func copyImageRegion(dst *image.RGBA, src *image.RGBA, srcX, srcY, width, height int) {
+	srcBounds := src.Bounds()
+	dstBounds := dst.Bounds()
+	
+	// Bounds checking
+	if srcX < 0 || srcY < 0 || srcX+width > srcBounds.Dx() || srcY+height > srcBounds.Dy() {
+		return
+	}
+	if width > dstBounds.Dx() || height > dstBounds.Dy() {
+		return
+	}
+	
+	// Copy row by row for better cache performance
+	for y := 0; y < height; y++ {
+		srcRowStart := (srcY+y)*src.Stride + srcX*4
+		dstRowStart := y*dst.Stride
+		
+		copy(dst.Pix[dstRowStart:dstRowStart+width*4], 
+			 src.Pix[srcRowStart:srcRowStart+width*4])
+	}
+}
+
+// preCalculateEasing pre-computes easing values to avoid math.Pow during transitions
+func preCalculateEasing(numFrames int, frameWidth int) []int {
+	if len(easingLookup) != numFrames {
+		easingLookup = make([]int, numFrames)
+		for i := 0; i < numFrames; i++ {
+			t := float64(i) / float64(numFrames)
+			et3 := 1 - math.Pow(1-t, 4) // Quartic easing
+			easingLookup[i] = int(et3 * float64(frameWidth))
+		}
+	}
+	return easingLookup
+}
+
+// cleanupPerformanceBuffers returns performance buffers to pool for cleanup
+func cleanupPerformanceBuffers() {
+	if croppedFrameBuffer != nil {
+		ReturnFrameBuffer(croppedFrameBuffer)
+		croppedFrameBuffer = nil
+	}
+	// Clear easing lookup to free memory
+	easingLookup = nil
+	cachedFPSText = ""
+}
+
 func max(a, b int) int {
 	if a > b {
 		return a
@@ -565,7 +613,7 @@ func hasShowSmsInUserConfig() bool {
 	
 	// Parse into a generic map to check for presence of show_sms
 	var rawMap map[string]interface{}
-	if err := json.Unmarshal(raw, &rawMap); err != nil {
+	if err := secureUnmarshal(raw, &rawMap); err != nil {
 		return false
 	}
 	
