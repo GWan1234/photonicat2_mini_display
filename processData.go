@@ -629,14 +629,22 @@ func getSN() (string, error) {
 		return "", fmt.Errorf("unmarshal JSON: %w", err)
 	}
 
-	// Extract "sn"
-	snVal, ok := payload["sn"]
-	if !ok {
-		return "", fmt.Errorf(`key "sn" not found`)
+	// Extract "sn" or fallback to "machine_sn"
+	var sn string
+	if v, ok := payload["sn"]; ok {
+		if s, ok2 := v.(string); ok2 && s != "" {
+			sn = s
+		}
 	}
-	sn, ok := snVal.(string)
-	if !ok {
-		return "", fmt.Errorf(`"sn" is not a string`)
+	if sn == "" {
+		if v, ok := payload["machine_sn"]; ok {
+			if s, ok2 := v.(string); ok2 && s != "" {
+				sn = s
+			}
+		}
+	}
+	if sn == "" {
+		return "", fmt.Errorf(`key "sn" or "machine_sn" not found or not a non-empty string`)
 	}
 
 	return sn, nil
