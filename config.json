@@ -145,7 +145,7 @@
                 {
                     "type": "fixed_text",
                     "label": "ping: [ping_site0]",
-                    "position": {"x": 6, "y": 4},
+                    "position": {"x": 6, "y": 3},
                     "font": "tiny",
                     "color": [255, 229, 0],
                     "enable": 1
@@ -153,7 +153,7 @@
                 {
                     "type": "text",
                     "label": "Ping0",
-                    "position": {"x": 6, "y": 18},
+                    "position": {"x": 6, "y": 17},
                     "font": "big",
                     "color": [255, 229, 0],
                     "units": "ms",
@@ -164,7 +164,7 @@
                 {
                     "type": "fixed_text",
                     "label": "ping: [ping_site1]",
-                    "position": {"x": 6, "y":49},
+                    "position": {"x": 6, "y":47},
                     "font": "tiny",
                     "color": [255, 229, 0],
                     "enable": 1
@@ -172,7 +172,7 @@
                 {
                     "type": "text",
                     "label": "Ping1",
-                    "position": {"x": 6, "y": 63},
+                    "position": {"x": 6, "y": 61},
                     "font": "big",
                     "color": [255, 229, 0],
                     "units": "ms",
@@ -183,7 +183,7 @@
                 {
                     "type": "fixed_text",
                     "label": "LAN IP",
-                    "position": {"x": 6, "y": 97},
+                    "position": {"x": 6, "y": 93},
                     "font": "unit",
                     "color": [255, 229, 0],
                     "enable": 1
@@ -191,8 +191,8 @@
                 {
                     "type": "text",
                     "label": "lan",
-                    "position": {"x": 6, "y": 114},
-                    "font": "thin",
+                    "position": {"x": 6, "y": 110},
+                    "font": "tiny",
                     "color": [255, 229, 255],
                     "data_key": "LAN_IP",
                     "units_font": "unit",
@@ -201,8 +201,8 @@
                 },
                 {
                     "type": "fixed_text",
-                    "label": "PUBLIC IP",
-                    "position": {"x": 6, "y": 137},
+                    "label": "WAN IP",
+                    "position": {"x": 6, "y": 126},
                     "font": "unit",
                     "color": [255, 229, 0],
                     "enable": 1
@@ -210,8 +210,8 @@
                 {
                     "type": "text",
                     "label": "wan",
-                    "position": {"x": 6, "y": 154},
-                    "font": "thin",
+                    "position": {"x": 6, "y": 143},
+                    "font": "tiny",
                     "color": [255, 229, 255],
                     "data_key": "WAN_IP",
                     "units_font": "unit",
@@ -220,8 +220,27 @@
                 },
                 {
                     "type": "fixed_text",
+                    "label": "PUBLIC IP",
+                    "position": {"x": 6, "y": 159},
+                    "font": "unit",
+                    "color": [255, 229, 0],
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "public",
+                    "position": {"x": 6, "y": 176},
+                    "font": "tiny",
+                    "color": [255, 229, 255],
+                    "data_key": "PUBLIC_IP",
+                    "units_font": "unit",
+                    "units": "",
+                    "enable": 1
+                },
+                {
+                    "type": "fixed_text",
                     "label": "SSID - Onboard",
-                    "position": {"x": 6, "y": 177},
+                    "position": {"x": 6, "y": 192},
                     "font": "unit",
                     "color": [255, 229, 0],
                     "enable": 1
@@ -229,7 +248,7 @@
                 {
                     "type": "text",
                     "label": "ssid",
-                    "position": {"x": 5, "y": 194},
+                    "position": {"x": 6, "y": 209},
                     "font": "tiny",
                     "color": [255, 229, 255],
                     "data_key": "SSID",
@@ -240,7 +259,7 @@
                 {
                     "type": "fixed_text",
                     "label": "SSID - PCIE",
-                    "position": {"x": 6, "y": 215},
+                    "position": {"x": 6, "y": 225},
                     "font": "unit",
                     "color": [255, 229, 0],
                     "enable": 1
@@ -248,7 +267,7 @@
                 {
                     "type": "text",
                     "label": "ssid",
-                    "position": {"x": 5, "y": 232},
+                    "position": {"x": 6, "y": 242},
                     "font": "tiny",
                     "color": [255, 229, 255],
                     "data_key": "SSID2",

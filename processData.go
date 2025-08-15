@@ -592,12 +592,20 @@ func collectNetworkData(cfg Config) {
 		globalData.Store("LAN_IP", localIP)
 	}
 
+	// WAN IP address (local WAN interface IP)
+	if wanIP, err := getWanIPv4(); err != nil {
+		fmt.Printf("Could not get WAN IP: %v\n", err)
+		globalData.Store("WAN_IP", "N/A")
+	} else {
+		globalData.Store("WAN_IP", wanIP)
+	}
+
 	// Public IP address.
 	if publicIP, err := getPublicIPv4(); err != nil {
 		fmt.Printf("Could not get public IP: %v\n", err)
-		globalData.Store("WAN_IP", "N/A")
+		globalData.Store("PUBLIC_IP", "N/A")
 	} else {
-		globalData.Store("WAN_IP", publicIP)
+		globalData.Store("PUBLIC_IP", publicIP)
 	}
 
 	// SSID.
@@ -981,15 +989,15 @@ func getDataUsageMonthlyGB(iface string) (float64, error) {
 	// 1. 调用 vnstat 获取 JSON
 	out, err := secureExecCommand("vnstat", "-i", iface, "--json")
 	if err != nil {
-		fmt.Printf("failed to run vnstat with default interface: %s, %w", iface, err)
+		fmt.Printf("failed to run vnstat with default interface: %s, %v", iface, err)
 		iface = "wwan0"
 		out, err = secureExecCommand("vnstat", "-i", iface, "--json")
 		if err != nil {
-			fmt.Printf("failed to run vnstat with default interface: %s, %w", iface, err)
+			fmt.Printf("failed to run vnstat with default interface: %s, %v", iface, err)
 			iface = "br-lan"
 			out, err = secureExecCommand("vnstat", "-i", iface, "--json")
 			if err != nil {
-				fmt.Printf("failed to run vnstat with default interface: %s, %w", iface, err)
+				fmt.Printf("failed to run vnstat with default interface: %s, %v", iface, err)
 				return 0, fmt.Errorf("failed to run vnstat with iface: %s, %w", iface, err)
 			}
 		}
@@ -1259,6 +1267,74 @@ func getLocalIPv4() (string, error) {
 
 	// none of the candidates had a usable IPv4
 	return "LINK DOWN", nil
+}
+
+// getWanIPv4 returns WAN interface IP from OpenWrt or default route IP on Debian.
+func getWanIPv4() (string, error) {
+	if isOpenWRT() {
+		// Try to get WAN IP from uci network.wan.ipaddr first
+		out, err := secureExecCommand("uci", "get", "network.wan.ipaddr")
+		if err == nil {
+			wanIP := strings.TrimSpace(string(out))
+			if net.ParseIP(wanIP) != nil && net.ParseIP(wanIP).To4() != nil {
+				return wanIP, nil
+			}
+		}
+		
+		// Fallback: try to get IP from wan interface
+		candidates := []string{"wan", "eth0", "wwan0"}
+		for _, name := range candidates {
+			iface, err := net.InterfaceByName(name)
+			if err != nil {
+				continue
+			}
+			if iface.Flags&net.FlagUp == 0 {
+				continue
+			}
+			addrs, err := iface.Addrs()
+			if err != nil {
+				continue
+			}
+			for _, addr := range addrs {
+				if ipnet, ok := addr.(*net.IPNet); ok {
+					if ip4 := ipnet.IP.To4(); ip4 != nil {
+						return ip4.String(), nil
+					}
+				}
+			}
+		}
+		
+		// Final fallback: use ip route to find WAN IP
+		out, err = secureExecCommand("ip", "route", "get", "1.1.1.1")
+		if err == nil {
+			lines := strings.Split(string(out), "\n")
+			for _, line := range lines {
+				fields := strings.Fields(line)
+				for i, field := range fields {
+					if field == "src" && i+1 < len(fields) {
+						return fields[i+1], nil
+					}
+				}
+			}
+		}
+	} else {
+		// Debian/Ubuntu: get source IP for default route
+		out, err := secureExecCommand("ip", "route", "get", "1.1.1.1")
+		if err != nil {
+			return "", err
+		}
+		lines := strings.Split(string(out), "\n")
+		for _, line := range lines {
+			fields := strings.Fields(line)
+			for i, field := range fields {
+				if field == "src" && i+1 < len(fields) {
+					return fields[i+1], nil
+				}
+			}
+		}
+	}
+
+	return "N/A", fmt.Errorf("WAN IP not found")
 }
 
 // getPublicIPv4 makes an HTTP request to a public API to fetch the external IPv4 address.

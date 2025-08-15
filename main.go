@@ -191,7 +191,7 @@ type DisplayElement struct {
 	IconPath  string   `json:"icon_path,omitempty"`
 	Enable    int      `json:"enable,omitempty"`
 	Size      *Size    `json:"size,omitempty"`  // for icons, if provided
-	_Size     *Size    `json:"_size,omitempty"` // sometimes provided as _size
+	Size2     *Size    `json:"_size,omitempty"` // sometimes provided as _size
 }
 
 // DisplayTemplate holds pages of elements.

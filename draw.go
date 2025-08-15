@@ -825,8 +825,8 @@ func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
 			var sz Size
 			if element.Size != nil {
 				sz = *element.Size
-			} else if element._Size != nil {
-				sz = *element._Size
+			} else if element.Size2 != nil {
+				sz = *element.Size2
 			} else {
 				sz = Size{Width: iconImg.Bounds().Dx(), Height: iconImg.Bounds().Dy()}
 			}
