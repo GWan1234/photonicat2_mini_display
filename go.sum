@@ -32,8 +32,8 @@ github.com/mattn/go-isatty v0.0.20 h1:xfD0iDuEKnDkl03q4limB+vH+GxLEtL/jb4xVJSWWE
 github.com/mattn/go-isatty v0.0.20/go.mod h1:W+V8PltTTMOvKvAeJH7IuucS94S2C6jfK/D7dTCTo3Y=
 github.com/mattn/go-runewidth v0.0.16 h1:E5ScNMtiwvlvB5paMFdw9p4kSQzbXFikJ5SQO6TULQc=
 github.com/mattn/go-runewidth v0.0.16/go.mod h1:Jdepj2loyihRzMpdS35Xk/zdY8IAYHsh153qUoGf23w=
-github.com/photonicat/periph.io-gc9307 v0.0.0-20250327024102-e03f39f11c1d h1:gD5epsGk/vxBb6TFPGtTg/pyY+CO42Q+pXcC0j2YcL0=
-github.com/photonicat/periph.io-gc9307 v0.0.0-20250327024102-e03f39f11c1d/go.mod h1:6UUL/rIuiUYySOItZv0Csx1Q8uMJTRBCCKFmeR3CuIk=
+github.com/photonicat/periph.io-gc9307 v1.0.1 h1:2X5x/42w2WcAuJfxCkeFnJ1UqOefTosgEEnW5CKNaaE=
+github.com/photonicat/periph.io-gc9307 v1.0.1/go.mod h1:6UUL/rIuiUYySOItZv0Csx1Q8uMJTRBCCKFmeR3CuIk=
 github.com/rivo/uniseg v0.2.0 h1:S1pD9weZBuJdFmowNwbpi7BJ8TNftyUImj/0WQi72jY=
 github.com/rivo/uniseg v0.2.0/go.mod h1:J6wj4VEh+S6ZtnVlnTBMWIodfgj8LQOQFoIToxlJtxc=
 github.com/srwiley/oksvg v0.0.0-20221011165216-be6e8873101c h1:km8GpoQut05eY3GiYWEedbTT0qnSxrCjsVbb7yKY1KE=
