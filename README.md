@@ -40,8 +40,11 @@ A Go language-based, HTTP-enabled driver for the Photonicat 2 LCD display used i
 
 - Go 1.16 or higher
 - Proper hardware setup for the Photonicat 2 mobile router and LCD display
+
 <code>
 apt install gcc-aarch64-linux-gnu musl-tools
+wget https://musl.cc/aarch64-linux-musl-cross.tgz
+sudo tar -C /usr/local -xzf aarch64-linux-musl-cross.tgz
 </code>
 
 ### Run

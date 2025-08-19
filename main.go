@@ -136,12 +136,12 @@ var (
 	localConfigExists       = false
 	stitchedFrame           *image.RGBA
 	totalNumPages           = -1
-	
+
 	// Performance optimization buffers
-	croppedFrameBuffer      *image.RGBA
-	easingLookup           []int
-	cachedFPSText          string
-	lastFPSUpdate          time.Time
+	croppedFrameBuffer *image.RGBA
+	easingLookup       []int
+	cachedFPSText      string
+	lastFPSUpdate      time.Time
 
 	topBarFrameWidth  = PCAT2_LCD_WIDTH
 	topBarFrameHeight = PCAT2_TOP_BAR_HEIGHT
@@ -386,7 +386,7 @@ func init3FrameBuffers() {
 func prepareMainLoop() {
 	stitchedFrame = image.NewRGBA(image.Rect(0, 0, middleFrameWidth*2, middleFrameHeight))
 	nextPageIdxFrameBuffer = image.NewRGBA(image.Rect(0, 0, middleFrameWidth, middleFrameHeight))
-	
+
 	// Initialize performance optimization buffers
 	croppedFrameBuffer = GetFrameBuffer(middleFrameWidth, middleFrameHeight)
 	easingLookup = preCalculateEasing(numIntermediatePages, middleFrameWidth)
@@ -405,45 +405,48 @@ func mainLoop() {
 		log.Fatalf("Failed to load font: %v", err)
 	}
 
+	var footerLocalIdx int
+	var footerPages int
+	var footerIsSMS bool
+
 	for weAreRunning {
 		if middleFrames%300 == 0 { // Log less frequently
 			log.Println("showsms:", cfg.ShowSms, "totalPages:", totalNumPages, "cfgPages:", cfgNumPages)
 		}
 		if runMainLoop {
+
 			start := time.Now()
-			if changePageTriggered || httpChangePageTriggered { //chang./cing page
+			if changePageTriggered || httpChangePageTriggered { //changing page
 				httpChangePageTriggered = false
 				changePageTriggered = false
 
-				jsonNumPages := cfgNumPages
 				currPageIdx = currPageIdx % totalNumPages
 				nextPageIdx = (currPageIdx + 1) % totalNumPages
 
-				if cfg.ShowSms && currPageIdx+1 > jsonNumPages {
+				if cfg.ShowSms && currPageIdx >= cfgNumPages {
 					isSMS = true
-					localIdx = currPageIdx - jsonNumPages
+					localIdx = currPageIdx - cfgNumPages
 				} else {
 					isSMS = false
 					localIdx = currPageIdx
 				}
 
-				if cfg.ShowSms && currPageIdx+2 > jsonNumPages {
+				if cfg.ShowSms && nextPageIdx >= cfgNumPages {
 					isNextPageSMS = true
 					if lenSmsPagesImages <= 0 {
 						lenSmsPagesImages = 1
 					}
-					nextLocalIdx = (currPageIdx + 1 - jsonNumPages) % lenSmsPagesImages
+					nextLocalIdx = (nextPageIdx - cfgNumPages) % lenSmsPagesImages
 				} else {
 					isNextPageSMS = false
-					nextLocalIdx = (currPageIdx + 1) % jsonNumPages
+					if cfgNumPages > 0 {
+						nextLocalIdx = nextPageIdx % cfgNumPages
+					} else {
+						nextLocalIdx = 0
+					}
 				}
 
-				if currPageIdx+2 > totalNumPages {
-					isNextPageSMS = false
-					nextLocalIdx = (currPageIdx + 1) % totalNumPages
-				}
-
-				log.Println("currPageIdx:", currPageIdx, "json/sms/total:", jsonNumPages, lenSmsPagesImages, totalNumPages, "localIdx:", localIdx, "nextLocalIdx:", nextLocalIdx, "isSMS:", isSMS)
+				log.Println("curr/next Idx:", currPageIdx, nextPageIdx, "json/sms/total:", cfgNumPages, lenSmsPagesImages, totalNumPages, "localIdx:", localIdx, "nextLocalIdx:", nextLocalIdx, "isSMS:", isSMS, "isNextPageSMS:", isNextPageSMS)
 
 				clearFrame(nextPageIdxFrameBuffer, middleFrameWidth, middleFrameHeight)
 				renderMiddle(nextPageIdxFrameBuffer, &cfg, isSMS, localIdx)
@@ -454,11 +457,6 @@ func mainLoop() {
 				copyImageToImageAt(stitchedFrame, nextPageIdxFrameBuffer, 0, 0)
 				copyImageToImageAt(stitchedFrame, middleFramebuffers[(middleFrames+1)%2], middleFrameWidth, 0)
 
-				// Pre-calculate footer rendering variables outside the loop for better performance
-				var footerLocalIdx int
-				var footerPages int
-				var footerIsSMS bool
-				
 				// Cache FPS text to avoid string concatenation every frame
 				if showFPS && time.Since(lastFPSUpdate) > 100*time.Millisecond {
 					now := time.Now()
@@ -476,8 +474,8 @@ func mainLoop() {
 					} else {
 						footerLocalIdx = localIdx
 					}
-					
-					if cfg.ShowSms && currPageIdx+1 > jsonNumPages {
+
+					if cfg.ShowSms && currPageIdx+1 > cfgNumPages {
 						footerIsSMS = true
 						footerPages = lenSmsPagesImages
 					} else {
@@ -499,12 +497,15 @@ func mainLoop() {
 
 					// Use efficient region copy instead of cropImageAt to avoid allocations
 					copyImageRegion(croppedFrameBuffer, stitchedFrame, xPos, 0, middleFrameWidth, middleFrameHeight)
-					
+
 					// Add FPS text only if needed and use cached string
 					if showFPS && cachedFPSText != "" {
 						drawText(croppedFrameBuffer, cachedFPSText, 10, 240, faceTiny, PCAT_RED, false)
 					}
-					
+
+					//make sure in main loop isSMS is updated to next page SMS status.
+					isSMS = isNextPageSMS
+
 					sendMiddle(display, croppedFrameBuffer)
 					middleFrames++
 					stitchedFrames++
