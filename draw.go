@@ -110,6 +110,13 @@ func loadImage(filePath string) (*image.RGBA, int, int, error) {
 			return nil, 0, 0, err
 		}
 	case ".svg":
+		// Check if SVG is already cached as rendered image
+		cacheKey := filePath + "_rendered"
+		if cachedImg, ok := imageCache[cacheKey]; ok {
+			bounds := cachedImg.Bounds()
+			return cachedImg, bounds.Dx(), bounds.Dy(), nil
+		}
+		
 		// Read the entire SVG file.
 		svgData, err := ioutil.ReadAll(f)
 		if err != nil {
@@ -135,7 +142,8 @@ func loadImage(filePath string) (*image.RGBA, int, int, error) {
 		// Render the SVG onto the RGBA image.
 		icon.Draw(dasher, 1.0)
 		// Cache and return the rendered image.
-		imageCache[filePath] = rgba
+		imageCache[cacheKey] = rgba
+		imageCache[filePath] = rgba // Also cache with original path for fast lookup
 		return rgba, w, h, nil
 	default:
 		return nil, 0, 0, fmt.Errorf("unsupported image format: %s", ext)
@@ -387,7 +395,7 @@ func cropImageAt(src *image.RGBA, x0, y0, width, height int) *image.RGBA {
 	return cropped
 }
 
-//copyImageToImageAt copies an image to an image at a specified offset. frame is the destination image, img is the source image. x0, y0 is the offset.
+// copyImageToImageAt copies an image to an image at a specified offset. frame is the destination image, img is the source image. x0, y0 is the offset.
 func copyImageToImageAt(frame *image.RGBA, img *image.RGBA, x0, y0 int) error {
 	targetWidth := img.Bounds().Dx()
 	targetHeight := img.Bounds().Dy()
@@ -402,7 +410,34 @@ func copyImageToImageAt(frame *image.RGBA, img *image.RGBA, x0, y0 int) error {
 		return fmt.Errorf("x, y is negative: %d,%d", x0, y0)
 	}
 
-	// Iterate over each pixel.
+	// Use optimized copying for fully opaque images
+	imgBounds := img.Bounds()
+	frameBounds := frame.Bounds()
+	
+	// Fast path for fully opaque images
+	if isFullyOpaque(img) {
+		// Use direct memory copy for better performance
+		for y := 0; y < targetHeight; y++ {
+			srcY := imgBounds.Min.Y + y
+			dstY := y0 + y
+			
+			if dstY >= frameBounds.Min.Y && dstY < frameBounds.Max.Y {
+				for x := 0; x < targetWidth; x++ {
+					srcX := imgBounds.Min.X + x
+					dstX := x0 + x
+					
+					if srcX >= imgBounds.Min.X && srcX < imgBounds.Max.X &&
+					   dstX >= frameBounds.Min.X && dstX < frameBounds.Max.X {
+						// Direct pixel copy for opaque images
+						frame.SetRGBA(dstX, dstY, img.RGBAAt(srcX, srcY))
+					}
+				}
+			}
+		}
+		return nil
+	}
+
+	// Iterate over each pixel with alpha blending for transparent images.
 	for y := 0; y < targetHeight; y++ {
 		for x := 0; x < targetWidth; x++ {
 			sample := img.RGBAAt(x, y)
@@ -437,6 +472,66 @@ func copyImageToImageAt(frame *image.RGBA, img *image.RGBA, x0, y0 int) error {
 	}
 
 	return nil
+}
+
+// isFullyOpaque checks if an image is fully opaque (no transparency)
+func isFullyOpaque(img *image.RGBA) bool {
+	bounds := img.Bounds()
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			if img.RGBAAt(x, y).A < 255 {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// copyImageRegion efficiently copies a region from src to dst
+func copyImageRegion(dst *image.RGBA, src *image.RGBA, x0, y0, width, height int) {
+	srcBounds := src.Bounds()
+	dstBounds := dst.Bounds()
+	
+	// Clamp to valid bounds
+	if x0 < srcBounds.Min.X {
+		width -= srcBounds.Min.X - x0
+		x0 = srcBounds.Min.X
+	}
+	if y0 < srcBounds.Min.Y {
+		height -= srcBounds.Min.Y - y0
+		y0 = srcBounds.Min.Y
+	}
+	
+	if x0+width > srcBounds.Max.X {
+		width = srcBounds.Max.X - x0
+	}
+	if y0+height > srcBounds.Max.Y {
+		height = srcBounds.Max.Y - y0
+	}
+	
+	// Early return if invalid region
+	if width <= 0 || height <= 0 {
+		return
+	}
+	
+	// Use direct memory copying for better performance
+	for y := 0; y < height; y++ {
+		srcY := y0 + y
+		dstY := y
+		
+		if srcY >= srcBounds.Min.Y && srcY < srcBounds.Max.Y && 
+		   dstY >= dstBounds.Min.Y && dstY < dstBounds.Max.Y {
+			for x := 0; x < width; x++ {
+				srcX := x0 + x
+				dstX := x
+				
+				if srcX >= srcBounds.Min.X && srcX < srcBounds.Max.X &&
+				   dstX >= dstBounds.Min.X && dstX < dstBounds.Max.X {
+					dst.SetRGBA(dstX, dstY, src.RGBAAt(srcX, srcY))
+				}
+			}
+		}
+	}
 }
 
 func drawRoundedRect(gc *draw2dimg.GraphicContext, x, y, w, h, r float64) {

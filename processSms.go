@@ -10,6 +10,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -37,6 +38,13 @@ type SMS struct {
 var (
 	lastSmsJsonContent string
 	lastNumPages       int
+	
+	// Memory pool for SMS images to reduce allocations
+	smsImagePool = sync.Pool{
+		New: func() interface{} {
+			return image.NewRGBA(image.Rect(0, 0, 172, 270))
+		},
+	}
 )
 
 func collectAndDrawSms(cfg *Config) int {
@@ -58,6 +66,15 @@ func collectAndDrawSms(cfg *Config) int {
 	if err != nil {
 		log.Println("Error drawing SMS:", err)
 		return 0
+	}
+
+	// Return old SMS images to pool to prevent memory leaks
+	for _, oldImg := range smsPagesImages {
+		if oldImg != nil {
+			// Clear the image before returning to pool
+			draw.Draw(oldImg, oldImg.Bounds(), &image.Uniform{color.Black}, image.Point{}, draw.Src)
+			smsImagePool.Put(oldImg)
+		}
 	}
 
 	// prepare the global slice
@@ -237,7 +254,9 @@ func drawSmsFrJson(jsonContent string, savePng bool, drawPageNum bool) (imgs []i
 	// Render pages to PNG
 	for i, page := range pages {
 		fmt.Printf("Rendering page %d\n", i)
-		img := image.NewRGBA(image.Rect(0, 0, width, height))
+		// Use pooled image buffer
+		img := smsImagePool.Get().(*image.RGBA)
+		// Clear the image before use
 		draw.Draw(img, img.Bounds(), &image.Uniform{color.Black}, image.Point{}, draw.Src)
 
 		fc.SetDst(img)

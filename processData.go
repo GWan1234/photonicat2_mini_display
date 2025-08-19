@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/tls"
-	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -57,7 +56,7 @@ func secureExecCommand(command string, args ...string) ([]byte, error) {
 	if sanitizeCommandArg(command) == "" {
 		return nil, fmt.Errorf("invalid command: %s", command)
 	}
-	
+
 	// Sanitize all arguments
 	sanitizedArgs := make([]string, 0, len(args))
 	for _, arg := range args {
@@ -65,9 +64,9 @@ func secureExecCommand(command string, args ...string) ([]byte, error) {
 			continue
 		}
 		// Allow some special arguments for system commands
-		if arg == "default" || arg == "--json" || arg == "-r" || arg == "-t" || arg == "-f" || 
-		   arg == "-c" || arg == "-v" || strings.HasPrefix(arg, "wireless.@wifi-iface") ||
-		   strings.HasPrefix(arg, "/dev/") || strings.HasPrefix(arg, "-") {
+		if arg == "default" || arg == "--json" || arg == "-r" || arg == "-t" || arg == "-f" ||
+			arg == "-c" || arg == "-v" || strings.HasPrefix(arg, "wireless.@wifi-iface") ||
+			strings.HasPrefix(arg, "/dev/") || strings.HasPrefix(arg, "-") {
 			sanitizedArgs = append(sanitizedArgs, arg)
 		} else if sanitized := sanitizeCommandArg(arg); sanitized != "" {
 			sanitizedArgs = append(sanitizedArgs, sanitized)
@@ -75,10 +74,9 @@ func secureExecCommand(command string, args ...string) ([]byte, error) {
 			return nil, fmt.Errorf("invalid argument: %s", arg)
 		}
 	}
-	
+
 	return exec.Command(command, sanitizedArgs...).Output()
 }
-
 
 // WiFiInterface mirrors each element of "wifi_interfaces" in the JSON.
 type WiFiInterface struct {
@@ -412,14 +410,18 @@ func collectWANNetworkSpeed() {
 			globalData.Store("WanDOWN_Unit", wanDOWNUnit)
 		}
 	} else {
-		wanInterface, err = getWANInterface()
-		if err != nil {
-			log.Printf("Could not get WAN interface: %v\n", err)
-			globalData.Store("WanUP", "0")
-			globalData.Store("WanDOWN", "0")
-			time.Sleep(5 * time.Second) // prevent infinite loop
-			return
+		// Cache WAN interface to avoid repeated lookups
+		if wanInterface == "" || wanInterface == "null" {
+			wanInterface, err = getWANInterface()
+			if err != nil {
+				log.Printf("Could not get WAN interface: %v\n", err)
+				globalData.Store("WanUP", "0")
+				globalData.Store("WanDOWN", "0")
+				time.Sleep(5 * time.Second) // prevent infinite loop
+				return
+			}
 		}
+
 		netData, err := getNetworkSpeed(wanInterface)
 		if err != nil {
 			log.Printf("Could not get network speed: %v\n", err)
@@ -921,16 +923,16 @@ func getNetworkSpeed(iface string) (NetworkSpeed, error) {
 		return NetworkSpeed{}, err
 	}
 
-	// Sampling interval every 2 seconds
-	time.Sleep(1999 * time.Millisecond)
+	// Reduced sampling interval for better responsiveness
+	time.Sleep(999 * time.Millisecond) // Reduced from 1999ms to 999ms
 
 	rx2, tx2, err := getInterfaceBytes(iface)
 	if err != nil {
 		return NetworkSpeed{}, err
 	}
 
-	downloadMbps := float64(rx2-rx1) / 1024 / 128 / 2
-	uploadMbps := float64(tx2-tx1) / 1024 / 128 / 2
+	downloadMbps := float64(rx2-rx1) / 1024 / 128 / 1 // Adjusted for 1 second
+	uploadMbps := float64(tx2-tx1) / 1024 / 128 / 1   // Adjusted for 1 second
 
 	return NetworkSpeed{
 		UploadMbps:   uploadMbps,
@@ -1221,22 +1223,6 @@ func getBatteryCurrentUA() (float64, error) {
 	return strconv.ParseFloat(strings.TrimSpace(string(content)), 64)
 }
 
-func getCountry() (string, error) {
-	resp, err := secureHTTPClient.Get("https://ipapi.co/json/")
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	var result struct {
-		Country string `json:"country"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return "", err
-	}
-	return result.Country, nil
-}
-
 // getLocalIPv4 returns eth0 IP on OpenWrt or WAN IP (default route) on Debian.
 func getLocalIPv4() (string, error) {
 	candidates := []string{"eth1", "end1", "end0", "br-lan"}
@@ -1280,7 +1266,7 @@ func getWanIPv4() (string, error) {
 				return wanIP, nil
 			}
 		}
-		
+
 		// Fallback: try to get IP from wan interface
 		candidates := []string{"wan", "eth0", "wwan0"}
 		for _, name := range candidates {
@@ -1303,7 +1289,7 @@ func getWanIPv4() (string, error) {
 				}
 			}
 		}
-		
+
 		// Final fallback: use ip route to find WAN IP
 		out, err = secureExecCommand("ip", "route", "get", "1.1.1.1")
 		if err == nil {
@@ -1545,16 +1531,4 @@ func readNetworkStats() (map[string]networkStats, error) {
 	}
 
 	return stats, nil
-}
-
-// getDHCPClients returns dummy DHCP clients for OpenWRT.
-func getDHCPClients() ([]string, error) {
-	clients := []string{"192.168.1.100", "192.168.1.101"}
-	return clients, nil
-}
-
-// getWifiClients returns dummy WiFi client MAC addresses for OpenWRT.
-func getWifiClients() (string, error) {
-	clients := "TEST"
-	return clients, nil
 }

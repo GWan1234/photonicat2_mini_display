@@ -97,29 +97,7 @@ func getFontFace(fontName string) (font.Face, int, error) {
 // Pre-allocated clear buffer for efficient frame clearing
 var clearBuffer []uint8
 
-// Frame buffer pool for reducing allocations
-var framePool = sync.Pool{
-	New: func() interface{} {
-		return image.NewRGBA(image.Rect(0, 0, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT))
-	},
-}
 
-// GetFrameBuffer gets a reusable frame buffer from the pool
-func GetFrameBuffer(width, height int) *image.RGBA {
-	frame := framePool.Get().(*image.RGBA)
-	// Resize if needed
-	if frame.Bounds().Dx() != width || frame.Bounds().Dy() != height {
-		frame = image.NewRGBA(image.Rect(0, 0, width, height))
-	}
-	return frame
-}
-
-// ReturnFrameBuffer returns a frame buffer to the pool for reuse
-func ReturnFrameBuffer(frame *image.RGBA) {
-	if frame != nil {
-		framePool.Put(frame)
-	}
-}
 
 func clearFrame(frame *image.RGBA, width int, height int) {
 	pixelsNeeded := width * height * 4
@@ -146,29 +124,6 @@ func clearFrame(frame *image.RGBA, width int, height int) {
 }
 
 // Helper function for max since Go doesn't have built-in max for int
-// copyImageRegion efficiently copies a rectangular region from src to dst
-// This avoids allocating a new image like cropImageAt does
-func copyImageRegion(dst *image.RGBA, src *image.RGBA, srcX, srcY, width, height int) {
-	srcBounds := src.Bounds()
-	dstBounds := dst.Bounds()
-	
-	// Bounds checking
-	if srcX < 0 || srcY < 0 || srcX+width > srcBounds.Dx() || srcY+height > srcBounds.Dy() {
-		return
-	}
-	if width > dstBounds.Dx() || height > dstBounds.Dy() {
-		return
-	}
-	
-	// Copy row by row for better cache performance
-	for y := 0; y < height; y++ {
-		srcRowStart := (srcY+y)*src.Stride + srcX*4
-		dstRowStart := y*dst.Stride
-		
-		copy(dst.Pix[dstRowStart:dstRowStart+width*4], 
-			 src.Pix[srcRowStart:srcRowStart+width*4])
-	}
-}
 
 // preCalculateEasing pre-computes easing values to avoid math.Pow during transitions
 func preCalculateEasing(numFrames int, frameWidth int) []int {

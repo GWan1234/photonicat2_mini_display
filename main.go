@@ -52,7 +52,7 @@ const (
 	ZERO_BACKLIGHT_DELAY      = 5 * time.Second
 	OFF_TIMEOUT               = 3 * time.Second
 	INTERVAL_SMS_COLLECT      = 60 * time.Second
-	INTERVAL_PCAT_WEB_COLLECT = 5 * time.Second
+	INTERVAL_PCAT_WEB_COLLECT = 10 * time.Second // Increased from 5 to 10 seconds to reduce CPU usage
 
 	ETC_USER_CONFIG_PATH = "/etc/pcat2_mini_display-user_config.json"
 	ETC_CONFIG_PATH      = "/etc/pcat2_mini_display-config.json"
@@ -95,6 +95,13 @@ var (
 	globalData         sync.Map
 	autoRotatePages    = false
 
+	// Frame buffer pool for better performance
+	frameBufferPool = sync.Pool{
+		New: func() interface{} {
+			return image.NewRGBA(image.Rect(0, 0, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT))
+		},
+	}
+
 	lastActivity   = time.Now()
 	lastActivityMu sync.Mutex
 
@@ -111,8 +118,9 @@ var (
 	battChargingStatus = false
 	battSOC            = 0
 
-	batteryDataInterval = 1 * time.Second
-	dataGatherInterval  = 2 * time.Second
+	batteryDataInterval   = 1 * time.Second
+	dataGatherInterval    = 2 * time.Second
+	networkGatherInterval = 3 * time.Second
 
 	desiredFPS = 5
 
@@ -164,6 +172,23 @@ type ImageBuffer struct {
 	width  int
 	height int
 	loaded bool
+}
+
+// GetFrameBuffer retrieves a frame buffer from the pool
+func GetFrameBuffer(width, height int) *image.RGBA {
+	buf := frameBufferPool.Get().(*image.RGBA)
+	if buf.Bounds().Dx() != width || buf.Bounds().Dy() != height {
+		// If size doesn't match, create a new one
+		return image.NewRGBA(image.Rect(0, 0, width, height))
+	}
+	return buf
+}
+
+// ReturnFrameBuffer returns a frame buffer to the pool
+func ReturnFrameBuffer(buf *image.RGBA) {
+	// Clear the buffer before returning to pool
+	clearFrame(buf, buf.Bounds().Dx(), buf.Bounds().Dy())
+	frameBufferPool.Put(buf)
 }
 
 // Position defines X and Y coordinates.
@@ -328,7 +353,7 @@ func main() {
 	go func() {
 		for {
 			collectWANNetworkSpeed()
-			time.Sleep(dataGatherInterval)
+			time.Sleep(networkGatherInterval)
 		}
 	}()
 
@@ -405,10 +430,6 @@ func mainLoop() {
 		log.Fatalf("Failed to load font: %v", err)
 	}
 
-	var footerLocalIdx int
-	var footerPages int
-	var footerIsSMS bool
-
 	for weAreRunning {
 		if middleFrames%300 == 0 { // Log less frequently
 			log.Println("showsms:", cfg.ShowSms, "totalPages:", totalNumPages, "cfgPages:", cfgNumPages)
@@ -420,25 +441,26 @@ func mainLoop() {
 				httpChangePageTriggered = false
 				changePageTriggered = false
 
+				// Optimize page calculations - calculate once and reuse
 				currPageIdx = currPageIdx % totalNumPages
 				nextPageIdx = (currPageIdx + 1) % totalNumPages
 
-				if cfg.ShowSms && currPageIdx >= cfgNumPages {
-					isSMS = true
+				// Pre-calculate SMS status to avoid redundant checks
+				isSMS = cfg.ShowSms && currPageIdx >= cfgNumPages
+				isNextPageSMS = cfg.ShowSms && nextPageIdx >= cfgNumPages
+
+				if isSMS {
 					localIdx = currPageIdx - cfgNumPages
 				} else {
-					isSMS = false
 					localIdx = currPageIdx
 				}
 
-				if cfg.ShowSms && nextPageIdx >= cfgNumPages {
-					isNextPageSMS = true
+				if isNextPageSMS {
 					if lenSmsPagesImages <= 0 {
 						lenSmsPagesImages = 1
 					}
 					nextLocalIdx = (nextPageIdx - cfgNumPages) % lenSmsPagesImages
 				} else {
-					isNextPageSMS = false
 					if cfgNumPages > 0 {
 						nextLocalIdx = nextPageIdx % cfgNumPages
 					} else {
@@ -466,30 +488,47 @@ func mainLoop() {
 					cachedFPSText = "FPS:" + strconv.Itoa(int(fps)) + ", " + strconv.Itoa(middleFrames)
 				}
 
+				// Pre-calculate footer parameters outside loop for better performance
+				halfPages := numIntermediatePages / 2
+
+				// Calculate footer parameters for both phases
+				firstPhaseFooterIdx := nextLocalIdx
+				firstPhaseFooterPages := cfgNumPages
+				firstPhaseFooterIsSMS := isNextPageSMS
+				if firstPhaseFooterIsSMS {
+					firstPhaseFooterPages = lenSmsPagesImages
+				}
+
+				secondPhaseFooterIdx := localIdx
+				secondPhaseFooterPages := cfgNumPages
+				secondPhaseFooterIsSMS := isSMS
+				if secondPhaseFooterIsSMS {
+					secondPhaseFooterPages = lenSmsPagesImages
+				}
+
 				for i := 0; i < numIntermediatePages; i++ {
-					if i <= numIntermediatePages/2 {
-						footerLocalIdx = nextLocalIdx
-						localIdx = nextLocalIdx
-						currPageIdx = nextPageIdx
-					} else {
-						footerLocalIdx = localIdx
-					}
+					// Use pre-calculated values instead of recalculating
+					var currentFooterIdx int
+					var currentFooterPages int
+					var currentFooterIsSMS bool
 
-					if cfg.ShowSms && currPageIdx+1 > cfgNumPages {
-						footerIsSMS = true
-						footerPages = lenSmsPagesImages
-					} else {
-						footerIsSMS = false
-						footerPages = cfgNumPages
-					}
-
-					// Render footer only when it changes or at key frames for better performance
-					if i == 0 || i == numIntermediatePages/2 {
-						if cfg.ShowSms && footerIsSMS {
-							drawFooter(display, footerFramebuffers[middleFrames%2], footerLocalIdx, footerPages, footerIsSMS)
-						} else {
-							drawFooter(display, footerFramebuffers[middleFrames%2], footerLocalIdx, footerPages, footerIsSMS)
+					if i <= halfPages {
+						currentFooterIdx = firstPhaseFooterIdx
+						currentFooterPages = firstPhaseFooterPages
+						currentFooterIsSMS = firstPhaseFooterIsSMS
+						if i == halfPages {
+							localIdx = nextLocalIdx
+							currPageIdx = nextPageIdx
 						}
+					} else {
+						currentFooterIdx = secondPhaseFooterIdx
+						currentFooterPages = secondPhaseFooterPages
+						currentFooterIsSMS = secondPhaseFooterIsSMS
+					}
+
+					// Render footer only at transition points
+					if i == 0 || i == halfPages {
+						drawFooter(display, footerFramebuffers[middleFrames%2], currentFooterIdx, currentFooterPages, currentFooterIsSMS)
 					}
 
 					// Use pre-calculated easing values instead of math.Pow for better performance
@@ -503,23 +542,37 @@ func mainLoop() {
 						drawText(croppedFrameBuffer, cachedFPSText, 10, 240, faceTiny, PCAT_RED, false)
 					}
 
-					//make sure in main loop isSMS is updated to next page SMS status.
-					isSMS = isNextPageSMS
-
 					sendMiddle(display, croppedFrameBuffer)
 					middleFrames++
 					stitchedFrames++
 				}
+
+				// Update isSMS for main loop after animation completes
+				isSMS = isNextPageSMS
+
+				// Print FPS when page change animation is complete
+				pageChangeDuration := time.Since(start)
+				pageChangeFPS := float64(numIntermediatePages) / pageChangeDuration.Seconds()
+				log.Printf("Page change completed in %.1fms, animation FPS: %.1f", float64(pageChangeDuration.Nanoseconds())/1e6, pageChangeFPS)
 			} else { //normal page rendering
-				drawTopBar(display, topBarFramebuffers[topFrames%2])
+				// Only update top bar and footer when needed (every few frames) to save CPU
+				// Top bar contains mostly static information (time, battery, signal)
+				// Update it less frequently to improve performance
+				if middleFrames%10 == 0 { // Update top bar every 10 frames instead of every frame
+					drawTopBar(display, topBarFramebuffers[topFrames%2])
+				}
+
+				// Update footer less frequently as well, except when showing SMS
 				if cfg.ShowSms && isSMS {
 					drawFooter(display, footerFramebuffers[middleFrames%2], localIdx, len(smsPagesImages), isSMS)
-				} else {
+				} else if middleFrames%5 == 0 { // Update footer every 5 frames for non-SMS pages
 					drawFooter(display, footerFramebuffers[middleFrames%2], localIdx, cfgNumPages, isSMS)
 				}
+
 				//draw middle
 				clearFrame(middleFramebuffers[middleFrames%2], middleFrameWidth, middleFrameHeight)
 				renderMiddle(middleFramebuffers[middleFrames%2], &cfg, isSMS, localIdx)
+
 				//draw fps - use cached text for better performance
 				if showFPS {
 					// Update cached FPS text periodically
