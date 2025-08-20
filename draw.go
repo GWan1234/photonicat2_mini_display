@@ -731,7 +731,7 @@ func drawTopBar(display gc9307.Device, frame *image.RGBA) {
 	}else if gatewayDevice == "wired"{
 		networkStr = "w"
 	}else{
-		networkStr = "u"
+		networkStr = "w"  // Default to ethernet when network status is unknown
 	}
 	signalStrength := 0.43
 	magicStr := timeStr + " " + strconv.Itoa(int(signalStrength*100)) + " " + networkStr + " " + strconv.Itoa(int(battSOC)) + " " + strconv.FormatBool(battChargingStatus)
