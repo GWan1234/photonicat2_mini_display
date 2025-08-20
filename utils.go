@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	evdev "github.com/holoplot/go-evdev"
 
@@ -59,14 +60,30 @@ func getFontFace(fontName string) (font.Face, int, error) {
 		return nil, 0, fmt.Errorf("font %s not found in mapping", fontName)
 	}
 
-	// 3) Read & parse the TTF
+	// 3) Read & parse the TTF/TTC
 	fontBytes, err := ioutil.ReadFile(cfg.FontPath)
 	if err != nil {
 		return nil, 0, fmt.Errorf("error reading font file: %v", err)
 	}
-	ttfFont, err := opentype.Parse(fontBytes)
-	if err != nil {
-		return nil, 0, fmt.Errorf("error parsing font: %v", err)
+	
+	var ttfFont *opentype.Font
+	// Handle TrueType Collections (.ttc files)
+	if strings.HasSuffix(cfg.FontPath, ".ttc") {
+		collection, err := opentype.ParseCollection(fontBytes)
+		if err != nil {
+			return nil, 0, fmt.Errorf("error parsing font collection: %v", err)
+		}
+		// Get the first font from the collection
+		ttfFont, err = collection.Font(0)
+		if err != nil {
+			return nil, 0, fmt.Errorf("error getting font from collection: %v", err)
+		}
+	} else {
+		// Handle single font files (.ttf, .otf)
+		ttfFont, err = opentype.Parse(fontBytes)
+		if err != nil {
+			return nil, 0, fmt.Errorf("error parsing font: %v", err)
+		}
 	}
 
 	// 4) Create the face
@@ -92,6 +109,27 @@ func getFontFace(fontName string) (font.Face, int, error) {
 	fontCacheMu.Unlock()
 
 	return face, fontHeight, nil
+}
+
+// containsChinese checks if a string contains Chinese characters
+func containsChinese(text string) bool {
+	for _, r := range text {
+		if unicode.In(r, unicode.Han) {
+			return true
+		}
+	}
+	return false
+}
+
+// getFontFaceForText returns the appropriate font face based on text content
+func getFontFaceForText(baseFontName string, text string) (font.Face, int, error) {
+	if containsChinese(text) {
+		// Use Chinese font variant if available
+		cjkFontName := baseFontName + "_cjk"
+		return getFontFace(cjkFontName)
+	}
+	// Use regular font for non-Chinese text
+	return getFontFace(baseFontName)
 }
 
 // Pre-allocated clear buffer for efficient frame clearing

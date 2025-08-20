@@ -846,20 +846,7 @@ func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
 
 		switch element.Type {
 		case "text":
-			// Get the font face for the main text.
-			face, _, err := getFontFace(element.Font)
-			if err != nil {
-				log.Printf("Error getting font face for %s: %v", element.Font, err)
-				continue
-			}
-			// Get the font face for the units.
-			unitFace, _, err := getFontFace(element.UnitsFont)
-			if err != nil {
-				log.Printf("Error getting font face for %s: %v", element.UnitsFont, err)
-				continue
-			}
-
-			// Determine the text to display.
+			// Determine the text to display first (moved up to use for font selection)
 			textValue, exists := globalData.Load(element.DataKey)
 			var textToDisplay string
 			if exists {
@@ -870,6 +857,19 @@ func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
 				}
 			} else {
 				textToDisplay = "-" // or any default value you prefer
+			}
+			
+			// Get the font face for the main text (choose Chinese font if needed)
+			face, _, err := getFontFaceForText(element.Font, textToDisplay)
+			if err != nil {
+				log.Printf("Error getting font face for %s: %v", element.Font, err)
+				continue
+			}
+			// Get the font face for the units.
+			unitFace, _, err := getFontFace(element.UnitsFont)
+			if err != nil {
+				log.Printf("Error getting font face for %s: %v", element.UnitsFont, err)
+				continue
 			}
 
 			// Convert the color array (assumed to be [R,G,B]) to a color.RGBA.
