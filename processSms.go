@@ -33,6 +33,9 @@ type SMS struct {
 	Part      int    `json:"part,omitempty"`
 	Total     int    `json:"total,omitempty"`
 	Content   string `json:"content"`
+	Status    string `json:"status,omitempty"`
+	Direction int    `json:"direction,omitempty"`
+	To        string `json:"to,omitempty"`
 }
 
 var (
@@ -163,14 +166,14 @@ func drawSmsFrJson(jsonContent string, savePng bool, drawPageNum bool) (imgs []i
 	fc.SetDPI(72)
 	fc.SetFont(fnt)
 	fc.SetFontSize(fontSize)
-	fc.SetSrc(image.NewUniform(color.RGBA{255, 255, 0, 255}))
+	// Color will be set dynamically during rendering based on sender
 	fc.SetHinting(font.HintingFull)
 
 	fcTitle := freetype.NewContext()
 	fcTitle.SetDPI(72)
 	fcTitle.SetFont(fnt)
 	fcTitle.SetFontSize(fontSizeTitle)
-	fcTitle.SetSrc(image.NewUniform(color.RGBA{255, 255, 255, 255}))
+	// Color will be set dynamically during rendering based on sender
 	fcTitle.SetHinting(font.HintingFull)
 
 	// Sort messages by timestamp descending
@@ -185,8 +188,10 @@ func drawSmsFrJson(jsonContent string, savePng bool, drawPageNum bool) (imgs []i
 
 	// Prepare pagination
 	type Line struct {
-		Text    string
-		IsTitle bool
+		Text        string
+		IsTitle     bool
+		IsSentByMe  bool
+		MessageSender string
 	}
 
 	type Page struct {
@@ -200,8 +205,20 @@ func drawSmsFrJson(jsonContent string, savePng bool, drawPageNum bool) (imgs []i
 	for _, msg := range smsData.Msg {
 		timestamp, _ := time.Parse(layout, msg.Timestamp)
 		formattedTime := timestamp.Format("2006-01-02 15:04")
-		title := fmt.Sprintf("%s|%s", msg.Sender, formattedTime)
+		
+		// Change display: show "> number" instead of "me" for sent messages
+		var displaySender string
+		if msg.Sender == "me" && msg.To != "" {
+			displaySender = "> " + msg.To
+		} else {
+			displaySender = msg.Sender
+		}
+		
+		title := fmt.Sprintf("%s|%s", displaySender, formattedTime)
 		message := msg.Content
+		
+		// Check if this is a sent message from "me" with status "SENT"
+		isSentByMe := msg.Sender == "me" && msg.Status == "SENT"
 
 		faceMeasure := truetype.NewFace(fnt, &truetype.Options{
 			Size:    fontSize,
@@ -219,7 +236,7 @@ func drawSmsFrJson(jsonContent string, savePng bool, drawPageNum bool) (imgs []i
 			currentPage = Page{}
 			currentHeight = topPadding
 		}
-		currentPage.Lines = append(currentPage.Lines, Line{Text: title, IsTitle: true})
+		currentPage.Lines = append(currentPage.Lines, Line{Text: title, IsTitle: true, IsSentByMe: isSentByMe, MessageSender: msg.Sender})
 		currentHeight += titleHeight
 
 		// Add message lines
@@ -232,16 +249,16 @@ func drawSmsFrJson(jsonContent string, savePng bool, drawPageNum bool) (imgs []i
 				currentPage = Page{}
 				currentHeight = topPadding
 				// Repeat title on new page
-				currentPage.Lines = append(currentPage.Lines, Line{Text: title, IsTitle: true})
+				currentPage.Lines = append(currentPage.Lines, Line{Text: title, IsTitle: true, IsSentByMe: isSentByMe, MessageSender: msg.Sender})
 				currentHeight += titleHeight
 			}
-			currentPage.Lines = append(currentPage.Lines, Line{Text: line, IsTitle: false})
+			currentPage.Lines = append(currentPage.Lines, Line{Text: line, IsTitle: false, IsSentByMe: isSentByMe, MessageSender: msg.Sender})
 			currentHeight += lineHeight
 		}
 		// Add spacing after message
 		spacingHeight := fontSize * lineSpacing
 		if currentHeight+spacingHeight <= float64(maxHeight) {
-			currentPage.Lines = append(currentPage.Lines, Line{Text: "", IsTitle: false})
+			currentPage.Lines = append(currentPage.Lines, Line{Text: "", IsTitle: false, IsSentByMe: false, MessageSender: ""})
 			currentHeight += spacingHeight
 		}
 	}
@@ -280,7 +297,7 @@ func drawSmsFrJson(jsonContent string, savePng bool, drawPageNum bool) (imgs []i
 				yesterday := today.AddDate(0, 0, -1)
 
 				if dateStr == today.Format("2006-01-02") {
-					timePrefix = "Today"
+					timePrefix = ""  // For today, show only time
 				} else if dateStr == yesterday.Format("2006-01-02") {
 					timePrefix = "Y-day"
 				} else {
@@ -297,10 +314,25 @@ func drawSmsFrJson(jsonContent string, savePng bool, drawPageNum bool) (imgs []i
 						//timePrefix = dateStr
 					}
 				}
-				timeDisplay := timePrefix + " " + timeStr
+				var timeDisplay string
+				if timePrefix == "" {
+					timeDisplay = timeStr  // For today, show only time
+				} else {
+					timeDisplay = timePrefix + " " + timeStr
+				}
 				if len(sender) > 15 {
 					sender = sender[:8] + "**" + sender[len(sender)-2:]
 				}
+				
+				// Set color for sender based on whether message is sent by me
+				if line.IsSentByMe {
+					// Light green color for sent messages
+					fcTitle.SetSrc(image.NewUniform(color.RGBA{144, 238, 144, 255}))
+				} else {
+					// Default white color for received messages
+					fcTitle.SetSrc(image.NewUniform(color.RGBA{255, 255, 255, 255}))
+				}
+				
 				// Draw sender left-aligned
 				ptSender := freetype.Pt(xStart, int(y+fontSizeTitle))
 				_, err := fcTitle.DrawString(sender, ptSender)
@@ -327,6 +359,15 @@ func drawSmsFrJson(jsonContent string, savePng bool, drawPageNum bool) (imgs []i
 				}
 				y += fontSizeTitle * lineSpacing
 			} else {
+				// Set color based on whether message is sent by me
+				if line.IsSentByMe {
+					// Light green color for sent messages
+					fc.SetSrc(image.NewUniform(color.RGBA{144, 238, 144, 255}))
+				} else {
+					// Default yellow color for received messages
+					fc.SetSrc(image.NewUniform(color.RGBA{255, 255, 0, 255}))
+				}
+				
 				pt := freetype.Pt(xStart, int(y+fontSize))
 				_, err := fc.DrawString(line.Text, pt)
 				if err != nil {
