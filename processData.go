@@ -37,7 +37,7 @@ var secureHTTPClient = &http.Client{
 
 // Local HTTP client for internal APIs (localhost)
 var localHTTPClient = &http.Client{
-	Timeout: 5 * time.Second,
+	Timeout: 15 * time.Second,
 }
 
 // sanitizeCommandArg validates and sanitizes command arguments

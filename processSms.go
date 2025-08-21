@@ -41,6 +41,7 @@ type SMS struct {
 var (
 	lastSmsJsonContent string
 	lastNumPages       int
+	lastSuccessfulSmsJsonContent string
 	
 	// Memory pool for SMS images to reduce allocations
 	smsImagePool = sync.Pool{
@@ -106,6 +107,11 @@ func getJsonContent(_ *Config) string {
 	resp, err := localHTTPClient.Get("http://localhost/api/v2/sms/list.json?n=10")
 	if err != nil {
 		log.Printf("GET /sms/list.json failed: %v", err)
+		// Return last successful result if we have one, otherwise return empty
+		if lastSuccessfulSmsJsonContent != "" {
+			log.Printf("Using cached SMS data due to request failure")
+			return lastSuccessfulSmsJsonContent
+		}
 		return ""
 	}
 	defer resp.Body.Close()
@@ -113,6 +119,11 @@ func getJsonContent(_ *Config) string {
 	// 2. Check HTTP status
 	if resp.StatusCode != http.StatusOK {
 		log.Printf("unexpected HTTP status: %s", resp.Status)
+		// Return last successful result if we have one, otherwise return empty
+		if lastSuccessfulSmsJsonContent != "" {
+			log.Printf("Using cached SMS data due to HTTP error")
+			return lastSuccessfulSmsJsonContent
+		}
 		return ""
 	}
 
@@ -120,10 +131,21 @@ func getJsonContent(_ *Config) string {
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		log.Printf("reading response body failed: %v", err)
+		// Return last successful result if we have one, otherwise return empty
+		if lastSuccessfulSmsJsonContent != "" {
+			log.Printf("Using cached SMS data due to read error")
+			return lastSuccessfulSmsJsonContent
+		}
 		return ""
 	}
 
-	return string(data)
+	result := string(data)
+	// Cache successful result
+	if len(result) > 10 { // Basic validation that we got actual data
+		lastSuccessfulSmsJsonContent = result
+	}
+	
+	return result
 }
 
 func drawSmsFrJson(jsonContent string, savePng bool, drawPageNum bool) (imgs []image.Image, err error) {
