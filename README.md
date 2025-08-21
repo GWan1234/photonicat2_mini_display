@@ -6,7 +6,6 @@ A Go-based display driver for the Photonicat2 mini display, providing real-time 
 
 ![Sample Display](docs/sample_screen.png)
 
-> **Note**: Add your sample screen image as `docs/sample_screen.png` to display it here.
 
 ## Update Frequencies & Intervals
 
