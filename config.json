@@ -162,6 +162,17 @@
                     "enable": 1
                 },
                 {
+                    "type": "text",
+                    "label": "Rate0",
+                    "position": {"x": 115, "y": 23},
+                    "font": "unit",
+                    "color": [255, 255, 255],
+                    "units": "%",
+                    "data_key": "Ping0Rate",
+                    "units_font": "unit",
+                    "enable": 1
+                },
+                {
                     "type": "fixed_text",
                     "label": "ping: [ping_site1]",
                     "position": {"x": 6, "y":47},
@@ -177,6 +188,17 @@
                     "color": [255, 229, 0],
                     "units": "ms",
                     "data_key": "Ping1",
+                    "units_font": "unit",
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "Rate1",
+                    "position": {"x": 115, "y": 68},
+                    "font": "unit",
+                    "color": [255, 255, 255],
+                    "units": "%",
+                    "data_key": "Ping1Rate",
                     "units_font": "unit",
                     "enable": 1
                 },

@@ -642,21 +642,67 @@ func collectNetworkData(cfg Config) {
 		globalData.Store("WifiClients", wifiClients)
 	}
 
-	// Ping Site0 using ICMP.
+	// Ping Site0 using ICMP with statistics tracking
+	ping0Stats.mu.Lock()
+	ping0Stats.total++
 	if ping0, err := pingICMP(cfg.PingSite0); err != nil {
-		fmt.Printf("ICMP ping to %s failed: %v\n", cfg.PingSite0, err)
-		globalData.Store("Ping0", -1) // using -1 to indicate an error
-	} else {
+		// Keep showing last successful ping value, or -1 if never succeeded
+		if ping0Stats.lastSuccess > 0 {
+			globalData.Store("Ping0", ping0Stats.lastSuccess)
+		} else {
+			globalData.Store("Ping0", int64(-1))
+		}
+	} else if ping0 == -2 {
+		// Timeout case - show red X
+		globalData.Store("Ping0", int64(-2))
+	} else if ping0 > 0 {
+		// Successful ping - update last success and display it
+		ping0Stats.successful++
+		ping0Stats.lastSuccess = ping0
 		globalData.Store("Ping0", ping0)
-	}
-
-	// Ping Site1 using ICMP.
-	if ping1, err := pingICMP(cfg.PingSite1); err != nil {
-		fmt.Printf("ICMP ping to %s failed: %v\n", cfg.PingSite1, err)
-		globalData.Store("Ping1", -1)
 	} else {
-		globalData.Store("Ping1", ping1)
+		// Other error case
+		if ping0Stats.lastSuccess > 0 {
+			globalData.Store("Ping0", ping0Stats.lastSuccess)
+		} else {
+			globalData.Store("Ping0", int64(-1))
+		}
 	}
+	// Calculate and store success rate
+	successRate0 := float64(ping0Stats.successful) / float64(ping0Stats.total) * 100
+	globalData.Store("Ping0Rate", fmt.Sprintf("%.0f", successRate0))
+	ping0Stats.mu.Unlock()
+
+	// Ping Site1 using ICMP with statistics tracking
+	ping1Stats.mu.Lock()
+	ping1Stats.total++
+	if ping1, err := pingICMP(cfg.PingSite1); err != nil {
+		// Keep showing last successful ping value, or -1 if never succeeded
+		if ping1Stats.lastSuccess > 0 {
+			globalData.Store("Ping1", ping1Stats.lastSuccess)
+		} else {
+			globalData.Store("Ping1", int64(-1))
+		}
+	} else if ping1 == -2 {
+		// Timeout case - show red X
+		globalData.Store("Ping1", int64(-2))
+	} else if ping1 > 0 {
+		// Successful ping - update last success and display it
+		ping1Stats.successful++
+		ping1Stats.lastSuccess = ping1
+		globalData.Store("Ping1", ping1)
+	} else {
+		// Other error case
+		if ping1Stats.lastSuccess > 0 {
+			globalData.Store("Ping1", ping1Stats.lastSuccess)
+		} else {
+			globalData.Store("Ping1", int64(-1))
+		}
+	}
+	// Calculate and store success rate
+	successRate1 := float64(ping1Stats.successful) / float64(ping1Stats.total) * 100
+	globalData.Store("Ping1Rate", fmt.Sprintf("%.0f", successRate1))
+	ping1Stats.mu.Unlock()
 
 	/*
 		// Country based on public IP geolocation.
@@ -1130,24 +1176,41 @@ func getCpuUsages() ([]float64, error) {
 
 // pingICMP uses github.com/go-ping/ping to perform an ICMP ping.
 // Note: raw ICMP ping usually requires root privileges.
+// Returns -2 for timeouts >3 seconds, -1 for other errors, or ping time in ms.
 func pingICMP(host string) (int64, error) {
 	pinger, err := ping.NewPinger(host)
 	if err != nil {
-		return 0, err
+		return -1, err
 	}
 	// Set privileged mode if possible; otherwise, false will use UDP.
 	pinger.SetPrivileged(true)
 	pinger.Count = 1
-	pinger.Timeout = 2 * time.Second
+	pinger.Timeout = 5 * time.Second // Increased timeout to 5 seconds
 
 	// Run the ping (blocking).
 	err = pinger.Run()
 	if err != nil {
-		return 0, err
+		// Check if this is a timeout error
+		if strings.Contains(err.Error(), "timeout") {
+			return -2, nil // Special value for timeout
+		}
+		return -1, err
 	}
+	
 	stats := pinger.Statistics()
+	if stats.PacketsRecv == 0 {
+		return -2, nil // No packets received = timeout
+	}
+	
+	avgRtt := int64(stats.AvgRtt / time.Millisecond)
+	
+	// If ping took more than 3 seconds, treat as timeout
+	if avgRtt > 3000 {
+		return -2, nil
+	}
+	
 	// Return average round-trip time in milliseconds.
-	return int64(stats.AvgRtt / time.Millisecond), nil
+	return avgRtt, nil
 }
 
 // getBatterySoc returns the battery soc from /sys/class/power_supply/battery/capacity.

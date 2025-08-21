@@ -680,6 +680,5 @@ func loadAllConfigsToVariables() {
 	}
 
 	mergeConfigs()
-	log.Println("merged configs to cfg", cfg)
 
 }

@@ -164,6 +164,21 @@ var (
 	display           gc9307.Device
 
 	cfgNumPages = 0
+
+	// Ping statistics tracking
+	ping0Stats = struct {
+		total       int
+		successful  int
+		lastSuccess int64
+		mu          sync.RWMutex
+	}{lastSuccess: -1}
+	
+	ping1Stats = struct {
+		total       int
+		successful  int
+		lastSuccess int64
+		mu          sync.RWMutex
+	}{lastSuccess: -1}
 )
 
 // ImageBuffer holds a 1D slice of pixels for the display area.

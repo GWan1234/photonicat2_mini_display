@@ -849,11 +849,45 @@ func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
 			// Determine the text to display first (moved up to use for font selection)
 			textValue, exists := globalData.Load(element.DataKey)
 			var textToDisplay string
+			var isPingTimeout bool = false
+			
 			if exists {
 				if textValue == nil {
 					textToDisplay = "-"
-				}else{
-					textToDisplay = fmt.Sprintf("%v", textValue)
+				} else {
+					// Special handling for ping timeout (-2) and errors
+					if (element.DataKey == "Ping0" || element.DataKey == "Ping1") {
+						// Handle both int64 and int types for ping values
+						var pingVal int64
+						var validPingValue bool
+						
+						if val, ok := textValue.(int64); ok {
+							pingVal = val
+							validPingValue = true
+						} else if val, ok := textValue.(int); ok {
+							pingVal = int64(val)
+							validPingValue = true
+						}
+						
+						if validPingValue {
+							if pingVal == -2 || pingVal == -1 {
+								// Both timeout (-2) and other failures (-1) show red X
+								textToDisplay = "X"
+								isPingTimeout = true
+							} else if pingVal >= 0 {
+								textToDisplay = fmt.Sprintf("%d", pingVal)
+							} else {
+								// Any other negative value should not happen, but show as red X
+								textToDisplay = "X"
+								isPingTimeout = true
+							}
+						} else {
+							// If not a numeric type, show as error
+							textToDisplay = "-"
+						}
+					} else {
+						textToDisplay = fmt.Sprintf("%v", textValue)
+					}
 				}
 			} else {
 				textToDisplay = "-" // or any default value you prefer
@@ -886,6 +920,11 @@ func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
 				clr = color.RGBA{255, 255, 255, 255}
 			}
 
+			// Use red color for ping timeouts
+			if isPingTimeout {
+				clr = PCAT_RED
+			}
+
 			// Draw the main text.
 			// The drawText function uses the provided y plus the font ascent as the baseline.
 			mainAscent := face.Metrics().Ascent.Round()
@@ -897,15 +936,17 @@ func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
 			unitAscent := unitFace.Metrics().Ascent.Round()
 			unitY := mainBaseline - unitAscent
 
-			// Draw the units text slightly to the right of the main text.
-			unitText := element.Units
-			//check if there is a override unit
-			theKey := element.DataKey + "_Unit"
-			if _, ok := globalData.Load(theKey); ok {
-				unitTextVal, _ := globalData.Load(theKey)
-				unitText = unitTextVal.(string)
+			// Draw the units text slightly to the right of the main text (skip units for timeout)
+			if !isPingTimeout {
+				unitText := element.Units
+				//check if there is a override unit
+				theKey := element.DataKey + "_Unit"
+				if _, ok := globalData.Load(theKey); ok {
+					unitTextVal, _ := globalData.Load(theKey)
+					unitText = unitTextVal.(string)
+				}
+				drawText(frame, unitText, xMain+1, unitY, unitFace, clr, false)
 			}
-			drawText(frame, unitText, xMain+1, unitY, unitFace, clr, false)
 		
 		case "icon":
 			var iconImg *image.RGBA
