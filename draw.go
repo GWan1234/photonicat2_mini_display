@@ -1145,6 +1145,27 @@ func showWelcome(display gc9307.Device, width, height int, duration time.Duratio
     }
 }
 
+func showWelcomeForced(display gc9307.Device, width, height int, duration time.Duration) {
+	frame := image.NewRGBA(image.Rect(0, 0, width, height))
+	clearFrame(frame, width, height)
+	
+	// Load and display welcome logo only
+	welcomeLogo, w, h, err := loadImage(assetsPrefix+"/assets/svg/welcome.svg")
+	if err != nil {
+		log.Printf("Error loading welcome logo from %s: %v", "assets/svg/welcome.svg", err)
+		return
+	}
+	
+	// Center the logo
+	x0 := width/2 - w/2
+	y0 := height/2 - h/2
+	copyImageToImageAt(frame, welcomeLogo, x0, y0)
+	
+	// Send to display and wait for specified duration
+	sendFull(display, frame)
+	time.Sleep(duration)
+}
+
 
 
 func showCiao(display gc9307.Device, width, height int, duration time.Duration) {
@@ -1170,4 +1191,31 @@ func showCiao(display gc9307.Device, width, height int, duration time.Duration) 
 	drawText(frame, text, width/2, logoY + h + spaceBetweenLogoAndText, faceUnit, PCAT_WHITE, true)
 	sendFull(display, frame)
 
+}
+
+func showCiaoInstant(display gc9307.Device, width, height int) {
+	spaceBetweenLogoAndText := 28
+	textHeight := 12
+	frame := image.NewRGBA(image.Rect(0, 0, width, height))
+	clearFrame(frame, width, height)
+	
+	// Load and display shutdown screen
+	ciaoLogo, w, h, err := loadImage(assetsPrefix+"/assets/svg/ciao.svg")
+	if err != nil {
+		log.Printf("Error loading ciao logo from %s: %v", "assets/svg/ciao.svg", err)
+		return
+	}
+	logoY := height/2 - (h+spaceBetweenLogoAndText+textHeight)/2
+	copyImageToImageAt(frame, ciaoLogo, width/2 - w/2, logoY)
+	text := "Powering Off..."
+	faceUnit, _, err := getFontFace("unit")
+	if err != nil {
+		log.Printf("Error getting font face for %s: %v", "unit", err)
+		return
+	}
+	drawText(frame, text, width/2, logoY + h + spaceBetweenLogoAndText, faceUnit, PCAT_WHITE, true)
+	sendFull(display, frame)
+	
+	// Instantly dim to minimum brightness
+	setBacklight(0)
 }

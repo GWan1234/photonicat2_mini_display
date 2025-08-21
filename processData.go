@@ -761,22 +761,32 @@ func getSN() (string, error) {
 	return sn, nil
 }
 
-func getUptime() (string, error) {
+// getUptimeSeconds returns system uptime in seconds
+func getUptimeSeconds() (float64, error) {
 	// Read /proc/uptime
 	data, err := ioutil.ReadFile("/proc/uptime")
 	if err != nil {
-		return "", fmt.Errorf("error reading /proc/uptime: %v", err)
+		return 0, fmt.Errorf("error reading /proc/uptime: %v", err)
 	}
 
 	// Parse the first value (uptime in seconds)
 	fields := strings.Fields(string(data))
 	if len(fields) < 1 {
-		return "", fmt.Errorf("invalid uptime data")
+		return 0, fmt.Errorf("invalid uptime data")
 	}
 
 	seconds, err := strconv.ParseFloat(fields[0], 64)
 	if err != nil {
-		return "", fmt.Errorf("error parsing uptime: %v", err)
+		return 0, fmt.Errorf("error parsing uptime: %v", err)
+	}
+
+	return seconds, nil
+}
+
+func getUptime() (string, error) {
+	seconds, err := getUptimeSeconds()
+	if err != nil {
+		return "", err
 	}
 
 	// Convert seconds to time.Duration

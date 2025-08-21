@@ -261,6 +261,7 @@ func main() {
 	var wg sync.WaitGroup
 	all := flag.Bool("all", false, "if set, listen on all network interfaces (0.0.0.0)")
 	port := flag.Int("port", 8081, "TCP port to listen on")
+	forceColdBoot := flag.Bool("force-cold-boot", false, "force showing welcome screen even on warm boot")
 	flag.Parse()
 
 	// Build the listen address:
@@ -333,7 +334,35 @@ func main() {
 	wg.Add(1) //first show welcome and do some other things and wait
 	go func() {
 		defer wg.Done()
-		showWelcome(display, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT, 5*time.Second)
+		
+		// Check if we should show welcome screen
+		shouldShowWelcome := *forceColdBoot // Always show if forced
+		
+		if !shouldShowWelcome {
+			// Check system uptime - skip welcome if uptime > 1 minute (60 seconds)
+			if uptimeSeconds, err := getUptimeSeconds(); err != nil {
+				log.Printf("Failed to get uptime, showing welcome: %v", err)
+				shouldShowWelcome = true // Default to showing welcome on error
+			} else if uptimeSeconds <= 60 {
+				log.Printf("Cold boot detected (uptime: %.1fs), showing welcome screen", uptimeSeconds)
+				shouldShowWelcome = true
+			} else {
+				log.Printf("Warm boot detected (uptime: %.1fs), skipping welcome screen", uptimeSeconds)
+				shouldShowWelcome = false
+			}
+		} else {
+			log.Println("Welcome screen forced by --force-cold-boot flag")
+		}
+		
+		if shouldShowWelcome {
+			if *forceColdBoot {
+				// Force mode: show logo for 1 second only, no progress bar
+				showWelcomeForced(display, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT, 1*time.Second)
+			} else {
+				// Normal cold boot: full animation
+				showWelcome(display, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT, 5*time.Second)
+			}
+		}
 	}()
 
 	loadAllConfigsToVariables() //load user, default configs
@@ -402,8 +431,17 @@ func registerExitHandler() {
 		weAreRunning = false
 		offTime = time.Now()
 		time.Sleep(200 * time.Millisecond)
-		showCiao(display, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT, OFF_TIMEOUT)
-		time.Sleep(OFF_TIMEOUT)
+		
+		// Different behavior for SIGTERM vs SIGINT
+		if sig == syscall.SIGTERM {
+			log.Println("System shutdown detected, showing shutdown screen")
+			showCiao(display, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT, OFF_TIMEOUT)
+			time.Sleep(OFF_TIMEOUT)
+		} else {
+			log.Println("Manual interruption detected, showing shutdown screen but dimming instantly")
+			showCiaoInstant(display, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT)
+		}
+		
 		os.Exit(0)
 	}()
 }
