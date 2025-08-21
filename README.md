@@ -2,6 +2,12 @@
 
 A Go-based display driver for the PhotoniCat2 mini display, providing real-time system information, network status, and device metrics on a small LCD screen.
 
+## Sample Screen
+
+![Sample Display](docs/sample_screen.png)
+
+> **Note**: Add your sample screen image as `docs/sample_screen.png` to display it here.
+
 ## Update Frequencies & Intervals
 
 ### Display Rendering
