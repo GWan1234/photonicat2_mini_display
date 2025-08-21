@@ -34,6 +34,8 @@ echo "Compiling for Debian..."
 env $BUILD_ENV CC=$DEBIAN_CC go build -o pcat2_mini_display_debian .
 echo "  ✓ Debian build succeeded"
 
+exit 0 #exit, no need to copy around for now.
+
 # Package up
 PACKAGE_DIR="pcat2_mini_display_package"
 rm -rf "$PACKAGE_DIR"
