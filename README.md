@@ -1,6 +1,6 @@
 # PhotoniCat2 Mini Display
 
-A Go-based display driver for the PhotoniCat2 mini display, providing real-time system information, network status, and device metrics on a small LCD screen.
+A Go-based display driver for the Photonicat2 mini display, providing real-time system information, network status, and device metrics on a small LCD screen.
 
 ## Sample Screen
 
