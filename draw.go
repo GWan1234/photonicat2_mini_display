@@ -1006,6 +1006,37 @@ func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
 
 			drawText(frame, label, element.Position.X, element.Position.Y, face, clr, false)
 
+		case "graph":
+			// Handle graph elements
+			if element.GraphConfig == nil {
+				log.Printf("Graph element missing graph_config")
+				continue
+			}
+			
+			// Determine the size for the graph
+			var sz Size
+			if element.Size != nil {
+				sz = *element.Size
+			} else if element.Size2 != nil {
+				sz = *element.Size2
+			} else {
+				// Default graph size
+				sz = Size{Width: 60, Height: 25}
+			}
+			
+			// Set time frame if specified
+			if element.GraphConfig.TimeFrameMins > 0 {
+				setPowerGraphTimeFrame(element.GraphConfig.TimeFrameMins)
+			}
+			
+			// Draw the graph based on type
+			switch element.GraphConfig.GraphType {
+			case "power":
+				drawPowerGraph(frame, element.Position.X, element.Position.Y, sz.Width, sz.Height)
+			default:
+				log.Printf("Unknown graph type: %s", element.GraphConfig.GraphType)
+			}
+			
 		default:
 			log.Printf("Unknown element type: %s", element.Type)
 		}

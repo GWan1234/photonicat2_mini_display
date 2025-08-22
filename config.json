@@ -139,6 +139,16 @@
                     "data_key": "DCVoltage",
                     "units_font": "unit",
                     "enable": 1
+                },
+                {
+                    "type": "graph",
+                    "position": {"x": 100, "y": 228},
+                    "size": {"width": 60, "height": 25},
+                    "enable": 0,
+                    "graph_config": {
+                        "graph_type": "power",
+                        "time_frame_mins": 15
+                    }
                 }
             ],
             "page1": [

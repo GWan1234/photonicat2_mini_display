@@ -220,18 +220,25 @@ type Size struct {
 
 // DisplayElement represents one UI element to render.
 type DisplayElement struct {
-	Type      string   `json:"type"`
-	Label     string   `json:"label"`
-	Position  Position `json:"position"`
-	Font      string   `json:"font,omitempty"`
-	Color     []int    `json:"color,omitempty"`
-	Units     string   `json:"units,omitempty"`
-	DataKey   string   `json:"data_key,omitempty"`
-	UnitsFont string   `json:"units_font,omitempty"`
-	IconPath  string   `json:"icon_path,omitempty"`
-	Enable    int      `json:"enable,omitempty"`
-	Size      *Size    `json:"size,omitempty"`  // for icons, if provided
-	Size2     *Size    `json:"_size,omitempty"` // sometimes provided as _size
+	Type        string       `json:"type"`
+	Label       string       `json:"label"`
+	Position    Position     `json:"position"`
+	Font        string       `json:"font,omitempty"`
+	Color       []int        `json:"color,omitempty"`
+	Units       string       `json:"units,omitempty"`
+	DataKey     string       `json:"data_key,omitempty"`
+	UnitsFont   string       `json:"units_font,omitempty"`
+	IconPath    string       `json:"icon_path,omitempty"`
+	Enable      int          `json:"enable,omitempty"`
+	Size        *Size        `json:"size,omitempty"`  // for icons, if provided
+	Size2       *Size        `json:"_size,omitempty"` // sometimes provided as _size
+	GraphConfig *GraphConfig `json:"graph_config,omitempty"` // for graph elements
+}
+
+// GraphConfig holds configuration for graph elements
+type GraphConfig struct {
+	GraphType     string `json:"graph_type"`     // e.g., "power"
+	TimeFrameMins int    `json:"time_frame_mins"` // time frame in minutes
 }
 
 // DisplayTemplate holds pages of elements.
@@ -408,6 +415,9 @@ func main() {
 	go httpServer(addr)                      //listen local for http request
 	go monitorKeyboard(&changePageTriggered) // Start keyboard monitoring in a goroutine
 	go idleDimmer()                          //control backlight
+	
+	// Initialize power graph data recording
+	initPowerDataRecording()
 
 	registerExitHandler() //catch sigterm
 
