@@ -154,6 +154,12 @@ Comprehensive stdout logging shows:
 - [golang.org/x/image](https://pkg.go.dev/golang.org/x/image) for image and font rendering
 - [github.com/go-ping/ping](https://github.com/go-ping/ping) for ICMP ping functionality
 
+## Documentation
+
+📖 **Configuration Guides**
+- [English Screen Configuration Guide](docs/screen_guide_en.md) - Comprehensive guide for customizing display content
+- [中文屏幕配置指南](docs/screen_guide-zh_cn.md) - 屏幕显示内容自定义完整指南
+
 ## File Structure
 ```
 ├── main.go              # Main application loop
