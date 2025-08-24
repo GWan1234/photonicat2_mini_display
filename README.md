@@ -2,6 +2,25 @@
 
 A Go-based display driver for the Photonicat2 mini display, providing real-time system information, network status, and device metrics on a small LCD screen.
 
+## 🚀 Quick Start
+
+### Build and Test
+```bash
+# Build everything (host + cross-compilation + verify tests)
+./compile.sh
+
+# Run comprehensive test suite (155+ unit tests)
+./run_tests.sh
+```
+
+### Run Application
+```bash
+# After building with compile.sh
+./photonicat2_mini_display
+```
+
+📚 **Complete Guide**: See [BUILD_AND_TEST.md](BUILD_AND_TEST.md) for detailed build instructions and testing guide.
+
 ## Sample Screen
 
 ![Sample Display](docs/sample_screen.png)

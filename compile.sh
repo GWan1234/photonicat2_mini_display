@@ -195,13 +195,80 @@ else
     DEBIAN_CC="gcc"
 fi
 
-echo "Compiling for OpenWRT..."
-env $BUILD_ENV CC=$OPENWRT_CC go build -o pcat2_mini_display_openwrt .
-echo "  ✓ OpenWRT build succeeded"
+# Build for host system first (needed for tests)
+echo -e "\n${YELLOW}6. Building for host system...${NC}"
+echo "Compiling for host ($HOST_ARCH)..."
+go build -o photonicat2_mini_display .
+if [ $? -eq 0 ]; then
+    echo -e "  ✓ ${GREEN}Host build succeeded${NC}"
+else
+    echo -e "  ✗ ${RED}Host build failed${NC}"
+    exit 1
+fi
 
-echo "Compiling for Debian..."
-env $BUILD_ENV CC=$DEBIAN_CC go build -o pcat2_mini_display_debian .
-echo "  ✓ Debian build succeeded"
+# Build cross-compilation targets if on x86_64
+if [ "$HOST_ARCH" = "x86_64" ]; then
+    echo -e "\n${YELLOW}7. Cross-compiling for target systems...${NC}"
+    
+    echo "Compiling for OpenWRT (aarch64)..."
+    env $BUILD_ENV CC=$OPENWRT_CC go build -o pcat2_mini_display_openwrt .
+    if [ $? -eq 0 ]; then
+        echo -e "  ✓ ${GREEN}OpenWRT build succeeded${NC}"
+    else
+        echo -e "  ✗ ${RED}OpenWRT build failed${NC}"
+    fi
+
+    echo "Compiling for Debian (aarch64)..."
+    env $BUILD_ENV CC=$DEBIAN_CC go build -o pcat2_mini_display_debian .
+    if [ $? -eq 0 ]; then
+        echo -e "  ✓ ${GREEN}Debian build succeeded${NC}"
+    else
+        echo -e "  ✗ ${RED}Debian build failed${NC}"
+    fi
+else
+    echo -e "\n${YELLOW}7. Skipping cross-compilation (not on x86_64 host)${NC}"
+    echo -e "  Native build completed for $HOST_ARCH"
+fi
+
+# Build tests to verify they compile and create test binary
+echo -e "\n${YELLOW}8. Building test binary for target systems...${NC}"
+echo "Compiling tests for host system..."
+go test -c -o test_runner .
+if [ $? -eq 0 ]; then
+    echo -e "  ✓ ${GREEN}Host test binary created: test_runner${NC}"
+else
+    echo -e "  ✗ ${RED}Test compilation failed${NC}"
+    echo -e "${YELLOW}Tests may have compilation issues. Run 'go test .' to see details.${NC}"
+fi
+
+# Build cross-compiled test binaries if on x86_64
+if [ "$HOST_ARCH" = "x86_64" ]; then
+    echo "Compiling tests for OpenWRT (aarch64)..."
+    env $BUILD_ENV CC=$OPENWRT_CC go test -c -o test_runner_openwrt .
+    if [ $? -eq 0 ]; then
+        echo -e "  ✓ ${GREEN}OpenWRT test binary created: test_runner_openwrt${NC}"
+    else
+        echo -e "  ✗ ${RED}OpenWRT test compilation failed${NC}"
+    fi
+
+    echo "Compiling tests for Debian (aarch64)..."
+    env $BUILD_ENV CC=$DEBIAN_CC go test -c -o test_runner_debian .
+    if [ $? -eq 0 ]; then
+        echo -e "  ✓ ${GREEN}Debian test binary created: test_runner_debian${NC}"
+    else
+        echo -e "  ✗ ${RED}Debian test compilation failed${NC}"
+    fi
+fi
+
+echo -e "\n${GREEN}✅ Build process completed!${NC}"
+echo -e "\nBuilt binaries:"
+ls -la photonicat2_mini_display* test_runner* 2>/dev/null || echo "  No binaries found"
+echo -e "\n${BLUE}Usage:${NC}"
+echo -e "  Run tests: ${YELLOW}./run_tests.sh${NC}"
+echo -e "  Run app:   ${YELLOW}./photonicat2_mini_display${NC}"
+echo -e "\n${BLUE}For OpenWRT/Debian deployment:${NC}"
+echo -e "  Copy appropriate binaries to target system:"
+echo -e "  ${YELLOW}scp pcat2_mini_display_openwrt test_runner_openwrt user@device:/${NC}"
 
 exit 0 #exit, no need to copy around for now.
 

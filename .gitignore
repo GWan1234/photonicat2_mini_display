@@ -13,3 +13,4 @@ pcat2_mini_display_debian
 *.gz
 *.xz
 .gitlab_token
+*.log

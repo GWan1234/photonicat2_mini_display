@@ -397,13 +397,13 @@ func cropImageAt(src *image.RGBA, x0, y0, width, height int) *image.RGBA {
 
 // copyImageToImageAt copies an image to an image at a specified offset. frame is the destination image, img is the source image. x0, y0 is the offset.
 func copyImageToImageAt(frame *image.RGBA, img *image.RGBA, x0, y0 int) error {
-	targetWidth := img.Bounds().Dx()
-	targetHeight := img.Bounds().Dy()
-
-	// Validate input parameters.
+	// Validate input parameters first.
 	if frame == nil || img == nil {
 		return fmt.Errorf("nil image provided")
 	}
+
+	targetWidth := img.Bounds().Dx()
+	targetHeight := img.Bounds().Dy()
 
 	// Check bounds.
 	if x0 < 0 || y0 < 0 {
