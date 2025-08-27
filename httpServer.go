@@ -78,18 +78,29 @@ func serveFrame(c *fiber.Ctx) error {
 	}
 
 	frameMutex.RLock()
-	// Composite the frames
-	err = copyImageToImageAt(webFrame, topBarFramebuffers[0], 0, 0)
+	// Composite the frames using optimized buffer manager or compatibility layer
+	var topBuffer, middleBuffer, footerBuffer *image.RGBA
+	if bufferManager != nil {
+		topBuffer = bufferManager.topBar.GetActive()
+		middleBuffer = bufferManager.middle.GetActive()
+		footerBuffer = bufferManager.footer.GetActive()
+	} else {
+		topBuffer = getTopBarFramebuffer(0)
+		middleBuffer = getMiddleFramebuffer(0)
+		footerBuffer = getFooterFramebuffer(frames%2)
+	}
+
+	err = copyImageToImageAt(webFrame, topBuffer, 0, 0)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).SendString("Failed to copy top bar frame")
 	}
 
-	err = copyImageToImageAt(webFrame, middleFramebuffers[0], 0, PCAT2_TOP_BAR_HEIGHT)
+	err = copyImageToImageAt(webFrame, middleBuffer, 0, PCAT2_TOP_BAR_HEIGHT)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).SendString("Failed to copy middle frame")
 	}
 
-	err = copyImageToImageAt(webFrame, footerFramebuffers[frames%2], 0, PCAT2_LCD_HEIGHT-PCAT2_FOOTER_HEIGHT)
+	err = copyImageToImageAt(webFrame, footerBuffer, 0, PCAT2_LCD_HEIGHT-PCAT2_FOOTER_HEIGHT)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).SendString("Failed to copy footer frame")
 	}
@@ -120,6 +131,10 @@ func changePage(c *fiber.Ctx) error {
 	httpChangePageTriggered = true
 	lastActivity = time.Now().Add(-1 * time.Second) //add small time to not enter FADE_IN state.
 	lastActivityMu.Unlock()
+	
+	// Invalidate pre-calculated data since page is changing via HTTP
+	invalidatePreCalculatedData()
+	
 	return c.JSON(fiber.Map{"status": "page change triggered"})
 }
 

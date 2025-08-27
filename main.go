@@ -74,14 +74,12 @@ var (
 	wanInterface = "null"
 
 	frameMutex         sync.RWMutex
-	currFrame          *image.RGBA
-	lastFrame          *image.RGBA
-	topBarFramebuffers []*image.RGBA
-	topBarFrame        *image.RGBA
-	middleFramebuffers []*image.RGBA
-	middleFrame        *image.RGBA
-	footerFramebuffers []*image.RGBA
-	footerFrame        *image.RGBA
+	// Optimized buffer manager
+	bufferManager      *BufferManager
+	// Render cache for frequently used elements
+	renderCache        *RenderCache
+	// Dirty region tracker
+	dirtyTracker       *DirtyRegionTracker
 	frames             int
 	dataMutex          sync.RWMutex
 	dynamicData        map[string]string
@@ -95,12 +93,7 @@ var (
 	globalData         sync.Map
 	autoRotatePages    = false
 
-	// Frame buffer pool for better performance
-	frameBufferPool = sync.Pool{
-		New: func() interface{} {
-			return image.NewRGBA(image.Rect(0, 0, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT))
-		},
-	}
+	// Frame buffer pool is now managed by BufferManager
 
 	lastActivity   = time.Now()
 	lastActivityMu sync.Mutex
@@ -134,19 +127,26 @@ var (
 
 	httpChangePageTriggered = false
 	changePageTriggered     = false
-	nextPageIdxFrameBuffer  *image.RGBA
+	// Pre-calculation optimization variables
+	isPreCalculating        = false
+	preCalculatedReady      = false
+	preCalculatedStitched   *image.RGBA
+	preCalculatedNextIdx    = 0
+	preCalculatedIsSMS      = false
+	preCalculatedIsNextSMS  = false
+	preCalculatedLocalIdx   = 0
+	preCalculatedNextLocalIdx = 0
+	// nextPageIdxFrameBuffer is now managed by BufferManager
 	showFPS                 = false
 	fps                     = 0.0
 	lastUpdate              = time.Now()
-	topFrames               = 0
-	middleFrames            = 0
-	stitchedFrames          = 0
+	totalFrames            = 0
+	stitchedFrames         = 0
 	localConfigExists       = false
 	stitchedFrame           *image.RGBA
 	totalNumPages           = -1
 
-	// Performance optimization buffers
-	croppedFrameBuffer *image.RGBA
+	// Performance optimization
 	easingLookup       []int
 	cachedFPSText      string
 	lastFPSUpdate      time.Time
@@ -191,19 +191,17 @@ type ImageBuffer struct {
 
 // GetFrameBuffer retrieves a frame buffer from the pool
 func GetFrameBuffer(width, height int) *image.RGBA {
-	buf := frameBufferPool.Get().(*image.RGBA)
-	if buf.Bounds().Dx() != width || buf.Bounds().Dy() != height {
-		// If size doesn't match, create a new one
+	if bufferManager == nil {
 		return image.NewRGBA(image.Rect(0, 0, width, height))
 	}
-	return buf
+	return bufferManager.GetFrameFromPool(width, height)
 }
 
 // ReturnFrameBuffer returns a frame buffer to the pool
 func ReturnFrameBuffer(buf *image.RGBA) {
-	// Clear the buffer before returning to pool
-	clearFrame(buf, buf.Bounds().Dx(), buf.Bounds().Dy())
-	frameBufferPool.Put(buf)
+	if bufferManager != nil && buf != nil {
+		bufferManager.ReturnFrameToPool(buf)
+	}
 }
 
 // Position defines X and Y coordinates.
@@ -414,6 +412,7 @@ func main() {
 	go getSmsPages()
 	go httpServer(addr)                      //listen local for http request
 	go monitorKeyboard(&changePageTriggered) // Start keyboard monitoring in a goroutine
+	go monitorConsoleInput(&changePageTriggered) // Start console input monitoring in a goroutine
 	go idleDimmer()                          //control backlight
 	
 	// Initialize power graph data recording
@@ -427,7 +426,12 @@ func main() {
 
 	wg.Wait()
 
-	mainLoop() //main loop
+	// Use optimized main loop if buffer manager is initialized
+	if bufferManager != nil {
+		mainLoopOptimized()
+	} else {
+		mainLoop()
+	} //main loop
 
 	select {} //blocking for sigterm processing
 }
@@ -457,28 +461,21 @@ func registerExitHandler() {
 }
 
 func init3FrameBuffers() {
-	middleFramebuffers = append(middleFramebuffers, image.NewRGBA(image.Rect(0, 0, middleFrameWidth, middleFrameHeight)))
-	middleFramebuffers = append(middleFramebuffers, image.NewRGBA(image.Rect(0, 0, middleFrameWidth, middleFrameHeight)))
-	clearFrame(middleFramebuffers[0], middleFrameWidth, middleFrameHeight)
-	clearFrame(middleFramebuffers[1], middleFrameWidth, middleFrameHeight)
-
-	topBarFramebuffers = append(topBarFramebuffers, image.NewRGBA(image.Rect(0, 0, topBarFrameWidth, topBarFrameHeight)))
-	topBarFramebuffers = append(topBarFramebuffers, image.NewRGBA(image.Rect(0, 0, topBarFrameWidth, topBarFrameHeight)))
-	clearFrame(topBarFramebuffers[0], topBarFrameWidth, topBarFrameHeight)
-	clearFrame(topBarFramebuffers[1], topBarFrameWidth, topBarFrameHeight)
-
-	footerFramebuffers = append(footerFramebuffers, image.NewRGBA(image.Rect(0, 0, footerFrameWidth, footerFrameHeight)))
-	footerFramebuffers = append(footerFramebuffers, image.NewRGBA(image.Rect(0, 0, footerFrameWidth, footerFrameHeight)))
-	clearFrame(footerFramebuffers[0], footerFrameWidth, footerFrameHeight)
-	clearFrame(footerFramebuffers[1], footerFrameWidth, footerFrameHeight)
+	// Initialize optimized buffer manager
+	bufferManager = NewBufferManager()
+	// Initialize render cache
+	renderCache = NewRenderCache()
+	// Initialize dirty region tracker
+	dirtyTracker = NewDirtyRegionTracker()
+	// Initialize legacy buffers for backward compatibility
+	initLegacyBuffers()
+	initLegacyTransitionBuffers()
 }
 
 func prepareMainLoop() {
 	stitchedFrame = image.NewRGBA(image.Rect(0, 0, middleFrameWidth*2, middleFrameHeight))
-	nextPageIdxFrameBuffer = image.NewRGBA(image.Rect(0, 0, middleFrameWidth, middleFrameHeight))
-
-	// Initialize performance optimization buffers
-	croppedFrameBuffer = GetFrameBuffer(middleFrameWidth, middleFrameHeight)
+	
+	// Initialize performance optimization
 	easingLookup = preCalculateEasing(numIntermediatePages, middleFrameWidth)
 	lastFPSUpdate = time.Now()
 }
@@ -506,43 +503,76 @@ func mainLoop() {
 				httpChangePageTriggered = false
 				changePageTriggered = false
 
-				// Optimize page calculations - calculate once and reuse
-				currPageIdx = currPageIdx % totalNumPages
-				nextPageIdx = (currPageIdx + 1) % totalNumPages
-
-				// Pre-calculate SMS status to avoid redundant checks
-				isSMS = cfg.ShowSms && currPageIdx >= cfgNumPages
-				isNextPageSMS = cfg.ShowSms && nextPageIdx >= cfgNumPages
-
-				if isSMS {
-					localIdx = currPageIdx - cfgNumPages
-				} else {
-					localIdx = currPageIdx
-				}
-
-				if isNextPageSMS {
-					if lenSmsPagesImages <= 0 {
-						lenSmsPagesImages = 1
-					}
-					nextLocalIdx = (nextPageIdx - cfgNumPages) % lenSmsPagesImages
-				} else {
-					if cfgNumPages > 0 {
-						nextLocalIdx = nextPageIdx % cfgNumPages
+				var usePreCalculated bool
+				
+				// Check if we can use pre-calculated results
+				if preCalculatedReady && !isPreCalculating {
+					// Verify pre-calculated data is still valid for current page
+					expectedNextIdx := (currPageIdx + 1) % totalNumPages
+					if preCalculatedNextIdx == expectedNextIdx {
+						usePreCalculated = true
+						log.Println("Using pre-calculated stitched frame for instant animation")
+						
+						// Use pre-calculated values
+						nextPageIdx = preCalculatedNextIdx
+						isSMS = preCalculatedIsSMS
+						isNextPageSMS = preCalculatedIsNextSMS
+						localIdx = preCalculatedLocalIdx
+						nextLocalIdx = preCalculatedNextLocalIdx
+						
+						// Use pre-calculated stitched frame
+						copy(stitchedFrame.Pix, preCalculatedStitched.Pix)
+						
+						log.Println("PRE-CALC curr/next Idx:", currPageIdx, nextPageIdx, "json/sms/total:", cfgNumPages, lenSmsPagesImages, totalNumPages, "localIdx:", localIdx, "nextLocalIdx:", nextLocalIdx, "isSMS:", isSMS, "isNextPageSMS:", isNextPageSMS)
 					} else {
-						nextLocalIdx = 0
+						log.Printf("Pre-calculated data stale: expected next=%d, got=%d", expectedNextIdx, preCalculatedNextIdx)
 					}
 				}
+				
+				if !usePreCalculated {
+					log.Println("Pre-calculated data not available, calculating on-demand")
+					
+					// Optimize page calculations - calculate once and reuse
+					currPageIdx = currPageIdx % totalNumPages
+					nextPageIdx = (currPageIdx + 1) % totalNumPages
 
-				log.Println("curr/next Idx:", currPageIdx, nextPageIdx, "json/sms/total:", cfgNumPages, lenSmsPagesImages, totalNumPages, "localIdx:", localIdx, "nextLocalIdx:", nextLocalIdx, "isSMS:", isSMS, "isNextPageSMS:", isNextPageSMS)
+					// Pre-calculate SMS status to avoid redundant checks
+					isSMS = cfg.ShowSms && currPageIdx >= cfgNumPages
+					isNextPageSMS = cfg.ShowSms && nextPageIdx >= cfgNumPages
 
-				clearFrame(nextPageIdxFrameBuffer, middleFrameWidth, middleFrameHeight)
-				renderMiddle(nextPageIdxFrameBuffer, &cfg, isSMS, localIdx)
+					if isSMS {
+						localIdx = currPageIdx - cfgNumPages
+					} else {
+						localIdx = currPageIdx
+					}
 
-				clearFrame(middleFramebuffers[(middleFrames+1)%2], middleFrameWidth, middleFrameHeight)
-				renderMiddle(middleFramebuffers[(middleFrames+1)%2], &cfg, isNextPageSMS, nextLocalIdx)
+					if isNextPageSMS {
+						if lenSmsPagesImages <= 0 {
+							lenSmsPagesImages = 1
+						}
+						nextLocalIdx = (nextPageIdx - cfgNumPages) % lenSmsPagesImages
+					} else {
+						if cfgNumPages > 0 {
+							nextLocalIdx = nextPageIdx % cfgNumPages
+						} else {
+							nextLocalIdx = 0
+						}
+					}
 
-				copyImageToImageAt(stitchedFrame, nextPageIdxFrameBuffer, 0, 0)
-				copyImageToImageAt(stitchedFrame, middleFramebuffers[(middleFrames+1)%2], middleFrameWidth, 0)
+					log.Println("ON-DEMAND curr/next Idx:", currPageIdx, nextPageIdx, "json/sms/total:", cfgNumPages, lenSmsPagesImages, totalNumPages, "localIdx:", localIdx, "nextLocalIdx:", nextLocalIdx, "isSMS:", isSMS, "isNextPageSMS:", isNextPageSMS)
+
+					clearFrame(nextPageIdxFrameBuffer, middleFrameWidth, middleFrameHeight)
+					renderMiddle(nextPageIdxFrameBuffer, &cfg, isSMS, localIdx)
+
+					clearFrame(middleFramebuffers[(middleFrames+1)%2], middleFrameWidth, middleFrameHeight)
+					renderMiddle(middleFramebuffers[(middleFrames+1)%2], &cfg, isNextPageSMS, nextLocalIdx)
+
+					copyImageToImageAt(stitchedFrame, nextPageIdxFrameBuffer, 0, 0)
+					copyImageToImageAt(stitchedFrame, middleFramebuffers[(middleFrames+1)%2], middleFrameWidth, 0)
+				}
+				
+				// Mark pre-calculated data as used/stale
+				preCalculatedReady = false
 
 				// Cache FPS text to avoid string concatenation every frame
 				if showFPS && time.Since(lastFPSUpdate) > 100*time.Millisecond {

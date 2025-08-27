@@ -247,7 +247,7 @@ func setBacklight(brightness int) {
 }
 
 func monitorKeyboard(changePageTriggered *bool) {
-	// 1) find the “rk805 pwrkey” device by name
+	// 1) find the "rk805 pwrkey" device by name
 	paths, err := evdev.ListDevicePaths()
 	if err != nil {
 		log.Printf("ListDevicePaths error: %v", err)
@@ -295,17 +295,22 @@ func monitorKeyboard(changePageTriggered *bool) {
 		if ev.Type == evdev.EV_KEY && ev.Code == evdev.KEY_POWER {
 			switch ev.Value {
 			case 1: // key press
-				log.Println("POWER pressed, state =", stateName(idleState))
+				log.Println("POWER pressed (key down), starting pre-calculation, state =", stateName(idleState))
 				if idleState == STATE_ACTIVE || idleState == STATE_FADE_IN {
 					swippingScreen = true
-					*changePageTriggered = true
+					// Start pre-calculation on key down
+					go preCalculateScreenTransition()
 				}
 				lastActivityMu.Lock()
 				lastActivity = now
 				lastActivityMu.Unlock()
 
 			case 0: // key release
-				// just update lastActivity; no page-change here
+				log.Println("POWER released (key up), triggering animation if ready, state =", stateName(idleState))
+				if idleState == STATE_ACTIVE || idleState == STATE_FADE_IN {
+					*changePageTriggered = true
+				}
+				// just update lastActivity
 				lastActivityMu.Lock()
 				lastActivity = now
 				lastActivityMu.Unlock()
@@ -323,7 +328,7 @@ func monitorKeyboard(changePageTriggered *bool) {
 				       lastKeyPress = now
 
 				   case 0: // key release
-				       // only trigger if it wasn’t a quick tap (<500ms)
+				       // only trigger if it wasn't a quick tap (<500ms)
 				       if now.Sub(lastKeyPress) > KEYBOARD_DEBOUNCE_TIME {
 				           log.Println("POWER released, state =", stateName(idleState))
 				           if idleState == STATE_ACTIVE{
@@ -336,6 +341,38 @@ func monitorKeyboard(changePageTriggered *bool) {
 				       }*/
 			}
 		}
+	}
+}
+
+func monitorConsoleInput(changePageTriggered *bool) {
+	log.Println("Console input monitoring started. Press ENTER key to change screen.")
+	
+	for {
+		var input string
+		log.Println("DEBUG: Waiting for console input...")
+		n, err := fmt.Scanln(&input)
+		log.Printf("DEBUG: Received input: '%s', length: %d, bytes read: %d, error: %v", input, len(input), n, err)
+		
+		// Handle EOF or other input errors gracefully, but also treat empty input as valid
+		if err != nil && err.Error() != "unexpected newline" {
+			log.Printf("DEBUG: Input error: %v", err)
+			time.Sleep(100 * time.Millisecond)
+			continue
+		}
+		
+		// Trigger on any input (including empty/just Enter key) or space
+		now := time.Now()
+		log.Println("ENTER key detected via console, triggering page change, state =", stateName(idleState))
+		if idleState == STATE_ACTIVE || idleState == STATE_FADE_IN {
+			log.Println("DEBUG: Setting changePageTriggered to true")
+			swippingScreen = true
+			*changePageTriggered = true
+		} else {
+			log.Printf("DEBUG: Not triggering because state is %s", stateName(idleState))
+		}
+		lastActivityMu.Lock()
+		lastActivity = now
+		lastActivityMu.Unlock()
 	}
 }
 
@@ -611,6 +648,81 @@ func hasShowSmsInUserConfig() bool {
 	
 	_, exists := rawMap["show_sms"]
 	return exists
+}
+
+// preCalculateScreenTransition pre-calculates the next screen transition for immediate display on key release
+func preCalculateScreenTransition() {
+	if isPreCalculating {
+		log.Println("Pre-calculation already in progress, skipping")
+		return
+	}
+	
+	isPreCalculating = true
+	preCalculatedReady = false
+	
+	log.Println("Starting screen transition pre-calculation...")
+	
+	// Calculate next page indices (same logic as in main loop)
+	preCalculatedNextIdx = (currPageIdx + 1) % totalNumPages
+	preCalculatedIsSMS = cfg.ShowSms && currPageIdx >= cfgNumPages
+	preCalculatedIsNextSMS = cfg.ShowSms && preCalculatedNextIdx >= cfgNumPages
+	
+	if preCalculatedIsSMS {
+		preCalculatedLocalIdx = currPageIdx - cfgNumPages
+	} else {
+		preCalculatedLocalIdx = currPageIdx
+	}
+	
+	if preCalculatedIsNextSMS {
+		if lenSmsPagesImages <= 0 {
+			lenSmsPagesImages = 1
+		}
+		preCalculatedNextLocalIdx = (preCalculatedNextIdx - cfgNumPages) % lenSmsPagesImages
+	} else {
+		if cfgNumPages > 0 {
+			preCalculatedNextLocalIdx = preCalculatedNextIdx % cfgNumPages
+		} else {
+			preCalculatedNextLocalIdx = 0
+		}
+	}
+	
+	// Ensure stitched frame is allocated
+	if preCalculatedStitched == nil {
+		preCalculatedStitched = image.NewRGBA(image.Rect(0, 0, middleFrameWidth*2, middleFrameHeight))
+	}
+	
+	// Create temporary buffers for rendering
+	currentPageBuffer := GetFrameBuffer(middleFrameWidth, middleFrameHeight)
+	nextPageBuffer := GetFrameBuffer(middleFrameWidth, middleFrameHeight)
+	
+	defer func() {
+		ReturnFrameBuffer(currentPageBuffer)
+		ReturnFrameBuffer(nextPageBuffer)
+		isPreCalculating = false
+	}()
+	
+	// Render current page
+	clearFrame(currentPageBuffer, middleFrameWidth, middleFrameHeight)
+	renderMiddle(currentPageBuffer, &cfg, preCalculatedIsSMS, preCalculatedLocalIdx)
+	
+	// Render next page  
+	clearFrame(nextPageBuffer, middleFrameWidth, middleFrameHeight)
+	renderMiddle(nextPageBuffer, &cfg, preCalculatedIsNextSMS, preCalculatedNextLocalIdx)
+	
+	// Create stitched frame: current page on left, next page on right
+	clearFrame(preCalculatedStitched, middleFrameWidth*2, middleFrameHeight)
+	copyImageToImageAt(preCalculatedStitched, currentPageBuffer, 0, 0)
+	copyImageToImageAt(preCalculatedStitched, nextPageBuffer, middleFrameWidth, 0)
+	
+	preCalculatedReady = true
+	log.Printf("Pre-calculation completed: current=%d->%d, SMS: %t->%t", 
+		currPageIdx, preCalculatedNextIdx, preCalculatedIsSMS, preCalculatedIsNextSMS)
+}
+
+// invalidatePreCalculatedData marks pre-calculated data as stale when page changes occur
+func invalidatePreCalculatedData() {
+	preCalculatedReady = false
+	log.Println("Pre-calculated data invalidated")
 }
 
 func loadAllConfigsToVariables() {
