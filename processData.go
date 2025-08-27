@@ -6,7 +6,6 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"math"
 	"net"
@@ -545,7 +544,7 @@ func getFanSpeed() (int, error) {
 	}
 
 	for _, p := range paths {
-		data, err := ioutil.ReadFile(p)
+		data, err := os.ReadFile(p)
 		if err != nil {
 			// skip files we can't read
 			continue
@@ -764,7 +763,7 @@ func getSN() (string, error) {
 // getUptimeSeconds returns system uptime in seconds
 func getUptimeSeconds() (float64, error) {
 	// Read /proc/uptime
-	data, err := ioutil.ReadFile("/proc/uptime")
+	data, err := os.ReadFile("/proc/uptime")
 	if err != nil {
 		return 0, fmt.Errorf("error reading /proc/uptime: %v", err)
 	}
@@ -840,7 +839,7 @@ func getDCVoltageUV() (float64, error) {
 		return 0, err
 	}
 	defer file.Close()
-	content, err := ioutil.ReadAll(file)
+	content, err := io.ReadAll(file)
 	rawUV, err := strconv.ParseFloat(strings.TrimSpace(string(content)), 64)
 	if err != nil {
 		return 0.0, err
@@ -1230,7 +1229,7 @@ func getBatterySoc() (int, error) {
 		return -1, err
 	}
 	defer file.Close()
-	content, err := ioutil.ReadAll(file)
+	content, err := io.ReadAll(file)
 	if err != nil {
 		return -1, err
 	}
@@ -1256,7 +1255,7 @@ func getBatteryCharging() (bool, error) {
 			return false, err
 		}
 		defer file.Close()
-		content, err := ioutil.ReadAll(file)
+		content, err := io.ReadAll(file)
 		if err != nil {
 			return false, err
 		}
@@ -1276,7 +1275,7 @@ func getBatteryVoltageUV() (float64, error) {
 		return 0, err
 	}
 	defer file.Close()
-	content, err := ioutil.ReadAll(file)
+	content, err := io.ReadAll(file)
 	if err != nil {
 		return 0, err
 	}
@@ -1289,7 +1288,7 @@ func getBatteryCurrentUA() (float64, error) {
 		return 0, err
 	}
 	defer file.Close()
-	content, err := ioutil.ReadAll(file)
+	content, err := io.ReadAll(file)
 	if err != nil {
 		return 0, err
 	}
@@ -1451,7 +1450,7 @@ func getCpuTemp() (float64, error) {
 		return 0, err
 	}
 	defer file.Close()
-	content, err := ioutil.ReadAll(file)
+	content, err := io.ReadAll(file)
 	if err != nil {
 		return 0, err
 	}

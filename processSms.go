@@ -6,7 +6,6 @@ import (
 	"image/color"
 	"image/draw"
 	"image/png"
-	"io/ioutil"
 	"os"
 	"sort"
 	"strings"
@@ -161,7 +160,7 @@ func drawSmsFrJson(jsonContent string, savePng bool, drawPageNum bool) (imgs []i
 	// Load font
 	fontPath := assetsPrefix + "/assets/fonts/NotoSansMonoCJK-VF.ttf.ttc"
 	log.Println("sms using font:", fontPath)
-	fontBytes, err := ioutil.ReadFile(fontPath)
+	fontBytes, err := os.ReadFile(fontPath)
 	if err != nil {
 		fmt.Printf("Error loading font: %v\n", err)
 		return

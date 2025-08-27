@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"image"
-	"io/ioutil"
 	"log"
 	"math"
 	"os"
@@ -28,7 +27,7 @@ var (
 
 // loadConfig reads and unmarshals the config file.
 func loadConfig(path string) (Config, error) {
-	data, err := ioutil.ReadFile(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return Config{}, err
 	}
@@ -61,7 +60,7 @@ func getFontFace(fontName string) (font.Face, int, error) {
 	}
 
 	// 3) Read & parse the TTF/TTC
-	fontBytes, err := ioutil.ReadFile(cfg.FontPath)
+	fontBytes, err := os.ReadFile(cfg.FontPath)
 	if err != nil {
 		return nil, 0, fmt.Errorf("error reading font file: %v", err)
 	}
@@ -341,7 +340,7 @@ func monitorKeyboard(changePageTriggered *bool) {
 }
 
 func getBacklight() int {
-	data, err := ioutil.ReadFile("/sys/class/backlight/backlight/brightness")
+	data, err := os.ReadFile("/sys/class/backlight/backlight/brightness")
 	if err != nil {
 		log.Printf("getBacklight error: %v", err)
 		return 0
@@ -397,7 +396,7 @@ func idleDimmer() {
 
 	for range ticker.C {
 		// 1) Movement/keypress detection
-		data, err := ioutil.ReadFile("/sys/kernel/photonicat-pm/movement_trigger")
+		data, err := os.ReadFile("/sys/kernel/photonicat-pm/movement_trigger")
 		if err == nil && strings.TrimSpace(string(data)) == "1" {
 			// Reset idle timer, treat screen as already “on”
 			now := time.Now()
@@ -599,7 +598,7 @@ func hasShowSmsInUserConfig() bool {
 	}
 	
 	// Read the raw JSON
-	raw, err := ioutil.ReadFile(userConfigPath)
+	raw, err := os.ReadFile(userConfigPath)
 	if err != nil {
 		return false
 	}
@@ -657,7 +656,7 @@ func loadAllConfigsToVariables() {
 	if err != nil {
 		//create a empty json file
 		content := "{}"
-		if err := ioutil.WriteFile(ETC_USER_CONFIG_PATH, []byte(content), 0644); err != nil {
+		if err := os.WriteFile(ETC_USER_CONFIG_PATH, []byte(content), 0644); err != nil {
 			log.Printf("could not write temp user config: %v", err)
 		}
 		log.Println("Created empty user config file at", ETC_USER_CONFIG_PATH)

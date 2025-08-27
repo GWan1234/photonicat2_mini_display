@@ -8,7 +8,7 @@ import (
 	"image/png"
 	"image/jpeg"
 	"image/gif"
-	"io/ioutil"
+	"io"
 	"log"
 	"os"
 	"time"
@@ -118,7 +118,7 @@ func loadImage(filePath string) (*image.RGBA, int, int, error) {
 		}
 		
 		// Read the entire SVG file.
-		svgData, err := ioutil.ReadAll(f)
+		svgData, err := io.ReadAll(f)
 		if err != nil {
 			return nil, 0, 0, err
 		}
@@ -303,7 +303,7 @@ func drawSVG(frame *image.RGBA, svgPath string, x0, y0, targetWidth, targetHeigh
 		}
 		defer svgFile.Close()
 		
-		svgData, err := ioutil.ReadAll(svgFile)
+		svgData, err := io.ReadAll(svgFile)
 		if err != nil {
 			return err
 		}
@@ -336,7 +336,7 @@ func drawSVG(frame *image.RGBA, svgPath string, x0, y0, targetWidth, targetHeigh
 	}
 	defer svgFile.Close()
 
-	svgData, err := ioutil.ReadAll(svgFile)
+	svgData, err := io.ReadAll(svgFile)
 	if err != nil {
 		return err
 	}

@@ -7,7 +7,6 @@ import (
 	"image"
 	"image/color"
 	"image/png"
-	"io/ioutil"
 	"log"
 	"math"
 	"math/rand"
@@ -147,7 +146,7 @@ func loadUserConfig() string {
 		return userJsonConfig
 	}
 	path := ETC_USER_CONFIG_PATH
-	raw, err := ioutil.ReadFile(path)
+	raw, err := os.ReadFile(path)
 
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -329,7 +328,7 @@ func setUserConfig(c *fiber.Ctx) error {
 			Status(fiber.StatusInternalServerError).
 			JSON(fiber.Map{"error": "could not save config"})
 	}
-	if err := ioutil.WriteFile("config/user_config.json", raw, 0644); err != nil {
+	if err := os.WriteFile("config/user_config.json", raw, 0644); err != nil {
 		log.Printf("warning: could not write user_config.json: %v", err)
 		return c.
 			Status(fiber.StatusInternalServerError).
@@ -367,7 +366,7 @@ func setConfig(c *fiber.Ctx) error {
 	// Persist userOverrides back to disk
 	if raw, err := json.MarshalIndent(userOverrides, "", "  "); err != nil {
 		log.Printf("warning: could not marshal user_config.json: %v", err)
-	} else if err := ioutil.WriteFile("config/user_config.json", raw, 0644); err != nil {
+	} else if err := os.WriteFile("config/user_config.json", raw, 0644); err != nil {
 		log.Printf("warning: could not write user_config.json: %v", err)
 	}
 
