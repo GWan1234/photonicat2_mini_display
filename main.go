@@ -145,6 +145,10 @@ var (
 	localConfigExists       = false
 	stitchedFrame           *image.RGBA
 	totalNumPages           = -1
+	middleFrames            = 0
+	topFrames              = 0
+	nextPageIdxFrameBuffer *image.RGBA
+	croppedFrameBuffer     *image.RGBA
 
 	// Performance optimization
 	easingLookup       []int
@@ -159,6 +163,11 @@ var (
 
 	footerFrameWidth  = PCAT2_LCD_WIDTH
 	footerFrameHeight = PCAT2_FOOTER_HEIGHT
+
+	// Double buffering framebuffers
+	topBarFramebuffers [2]*image.RGBA
+	middleFramebuffers [2]*image.RGBA
+	footerFramebuffers [2]*image.RGBA
 
 	lenSmsPagesImages = 1
 	display           gc9307.Device
@@ -703,4 +712,140 @@ func mainLoop() {
 			time.Sleep(50 * time.Millisecond) //not inf loop
 		}
 	}
+}
+
+// DoubleBuffer holds two buffers for double buffering
+type DoubleBuffer struct {
+	buffers [2]*image.RGBA
+	active  int
+	mutex   sync.RWMutex
+}
+
+// GetActive returns the active buffer
+func (db *DoubleBuffer) GetActive() *image.RGBA {
+	db.mutex.RLock()
+	defer db.mutex.RUnlock()
+	return db.buffers[db.active]
+}
+
+// BufferManager manages frame buffers
+type BufferManager struct {
+	topBar  *DoubleBuffer
+	middle  *DoubleBuffer
+	footer  *DoubleBuffer
+	mutex   sync.RWMutex
+}
+
+// NewBufferManager creates a new buffer manager
+func NewBufferManager() *BufferManager {
+	return &BufferManager{
+		topBar: &DoubleBuffer{
+			buffers: [2]*image.RGBA{
+				image.NewRGBA(image.Rect(0, 0, topBarFrameWidth, topBarFrameHeight)),
+				image.NewRGBA(image.Rect(0, 0, topBarFrameWidth, topBarFrameHeight)),
+			},
+			active: 0,
+		},
+		middle: &DoubleBuffer{
+			buffers: [2]*image.RGBA{
+				image.NewRGBA(image.Rect(0, 0, middleFrameWidth, middleFrameHeight)),
+				image.NewRGBA(image.Rect(0, 0, middleFrameWidth, middleFrameHeight)),
+			},
+			active: 0,
+		},
+		footer: &DoubleBuffer{
+			buffers: [2]*image.RGBA{
+				image.NewRGBA(image.Rect(0, 0, footerFrameWidth, footerFrameHeight)),
+				image.NewRGBA(image.Rect(0, 0, footerFrameWidth, footerFrameHeight)),
+			},
+			active: 0,
+		},
+	}
+}
+
+// GetFrameFromPool gets a frame from the buffer pool
+func (bm *BufferManager) GetFrameFromPool(width, height int) *image.RGBA {
+	bm.mutex.Lock()
+	defer bm.mutex.Unlock()
+	// For now, just create a new frame
+	return image.NewRGBA(image.Rect(0, 0, width, height))
+}
+
+// ReturnFrameToPool returns a frame to the buffer pool
+func (bm *BufferManager) ReturnFrameToPool(frame *image.RGBA) {
+	// For now, this is a no-op
+}
+
+// RenderCache caches rendered elements
+type RenderCache struct {
+	cache map[string]*image.RGBA
+	mutex sync.RWMutex
+}
+
+// NewRenderCache creates a new render cache
+func NewRenderCache() *RenderCache {
+	return &RenderCache{
+		cache: make(map[string]*image.RGBA),
+	}
+}
+
+// DirtyRegionTracker tracks dirty regions for optimization
+type DirtyRegionTracker struct {
+	regions []image.Rectangle
+	mutex   sync.RWMutex
+}
+
+// NewDirtyRegionTracker creates a new dirty region tracker
+func NewDirtyRegionTracker() *DirtyRegionTracker {
+	return &DirtyRegionTracker{
+		regions: make([]image.Rectangle, 0),
+	}
+}
+
+// mainLoopOptimized runs the optimized main loop
+func mainLoopOptimized() {
+	// For now, fallback to the regular main loop
+	mainLoop()
+}
+
+// initLegacyBuffers initializes the legacy framebuffers for backward compatibility
+func initLegacyBuffers() {
+	topBarFramebuffers[0] = image.NewRGBA(image.Rect(0, 0, topBarFrameWidth, topBarFrameHeight))
+	topBarFramebuffers[1] = image.NewRGBA(image.Rect(0, 0, topBarFrameWidth, topBarFrameHeight))
+	
+	middleFramebuffers[0] = image.NewRGBA(image.Rect(0, 0, middleFrameWidth, middleFrameHeight))
+	middleFramebuffers[1] = image.NewRGBA(image.Rect(0, 0, middleFrameWidth, middleFrameHeight))
+	
+	footerFramebuffers[0] = image.NewRGBA(image.Rect(0, 0, footerFrameWidth, footerFrameHeight))
+	footerFramebuffers[1] = image.NewRGBA(image.Rect(0, 0, footerFrameWidth, footerFrameHeight))
+}
+
+// initLegacyTransitionBuffers initializes transition buffers
+func initLegacyTransitionBuffers() {
+	// Initialize any additional transition buffers if needed
+	// This is a placeholder for compatibility
+}
+
+// getTopBarFramebuffer returns the top bar framebuffer at the specified index
+func getTopBarFramebuffer(index int) *image.RGBA {
+	if index < 0 || index >= len(topBarFramebuffers) {
+		return topBarFramebuffers[0]
+	}
+	return topBarFramebuffers[index]
+}
+
+// getMiddleFramebuffer returns the middle framebuffer at the specified index
+func getMiddleFramebuffer(index int) *image.RGBA {
+	if index < 0 || index >= len(middleFramebuffers) {
+		return middleFramebuffers[0]
+	}
+	return middleFramebuffers[index]
+}
+
+// getFooterFramebuffer returns the footer framebuffer at the specified index
+func getFooterFramebuffer(index int) *image.RGBA {
+	if index < 0 || index >= len(footerFramebuffers) {
+		return footerFramebuffers[0]
+	}
+	return footerFramebuffers[index]
 }
