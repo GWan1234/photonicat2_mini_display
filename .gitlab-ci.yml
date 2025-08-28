@@ -1,0 +1,170 @@
+stages:
+  - lint
+  - test
+  - build
+  - package
+
+variables:
+  GO_VERSION: "1.21"
+  GOPROXY: "https://proxy.golang.org,direct"
+  GOSUMDB: "sum.golang.org"
+  CGO_ENABLED: "1"
+
+# Template for Go jobs
+.go-template: &go_template
+  image: golang:${GO_VERSION}
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq git ca-certificates
+    - go version
+    - go mod download
+
+# Lint stage
+lint:
+  <<: *go_template
+  stage: lint
+  script:
+    - go fmt ./...
+    - go vet ./...
+    - |
+      if command -v golint &> /dev/null; then
+        golint ./...
+      else
+        echo "golint not available, skipping"
+      fi
+  only:
+    - merge_requests
+    - main
+    - develop
+
+# Test stage
+test:
+  <<: *go_template
+  stage: test
+  script:
+    - go test -v ./...
+    - go test -race -short ./...
+  coverage: '/coverage: \d+\.\d+% of statements/'
+  artifacts:
+    reports:
+      junit: report.xml
+    paths:
+      - coverage.html
+      - coverage.out
+    expire_in: 1 week
+  only:
+    - merge_requests
+    - main
+    - develop
+
+# Build for host system
+build:host:
+  <<: *go_template
+  stage: build
+  script:
+    - make build
+  artifacts:
+    paths:
+      - pcat2_mini_display
+    expire_in: 1 week
+  only:
+    - merge_requests
+    - main
+    - tags
+
+# Cross-compilation build job
+build:cross-compile:
+  image: ubuntu:22.04
+  stage: build
+  before_script:
+    # Install Go
+    - apt-get update -qq
+    - apt-get install -y -qq wget git gcc pkg-config
+    - wget -q https://go.dev/dl/go${GO_VERSION}.0.linux-amd64.tar.gz
+    - tar -C /usr/local -xzf go${GO_VERSION}.0.linux-amd64.tar.gz
+    - export PATH=$PATH:/usr/local/go/bin
+    - go version
+    # Install cross-compilation tools
+    - apt-get install -y -qq gcc-aarch64-linux-gnu
+    - wget -q https://musl.cc/aarch64-linux-musl-cross.tgz
+    - tar -C /usr/local -xzf aarch64-linux-musl-cross.tgz
+    - export PATH=/usr/local/aarch64-linux-musl-cross/bin:$PATH
+    - cd $CI_PROJECT_DIR
+    - go mod download
+  script:
+    # Build for OpenWRT (aarch64 with musl)
+    - echo "Building for OpenWRT (aarch64)..."
+    - GOOS=linux GOARCH=arm64 CGO_ENABLED=1 CC=aarch64-linux-musl-gcc go build -o pcat2_mini_display_openwrt .
+    # Build for Debian (aarch64 with glibc)
+    - echo "Building for Debian (aarch64)..."
+    - GOOS=linux GOARCH=arm64 CGO_ENABLED=1 CC=aarch64-linux-gnu-gcc go build -o pcat2_mini_display_debian .
+  artifacts:
+    paths:
+      - pcat2_mini_display_openwrt
+      - pcat2_mini_display_debian
+    expire_in: 1 week
+  only:
+    - main
+    - tags
+
+# Package stage - create release package
+package:
+  image: ubuntu:22.04
+  stage: package
+  dependencies:
+    - build:cross-compile
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq git tar xz-utils
+  script:
+    - |
+      # Get version information
+      GIT_VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "unknown")
+      echo "Packaging version: $GIT_VERSION"
+      
+      # Create package directory
+      PACKAGE_DIR="pcat2_mini_display_package"
+      rm -rf "$PACKAGE_DIR"
+      mkdir -p "$PACKAGE_DIR"
+      
+      # Copy files to package
+      echo "Git version: $GIT_VERSION" > "$PACKAGE_DIR/VERSION.txt"
+      cp pcat2_mini_display_openwrt "$PACKAGE_DIR/" || echo "OpenWRT binary not found"
+      cp pcat2_mini_display_debian "$PACKAGE_DIR/" || echo "Debian binary not found"
+      cp config.json "$PACKAGE_DIR/" || echo "config.json not found"
+      cp -r assets "$PACKAGE_DIR/" 2>/dev/null || echo "assets directory not found"
+      cp -r service-files "$PACKAGE_DIR/" 2>/dev/null || echo "service-files directory not found"
+      cp install_service.sh "$PACKAGE_DIR/" 2>/dev/null || echo "install_service.sh not found"
+      cp README.md "$PACKAGE_DIR/" 2>/dev/null || echo "README.md not found"
+      
+      # Create tarball
+      TAR_NAME="pcat2_mini_display_package_${CI_COMMIT_SHORT_SHA}_${GIT_VERSION}.tar.xz"
+      tar -cJf "$TAR_NAME" "$PACKAGE_DIR"
+      echo "Created package: $TAR_NAME"
+      
+      # List contents
+      echo "Package contents:"
+      tar -tJf "$TAR_NAME"
+  artifacts:
+    paths:
+      - pcat2_mini_display_package_*.tar.xz
+    expire_in: 4 weeks
+  only:
+    - main
+    - tags
+
+# Release job - only for tags
+release:
+  stage: package
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  dependencies:
+    - package
+  script:
+    - echo "Creating release for tag $CI_COMMIT_TAG"
+  release:
+    tag_name: $CI_COMMIT_TAG
+    description: 'Release $CI_COMMIT_TAG'
+    assets:
+      links:
+        - name: 'Release Package'
+          url: '$CI_PROJECT_URL/-/jobs/artifacts/$CI_COMMIT_TAG/download?job=package'
+  only:
+    - tags
