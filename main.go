@@ -76,11 +76,8 @@ var (
 	frameMutex         sync.RWMutex
 	currFrame          *image.RGBA
 	lastFrame          *image.RGBA
-	topBarFramebuffers []*image.RGBA
 	topBarFrame        *image.RGBA
-	middleFramebuffers []*image.RGBA
 	middleFrame        *image.RGBA
-	footerFramebuffers []*image.RGBA
 	footerFrame        *image.RGBA
 	frames             int
 	dataMutex          sync.RWMutex
@@ -134,19 +131,19 @@ var (
 
 	httpChangePageTriggered = false
 	changePageTriggered     = false
-	nextPageIdxFrameBuffer  *image.RGBA
 	showFPS                 = false
 	fps                     = 0.0
 	lastUpdate              = time.Now()
-	topFrames               = 0
-	middleFrames            = 0
 	stitchedFrames          = 0
+	totalFrames             = 0
 	localConfigExists       = false
 	stitchedFrame           *image.RGBA
 	totalNumPages           = -1
 
+	// Buffer management
+	bufferManager      *BufferManager
+	
 	// Performance optimization buffers
-	croppedFrameBuffer *image.RGBA
 	easingLookup       []int
 	cachedFPSText      string
 	lastFPSUpdate      time.Time
