@@ -78,17 +78,11 @@ func serveFrame(c *fiber.Ctx) error {
 	}
 
 	frameMutex.RLock()
-	// Composite the frames using optimized buffer manager or compatibility layer
+	// Use legacy framebuffers that are actively being rendered to
 	var topBuffer, middleBuffer, footerBuffer *image.RGBA
-	if bufferManager != nil {
-		topBuffer = bufferManager.topBar.GetActive()
-		middleBuffer = bufferManager.middle.GetActive()
-		footerBuffer = bufferManager.footer.GetActive()
-	} else {
-		topBuffer = getTopBarFramebuffer(0)
-		middleBuffer = getMiddleFramebuffer(0)
-		footerBuffer = getFooterFramebuffer(frames%2)
-	}
+	topBuffer = getTopBarFramebuffer(0)
+	middleBuffer = getMiddleFramebuffer(0)
+	footerBuffer = getFooterFramebuffer(frames%2)
 
 	err = copyImageToImageAt(webFrame, topBuffer, 0, 0)
 	if err != nil {
