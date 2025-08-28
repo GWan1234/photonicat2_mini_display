@@ -483,6 +483,8 @@ func init3FrameBuffers() {
 
 func prepareMainLoop() {
 	stitchedFrame = image.NewRGBA(image.Rect(0, 0, middleFrameWidth*2, middleFrameHeight))
+	croppedFrameBuffer = image.NewRGBA(image.Rect(0, 0, middleFrameWidth, middleFrameHeight))
+	nextPageIdxFrameBuffer = image.NewRGBA(image.Rect(0, 0, middleFrameWidth, middleFrameHeight))
 	
 	// Initialize performance optimization
 	easingLookup = preCalculateEasing(numIntermediatePages, middleFrameWidth)
