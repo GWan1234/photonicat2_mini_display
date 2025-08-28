@@ -72,6 +72,10 @@ var (
 	svgCache = make(map[string]*image.RGBA)
 
 	wanInterface = "null"
+	
+	// SPI DMA mode control
+	dmaMode = true
+	spiTransferOptimized = false
 
 	frameMutex         sync.RWMutex
 	// Optimized buffer manager
@@ -127,6 +131,9 @@ var (
 
 	httpChangePageTriggered = false
 	changePageTriggered     = false
+	lastButtonPress         = time.Time{}
+	buttonDebounceDelay     = 100 * time.Millisecond
+	buttonPressInProgress   = false
 	// Pre-calculation optimization variables
 	isPreCalculating        = false
 	preCalculatedReady      = false
@@ -136,6 +143,7 @@ var (
 	preCalculatedIsNextSMS  = false
 	preCalculatedLocalIdx   = 0
 	preCalculatedNextLocalIdx = 0
+	preCalculationMutex     sync.RWMutex
 	// nextPageIdxFrameBuffer is now managed by BufferManager
 	showFPS                 = false
 	fps                     = 0.0
@@ -171,6 +179,7 @@ var (
 
 	lenSmsPagesImages = 1
 	display           gc9307.Device
+	displayWrapper    *DisplayWrapper
 
 	cfgNumPages = 0
 
@@ -271,11 +280,130 @@ type FontConfig struct {
 	FontSize float64 // in points
 }
 
+// checkDMAAvailability checks if SPI DMA channels are available
+func checkDMAAvailability() error {
+	// Check for DMA channel files
+	dmaRxPath := "/sys/devices/platform/soc/2ad00000.spi/dma:rx"
+	dmaTxPath := "/sys/devices/platform/soc/2ad00000.spi/dma:tx"
+	
+	if _, err := os.Stat(dmaRxPath); os.IsNotExist(err) {
+		return fmt.Errorf("DMA RX channel not found at %s", dmaRxPath)
+	}
+	
+	if _, err := os.Stat(dmaTxPath); os.IsNotExist(err) {
+		return fmt.Errorf("DMA TX channel not found at %s", dmaTxPath)
+	}
+	
+	log.Printf("DMA channels found: RX=%s, TX=%s", dmaRxPath, dmaTxPath)
+	return nil
+}
+
+// SPIConfig holds SPI configuration based on DMA mode
+type SPIConfig struct {
+	MaxTransferSize int
+	UseChunking     bool
+	ChunkSize       int
+	BufferStrategy  string
+}
+
+// getSPIConfig returns optimized SPI configuration based on DMA availability
+func getSPIConfig() SPIConfig {
+	if spiTransferOptimized {
+		return SPIConfig{
+			MaxTransferSize: 65536, // 64KB for DMA transfers
+			UseChunking:     false,
+			ChunkSize:       0,
+			BufferStrategy:  "dma_optimized",
+		}
+	} else {
+		return SPIConfig{
+			MaxTransferSize: 4096, // 4KB for non-DMA transfers
+			UseChunking:     true,
+			ChunkSize:       1024, // 1KB chunks
+			BufferStrategy:  "interrupt_driven",
+		}
+	}
+}
+
+// logSPIMode logs the current SPI transfer mode
+func logSPIMode() {
+	config := getSPIConfig()
+	log.Printf("SPI Transfer Mode: %s, Max Transfer: %d bytes, Chunking: %v",
+		config.BufferStrategy, config.MaxTransferSize, config.UseChunking)
+	if config.UseChunking {
+		log.Printf("Chunk Size: %d bytes", config.ChunkSize)
+	}
+}
+
+// DisplayWrapper provides optimized display operations based on DMA mode
+type DisplayWrapper struct {
+	device gc9307.Device
+	config SPIConfig
+}
+
+// NewDisplayWrapper creates a new display wrapper with DMA optimization
+func NewDisplayWrapper(device gc9307.Device) *DisplayWrapper {
+	return &DisplayWrapper{
+		device: device,
+		config: getSPIConfig(),
+	}
+}
+
+// FillRectangleWithImageOptimized optimizes image transfers based on DMA availability
+func (dw *DisplayWrapper) FillRectangleWithImageOptimized(x, y, width, height int16, img *image.RGBA) {
+	if dw.config.UseChunking {
+		// Non-DMA mode: use smaller chunks to avoid blocking
+		dw.fillRectangleChunked(x, y, width, height, img)
+	} else {
+		// DMA mode: send larger buffers for optimal DMA utilization
+		dw.device.FillRectangleWithImage(x, y, width, height, img)
+	}
+}
+
+// fillRectangleChunked breaks large transfers into smaller chunks for non-DMA mode
+func (dw *DisplayWrapper) fillRectangleChunked(x, y, width, height int16, img *image.RGBA) {
+	// For non-DMA mode, we can break the image into horizontal strips
+	// This reduces the amount of data in each SPI transaction
+	chunkHeight := int16(dw.config.ChunkSize / (int(width) * 3)) // 3 bytes per pixel (RGB)
+	if chunkHeight < 1 {
+		chunkHeight = 1
+	}
+	if chunkHeight > height {
+		chunkHeight = height
+	}
+	
+	for currentY := y; currentY < y+height; currentY += chunkHeight {
+		remainingHeight := y + height - currentY
+		if remainingHeight < chunkHeight {
+			chunkHeight = remainingHeight
+		}
+		
+		// Create a sub-image for this chunk
+		chunkBounds := image.Rect(0, int(currentY-y), int(width), int(currentY-y+chunkHeight))
+		chunkImg := img.SubImage(chunkBounds).(*image.RGBA)
+		
+		// Send this chunk
+		dw.device.FillRectangleWithImage(x, currentY, width, chunkHeight, chunkImg)
+	}
+}
+
+// GetTransferStats returns statistics about the current transfer mode
+func (dw *DisplayWrapper) GetTransferStats() map[string]interface{} {
+	return map[string]interface{}{
+		"dma_enabled":       dmaMode,
+		"transfer_strategy": dw.config.BufferStrategy,
+		"max_transfer_size": dw.config.MaxTransferSize,
+		"use_chunking":      dw.config.UseChunking,
+		"chunk_size":        dw.config.ChunkSize,
+	}
+}
+
 func main() {
 	var wg sync.WaitGroup
 	all := flag.Bool("all", false, "if set, listen on all network interfaces (0.0.0.0)")
 	port := flag.Int("port", 8081, "TCP port to listen on")
 	forceColdBoot := flag.Bool("force-cold-boot", false, "force showing welcome screen even on warm boot")
+	useDMA := flag.Bool("dma", true, "enable DMA mode for SPI transfers (default: true)")
 	flag.Parse()
 
 	// Build the listen address:
@@ -285,6 +413,29 @@ func main() {
 	} else {
 		addr = fmt.Sprintf("127.0.0.1:%d", *port) // localhost only
 	}
+
+	// Set DMA mode from command line flag
+	dmaMode = *useDMA
+	if dmaMode {
+		log.Println("SPI DMA mode: ENABLED")
+	} else {
+		log.Println("SPI DMA mode: DISABLED")
+	}
+	
+	// Check if DMA channels are available
+	if err := checkDMAAvailability(); err != nil {
+		log.Printf("DMA not available, falling back to non-DMA mode: %v", err)
+		dmaMode = false
+		spiTransferOptimized = false
+	} else {
+		spiTransferOptimized = dmaMode
+		if dmaMode {
+			log.Println("DMA channels detected and enabled for optimized transfers")
+		}
+	}
+	
+	// Log the current SPI configuration
+	logSPIMode()
 
 	//rm pcat_display_initialized
 	os.Remove("/tmp/pcat_display_initialized")
@@ -300,7 +451,7 @@ func main() {
 	}
 	defer spiPort.Close()
 
-	conn, err := spiPort.Connect(80000*physic.KiloHertz, spi.Mode0, 8)
+	conn, err := spiPort.Connect(120000*physic.KiloHertz, spi.Mode0, 8)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -344,6 +495,10 @@ func main() {
 		VSyncLines:   gc9307.MAX_VSYNC_SCANLINES,
 		UseCS:        false,
 	})
+	
+	// Initialize display wrapper with DMA optimization
+	displayWrapper = NewDisplayWrapper(display)
+	log.Printf("Display wrapper initialized with transfer stats: %+v", displayWrapper.GetTransferStats())
 
 	wg.Add(1) //first show welcome and do some other things and wait
 	go func() {
@@ -511,13 +666,28 @@ func mainLoop() {
 
 			start := time.Now()
 			if changePageTriggered || httpChangePageTriggered { //changing page
+				// Debouncing: check if enough time has passed since last button press
+				now := time.Now()
+				if buttonPressInProgress || now.Sub(lastButtonPress) < buttonDebounceDelay {
+					// Too soon, skip this press
+					changePageTriggered = false
+					httpChangePageTriggered = false
+					continue
+				}
+				
+				// Mark button press in progress
+				buttonPressInProgress = true
+				lastButtonPress = now
+				
 				httpChangePageTriggered = false
 				changePageTriggered = false
 
 				var usePreCalculated bool
 				
-				// Check if we can use pre-calculated results
-				if preCalculatedReady && !isPreCalculating {
+				// Check if we can use pre-calculated results (with mutex protection)
+				preCalculationMutex.RLock()
+				canUsePreCalculated := preCalculatedReady && !isPreCalculating
+				if canUsePreCalculated {
 					// Verify pre-calculated data is still valid for current page
 					expectedNextIdx := (currPageIdx + 1) % totalNumPages
 					if preCalculatedNextIdx == expectedNextIdx {
@@ -532,13 +702,16 @@ func mainLoop() {
 						nextLocalIdx = preCalculatedNextLocalIdx
 						
 						// Use pre-calculated stitched frame
-						copy(stitchedFrame.Pix, preCalculatedStitched.Pix)
+						if preCalculatedStitched != nil && stitchedFrame != nil {
+							copy(stitchedFrame.Pix, preCalculatedStitched.Pix)
+						}
 						
 						log.Println("PRE-CALC curr/next Idx:", currPageIdx, nextPageIdx, "json/sms/total:", cfgNumPages, lenSmsPagesImages, totalNumPages, "localIdx:", localIdx, "nextLocalIdx:", nextLocalIdx, "isSMS:", isSMS, "isNextPageSMS:", isNextPageSMS)
 					} else {
 						log.Printf("Pre-calculated data stale: expected next=%d, got=%d", expectedNextIdx, preCalculatedNextIdx)
 					}
 				}
+				preCalculationMutex.RUnlock()
 				
 				if !usePreCalculated {
 					log.Println("Pre-calculated data not available, calculating on-demand")
@@ -572,18 +745,30 @@ func mainLoop() {
 
 					log.Println("ON-DEMAND curr/next Idx:", currPageIdx, nextPageIdx, "json/sms/total:", cfgNumPages, lenSmsPagesImages, totalNumPages, "localIdx:", localIdx, "nextLocalIdx:", nextLocalIdx, "isSMS:", isSMS, "isNextPageSMS:", isNextPageSMS)
 
-					clearFrame(nextPageIdxFrameBuffer, middleFrameWidth, middleFrameHeight)
-					renderMiddle(nextPageIdxFrameBuffer, &cfg, isSMS, localIdx)
+					// Safety checks for framebuffer operations
+					if nextPageIdxFrameBuffer != nil && !nextPageIdxFrameBuffer.Bounds().Empty() {
+						clearFrame(nextPageIdxFrameBuffer, middleFrameWidth, middleFrameHeight)
+						renderMiddle(nextPageIdxFrameBuffer, &cfg, isSMS, localIdx)
+					}
 
-					clearFrame(middleFramebuffers[(middleFrames+1)%2], middleFrameWidth, middleFrameHeight)
-					renderMiddle(middleFramebuffers[(middleFrames+1)%2], &cfg, isNextPageSMS, nextLocalIdx)
+					middleFrameIdx := (middleFrames+1)%2
+					if middleFrameIdx < len(middleFramebuffers) && middleFramebuffers[middleFrameIdx] != nil && !middleFramebuffers[middleFrameIdx].Bounds().Empty() {
+						clearFrame(middleFramebuffers[middleFrameIdx], middleFrameWidth, middleFrameHeight)
+						renderMiddle(middleFramebuffers[middleFrameIdx], &cfg, isNextPageSMS, nextLocalIdx)
+					}
 
-					copyImageToImageAt(stitchedFrame, nextPageIdxFrameBuffer, 0, 0)
-					copyImageToImageAt(stitchedFrame, middleFramebuffers[(middleFrames+1)%2], middleFrameWidth, 0)
+					if stitchedFrame != nil && nextPageIdxFrameBuffer != nil {
+						copyImageToImageAt(stitchedFrame, nextPageIdxFrameBuffer, 0, 0)
+					}
+					if stitchedFrame != nil && middleFrameIdx < len(middleFramebuffers) && middleFramebuffers[middleFrameIdx] != nil {
+						copyImageToImageAt(stitchedFrame, middleFramebuffers[middleFrameIdx], middleFrameWidth, 0)
+					}
 				}
 				
-				// Mark pre-calculated data as used/stale
+				// Mark pre-calculated data as used/stale (with mutex protection)
+				preCalculationMutex.Lock()
 				preCalculatedReady = false
+				preCalculationMutex.Unlock()
 
 				// Cache FPS text to avoid string concatenation every frame
 				if showFPS && time.Since(lastFPSUpdate) > 100*time.Millisecond {
@@ -660,6 +845,9 @@ func mainLoop() {
 				pageChangeDuration := time.Since(start)
 				pageChangeFPS := float64(numIntermediatePages) / pageChangeDuration.Seconds()
 				log.Printf("Page change completed in %.1fms, animation FPS: %.1f", float64(pageChangeDuration.Nanoseconds())/1e6, pageChangeFPS)
+				
+				// Mark button press complete
+				buttonPressInProgress = false
 			} else { //normal page rendering
 				// Only update top bar and footer when needed (every few frames) to save CPU
 				// Top bar contains mostly static information (time, battery, signal)

@@ -39,6 +39,11 @@ var (
 
 //---------------- Drawing Functions ----------------
 func drawText(img *image.RGBA, text string, posX, posY int, face font.Face, clr color.Color, center bool) (finishX, finishY int) {
+    // Check if image is nil or has invalid bounds
+    if img == nil || img.Bounds().Empty() {
+        return posX, posY
+    }
+    
     d := &font.Drawer{
         Dst:  img,
         Src:  image.NewUniform(clr),
@@ -64,8 +69,26 @@ func drawText(img *image.RGBA, text string, posX, posY int, face font.Face, clr 
     }
 	y = posY + metrics.Ascent.Round()
 
-    // Set drawing position and draw the text.
+    // Bounds checking - only prevent extreme out-of-bounds cases
+    bounds := img.Bounds()
+    // Only skip if text would be completely outside the image
+    if x + textWidth < bounds.Min.X || x > bounds.Max.X {
+        return posX, posY
+    }
+    if y < bounds.Min.Y - metrics.Descent.Round() || y - metrics.Ascent.Round() > bounds.Max.Y {
+        return posX, posY
+    }
+
+    // Set drawing position and draw the text with error recovery
     d.Dot = fixed.P(x, y)
+    
+    // Add a recovery mechanism for font rendering panics
+    defer func() {
+        if r := recover(); r != nil {
+            log.Printf("Font rendering panic recovered: %v at position (%d, %d) in bounds %+v", r, x, y, bounds)
+        }
+    }()
+    
     d.DrawString(text)
 
     // Calculate finishing coordinates.
@@ -173,11 +196,19 @@ func copyImageToFrameBuffer(img *image.RGBA, frame []color.RGBA) {
 }
 
 func sendTopBar(display gc9307.Device, frame *image.RGBA) {
-	display.FillRectangleWithImage(0, 0, PCAT2_LCD_WIDTH, PCAT2_TOP_BAR_HEIGHT, frame)
+	if displayWrapper != nil {
+		displayWrapper.FillRectangleWithImageOptimized(0, 0, PCAT2_LCD_WIDTH, PCAT2_TOP_BAR_HEIGHT, frame)
+	} else {
+		display.FillRectangleWithImage(0, 0, PCAT2_LCD_WIDTH, PCAT2_TOP_BAR_HEIGHT, frame)
+	}
 }
 
 func sendFooter(display gc9307.Device, frame *image.RGBA) {
-	display.FillRectangleWithImage(0, PCAT2_LCD_HEIGHT-PCAT2_FOOTER_HEIGHT, PCAT2_LCD_WIDTH, PCAT2_FOOTER_HEIGHT, frame)
+	if displayWrapper != nil {
+		displayWrapper.FillRectangleWithImageOptimized(0, PCAT2_LCD_HEIGHT-PCAT2_FOOTER_HEIGHT, PCAT2_LCD_WIDTH, PCAT2_FOOTER_HEIGHT, frame)
+	} else {
+		display.FillRectangleWithImage(0, PCAT2_LCD_HEIGHT-PCAT2_FOOTER_HEIGHT, PCAT2_LCD_WIDTH, PCAT2_FOOTER_HEIGHT, frame)
+	}
 }
 
 // cropToContent scans the given frame and returns a sub-image that contains only non-background pixels.
@@ -235,22 +266,40 @@ func sendMiddlePartial(display gc9307.Device, frame *image.RGBA) {
 
 	// Send the cropped frame to the display.
 	// Here we use the cropped image's dimensions.
-	display.FillRectangleWithImage(
-		int16(croppedFrame.Bounds().Min.X),
-		int16(croppedFrame.Bounds().Min.Y),
-		int16(croppedFrame.Bounds().Dx()),
-		int16(croppedFrame.Bounds().Dy()),
-		croppedFrame,
-	)
+	if displayWrapper != nil {
+		displayWrapper.FillRectangleWithImageOptimized(
+			int16(croppedFrame.Bounds().Min.X),
+			int16(croppedFrame.Bounds().Min.Y),
+			int16(croppedFrame.Bounds().Dx()),
+			int16(croppedFrame.Bounds().Dy()),
+			croppedFrame,
+		)
+	} else {
+		display.FillRectangleWithImage(
+			int16(croppedFrame.Bounds().Min.X),
+			int16(croppedFrame.Bounds().Min.Y),
+			int16(croppedFrame.Bounds().Dx()),
+			int16(croppedFrame.Bounds().Dy()),
+			croppedFrame,
+		)
+	}
 }
 
 func sendMiddle(display gc9307.Device, frame *image.RGBA) {
 	//crop some frame to save data transfer
-	display.FillRectangleWithImage(0, PCAT2_TOP_BAR_HEIGHT, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT-PCAT2_TOP_BAR_HEIGHT-PCAT2_FOOTER_HEIGHT, frame)
+	if displayWrapper != nil {
+		displayWrapper.FillRectangleWithImageOptimized(0, PCAT2_TOP_BAR_HEIGHT, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT-PCAT2_TOP_BAR_HEIGHT-PCAT2_FOOTER_HEIGHT, frame)
+	} else {
+		display.FillRectangleWithImage(0, PCAT2_TOP_BAR_HEIGHT, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT-PCAT2_TOP_BAR_HEIGHT-PCAT2_FOOTER_HEIGHT, frame)
+	}
 }
 
 func sendFull(display gc9307.Device, frame *image.RGBA) {
-	display.FillRectangleWithImage(0, 0, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT, frame)
+	if displayWrapper != nil {
+		displayWrapper.FillRectangleWithImageOptimized(0, 0, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT, frame)
+	} else {
+		display.FillRectangleWithImage(0, 0, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT, frame)
+	}
 }
 
 // Function to display time on frame buffer
@@ -828,10 +877,21 @@ func saveFrameToPng(frame *image.RGBA, filename string) {
 }
 
 func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
+	// Safety check for frame validity
+	if frame == nil || frame.Bounds().Empty() {
+		log.Printf("renderMiddle: invalid frame bounds %+v", frame)
+		return
+	}
+	
 	var placeholderRe = regexp.MustCompile(`\[(\w+)\]`)
 
 	if isSMS {
-		copyImageToImageAt(frame, smsPagesImages[pageIdx], 0, 0)
+		// Bounds check for SMS pages
+		if pageIdx >= 0 && pageIdx < len(smsPagesImages) && smsPagesImages[pageIdx] != nil {
+			copyImageToImageAt(frame, smsPagesImages[pageIdx], 0, 0)
+		} else {
+			log.Printf("renderMiddle: invalid SMS page index %d", pageIdx)
+		}
 		return
 	}
 

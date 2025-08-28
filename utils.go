@@ -652,6 +652,10 @@ func hasShowSmsInUserConfig() bool {
 
 // preCalculateScreenTransition pre-calculates the next screen transition for immediate display on key release
 func preCalculateScreenTransition() {
+	// Lock to prevent concurrent pre-calculations
+	preCalculationMutex.Lock()
+	defer preCalculationMutex.Unlock()
+	
 	if isPreCalculating {
 		log.Println("Pre-calculation already in progress, skipping")
 		return
@@ -701,13 +705,23 @@ func preCalculateScreenTransition() {
 		isPreCalculating = false
 	}()
 	
-	// Render current page
-	clearFrame(currentPageBuffer, middleFrameWidth, middleFrameHeight)
-	renderMiddle(currentPageBuffer, &cfg, preCalculatedIsSMS, preCalculatedLocalIdx)
+	// Render current page with safety checks
+	if currentPageBuffer != nil && !currentPageBuffer.Bounds().Empty() {
+		clearFrame(currentPageBuffer, middleFrameWidth, middleFrameHeight)
+		renderMiddle(currentPageBuffer, &cfg, preCalculatedIsSMS, preCalculatedLocalIdx)
+	} else {
+		log.Println("Pre-calculation: invalid current page buffer, skipping")
+		return
+	}
 	
-	// Render next page  
-	clearFrame(nextPageBuffer, middleFrameWidth, middleFrameHeight)
-	renderMiddle(nextPageBuffer, &cfg, preCalculatedIsNextSMS, preCalculatedNextLocalIdx)
+	// Render next page with safety checks  
+	if nextPageBuffer != nil && !nextPageBuffer.Bounds().Empty() {
+		clearFrame(nextPageBuffer, middleFrameWidth, middleFrameHeight)
+		renderMiddle(nextPageBuffer, &cfg, preCalculatedIsNextSMS, preCalculatedNextLocalIdx)
+	} else {
+		log.Println("Pre-calculation: invalid next page buffer, skipping")
+		return
+	}
 	
 	// Create stitched frame: current page on left, next page on right
 	clearFrame(preCalculatedStitched, middleFrameWidth*2, middleFrameHeight)
