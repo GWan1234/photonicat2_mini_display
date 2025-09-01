@@ -1,4 +1,4 @@
-# PhotoniCat2 Mini Display
+# Photonicat2 Mini Display
 
 A Go-based display driver for the Photonicat2 mini display, providing real-time system information, network status, and device metrics on a small LCD screen.
 
@@ -15,11 +15,9 @@ A Go-based display driver for the Photonicat2 mini display, providing real-time 
 
 ### Run Application
 ```bash
-# After building with compile.sh
-./photonicat2_mini_display
+# After building with compile.sh cross compile on X86
+./pcat2_mini_display_openwrt #on openwrt
 ```
-
-📚 **Complete Guide**: See [BUILD_AND_TEST.md](BUILD_AND_TEST.md) for detailed build instructions and testing guide.
 
 ## Sample Screen
 
