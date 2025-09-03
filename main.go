@@ -62,6 +62,9 @@ var (
 	weAreRunning = true
 	runMainLoop  = true
 	offTime      = time.Now()
+	
+	// Shutdown monitoring
+	shutdownMonitor *ShutdownMonitor
 	PCAT_YELLOW  = color.RGBA{255, 229, 0, 255}
 	PCAT_WHITE   = color.RGBA{255, 255, 255, 255}
 	PCAT_RED     = color.RGBA{226, 72, 38, 255}
@@ -499,6 +502,26 @@ func main() {
 	// Initialize display wrapper with DMA optimization
 	displayWrapper = NewDisplayWrapper(display)
 	log.Printf("Display wrapper initialized with transfer stats: %+v", displayWrapper.GetTransferStats())
+	
+	// Initialize shutdown monitoring
+	// This monitors system shutdown/restart before SIGTERM is sent
+	// EnableDBusLogind: monitors D-Bus logind PrepareForShutdown/PrepareForSleep signals
+	// EnableProcComm: monitors /proc/1/comm for init process changes
+	// Both methods detect shutdown earlier than SIGTERM for instant shutdown screen display
+	shutdownConfig := ShutdownMonitorConfig{
+		EnableDBusLogind: true,  // Monitor D-Bus logind signals (recommended)
+		EnableProcComm:   true,  // Monitor /proc/1/comm changes (backup method)
+	}
+	
+	if shutdownConfig.EnableDBusLogind || shutdownConfig.EnableProcComm {
+		shutdownMonitor = NewShutdownMonitor(shutdownConfig)
+		if err := shutdownMonitor.Start(); err != nil {
+			log.Printf("Failed to start shutdown monitoring: %v", err)
+		} else {
+			log.Printf("Shutdown monitoring started (D-Bus: %v, /proc/1/comm: %v)", 
+				shutdownConfig.EnableDBusLogind, shutdownConfig.EnableProcComm)
+		}
+	}
 
 	wg.Add(1) //first show welcome and do some other things and wait
 	go func() {
@@ -608,6 +631,12 @@ func registerExitHandler() {
 		log.Printf("Received signal: %v", sig)
 		weAreRunning = false
 		offTime = time.Now()
+		
+		// Stop shutdown monitoring
+		if shutdownMonitor != nil {
+			shutdownMonitor.Stop()
+		}
+		
 		time.Sleep(200 * time.Millisecond)
 		
 		// Different behavior for SIGTERM vs SIGINT
