@@ -104,7 +104,7 @@ var (
 	lastActivity   = time.Now()
 	lastActivityMu sync.Mutex
 
-	numIntermediatePages = 8
+	numIntermediatePages = 10
 
 	// configuration for idle fade
 	fadeDuration = 2 * time.Second // how long the fade takes
@@ -146,6 +146,14 @@ var (
 	preCalculatedLocalIdx     = 0
 	preCalculatedNextLocalIdx = 0
 	preCalculationMutex       sync.RWMutex
+
+	// Pre-allocated transition frame buffers
+	transitionFrames          []*image.RGBA
+	transitionFramesReady     = false
+	transitionCalculating     = false
+	transitionMutex           sync.RWMutex
+	transitionFrameChannel    = make(chan int, numIntermediatePages)
+	transitionCompleteChannel = make(chan bool, 1)
 	// nextPageIdxFrameBuffer is now managed by BufferManager
 	showFPS                = false
 	fps                    = 0.0
@@ -419,20 +427,20 @@ func main() {
 	// Set DMA mode from command line flag
 	dmaMode = *useDMA
 	if dmaMode {
-		log.Println("SPI DMA mode: ENABLED")
+		log.Println("\033[32mSPI DMA mode: ENABLED\033[0m")
 	} else {
-		log.Println("SPI DMA mode: DISABLED")
+		log.Println("\033[31mSPI DMA mode: DISABLED\033[0m")
 	}
 
 	// Check if DMA channels are available
 	if err := checkDMAAvailability(); err != nil {
-		log.Printf("DMA not available, falling back to non-DMA mode: %v", err)
+		log.Printf("\033[31mDMA not available, falling back to non-DMA mode: %v\033[0m", err)
 		dmaMode = false
 		spiTransferOptimized = false
 	} else {
 		spiTransferOptimized = dmaMode
 		if dmaMode {
-			log.Println("DMA channels detected and enabled for optimized transfers")
+			log.Println("\033[32mDMA channels detected and enabled for optimized transfers\033[0m")
 		}
 	}
 
@@ -666,6 +674,8 @@ func init3FrameBuffers() {
 	// Initialize legacy buffers for backward compatibility
 	initLegacyBuffers()
 	initLegacyTransitionBuffers()
+	// Initialize pre-allocated transition frame buffers
+	initTransitionFrameBuffers()
 }
 
 func prepareMainLoop() {
@@ -686,6 +696,12 @@ func mainLoop() {
 	nextPageIdx := 0
 	isNextPageSMS := false
 	faceTiny, _, err := getFontFace("tiny")
+
+	// Track frame-by-frame performance during transition
+	frameTimestamps := make([]time.Time, numIntermediatePages+1)
+	copyTimings := make([]int, numIntermediatePages)
+	sendTimings := make([]int, numIntermediatePages)
+
 	if err != nil {
 		log.Fatalf("Failed to load font: %v", err)
 	}
@@ -695,18 +711,16 @@ func mainLoop() {
 			log.Println("showsms:", cfg.ShowSms, "totalPages:", totalNumPages, "cfgPages:", cfgNumPages)
 		}
 		if runMainLoop {
-
 			start := time.Now()
-			if changePageTriggered || httpChangePageTriggered { //changing page
-				// Debouncing: check if enough time has passed since last button press
-				now := time.Now()
-				//if buttonPressInProgress || now.Sub(lastButtonPress) < buttonDebounceDelay {
-				if buttonPressInProgress {
-					// Too soon, skip this press
+			if changePageTriggered || httpChangePageTriggered { //CHANGE PAGE
+				if buttonPressInProgress { // Too soon, skip this press
 					changePageTriggered = false
 					httpChangePageTriggered = false
 					continue
 				}
+
+				log.Printf("🔄 Page change called")
+				now := time.Now()
 
 				// Mark button press in progress and immediately set activity
 				buttonPressInProgress = true
@@ -715,175 +729,219 @@ func mainLoop() {
 				lastActivity = now
 				lastActivityMu.Unlock()
 
-				httpChangePageTriggered = false
-				changePageTriggered = false
+				renderStart := time.Now()
+				log.Printf("⚡ Rendering starts +%dus", int(renderStart.Sub(start).Microseconds()))
 
-				var usePreCalculated bool
+				// Optimize page calculations - calculate once and reuse
+				currPageIdx = currPageIdx % totalNumPages
+				nextPageIdx = (currPageIdx + 1) % totalNumPages
 
-				// Check if we can use pre-calculated results (with mutex protection)
-				preCalculationMutex.RLock()
-				canUsePreCalculated := preCalculatedReady && !isPreCalculating
-				if canUsePreCalculated {
-					// Verify pre-calculated data is still valid for current page
-					expectedNextIdx := (currPageIdx + 1) % totalNumPages
-					if preCalculatedNextIdx == expectedNextIdx {
-						usePreCalculated = true
-						log.Println("Using pre-calculated stitched frame for instant animation")
+				// Pre-calculate SMS status to avoid redundant checks
+				isSMS = cfg.ShowSms && currPageIdx >= cfgNumPages
+				isNextPageSMS = cfg.ShowSms && nextPageIdx >= cfgNumPages
 
-						// Use pre-calculated values
-						nextPageIdx = preCalculatedNextIdx
-						isSMS = preCalculatedIsSMS
-						isNextPageSMS = preCalculatedIsNextSMS
-						localIdx = preCalculatedLocalIdx
-						nextLocalIdx = preCalculatedNextLocalIdx
+				if isSMS {
+					localIdx = currPageIdx - cfgNumPages
+				} else {
+					localIdx = currPageIdx
+				}
 
-						// Use pre-calculated stitched frame
-						if preCalculatedStitched != nil && stitchedFrame != nil {
-							copy(stitchedFrame.Pix, preCalculatedStitched.Pix)
-						}
-
-						log.Println("PRE-CALC curr/next Idx:", currPageIdx, nextPageIdx, "json/sms/total:", cfgNumPages, lenSmsPagesImages, totalNumPages, "localIdx:", localIdx, "nextLocalIdx:", nextLocalIdx, "isSMS:", isSMS, "isNextPageSMS:", isNextPageSMS)
+				if isNextPageSMS {
+					if lenSmsPagesImages <= 0 {
+						lenSmsPagesImages = 1
+					}
+					nextLocalIdx = (nextPageIdx - cfgNumPages) % lenSmsPagesImages
+				} else {
+					if cfgNumPages > 0 {
+						nextLocalIdx = nextPageIdx % cfgNumPages
 					} else {
-						log.Printf("Pre-calculated data stale: expected next=%d, got=%d", expectedNextIdx, preCalculatedNextIdx)
+						nextLocalIdx = 0
 					}
 				}
-				preCalculationMutex.RUnlock()
 
-				if !usePreCalculated {
-					log.Println("Pre-calculated data not available, calculating on-demand")
+				log.Println("curr/next Idx:", currPageIdx, nextPageIdx, "json/sms/total:", cfgNumPages, lenSmsPagesImages, totalNumPages, "localIdx:", localIdx, "nextLocalIdx:", nextLocalIdx, "isSMS:", isSMS, "isNextPageSMS:", isNextPageSMS)
 
-					// Optimize page calculations - calculate once and reuse
-					currPageIdx = currPageIdx % totalNumPages
-					nextPageIdx = (currPageIdx + 1) % totalNumPages
+				clearFrame(nextPageIdxFrameBuffer, middleFrameWidth, middleFrameHeight)
+				renderMiddle(nextPageIdxFrameBuffer, &cfg, isNextPageSMS, nextLocalIdx)
 
-					// Pre-calculate SMS status to avoid redundant checks
-					isSMS = cfg.ShowSms && currPageIdx >= cfgNumPages
-					isNextPageSMS = cfg.ShowSms && nextPageIdx >= cfgNumPages
+				stitchStart := time.Now()
 
-					if isSMS {
-						localIdx = currPageIdx - cfgNumPages
-					} else {
-						localIdx = currPageIdx
-					}
+				copyImageToImageAt(stitchedFrame, middleFramebuffers[(middleFrames+1)%2], 0, 0) //current frame
+				copyImageToImageAt(stitchedFrame, nextPageIdxFrameBuffer, middleFrameWidth, 0)  //next frame
 
-					if isNextPageSMS {
-						if lenSmsPagesImages <= 0 {
-							lenSmsPagesImages = 1
-						}
-						nextLocalIdx = (nextPageIdx - cfgNumPages) % lenSmsPagesImages
-					} else {
-						if cfgNumPages > 0 {
-							nextLocalIdx = nextPageIdx % cfgNumPages
+				stitchEnd := time.Now()
+				log.Printf("🔧 stitch took %dus", int(stitchEnd.Sub(stitchStart).Microseconds()))
+
+				calculateTransitionFramesAsync(stitchedFrame, easingLookup)
+
+				// Calculate and send first frame immediately (no waiting)
+				frameTimestamps[0] = time.Now()
+
+				// Process remaining frames - use pre-calculated if ready, otherwise calculate on-demand
+				for i := 1; i < numIntermediatePages; i++ {
+					// Update page indices at the halfway point
+					if i == numIntermediatePages/2 {
+						localIdx = nextLocalIdx
+						currPageIdx = nextPageIdx
+						isSMS = isNextPageSMS
+						nextPageLength := 0
+						if isNextPageSMS {
+							nextPageLength = lenSmsPagesImages
 						} else {
-							nextLocalIdx = 0
+							nextPageLength = cfgNumPages
 						}
+						drawFooter(display, footerFramebuffers[middleFrames%2], nextPageIdx, nextPageLength, isNextPageSMS)
 					}
 
-					log.Println("ON-DEMAND curr/next Idx:", currPageIdx, nextPageIdx, "json/sms/total:", cfgNumPages, lenSmsPagesImages, totalNumPages, "localIdx:", localIdx, "nextLocalIdx:", nextLocalIdx, "isSMS:", isSMS, "isNextPageSMS:", isNextPageSMS)
+					// Try to use pre-calculated frame, fallback to real-time calculation
+					var frameToSend *image.RGBA
+					frameReady := false
 
-					// Safety checks for framebuffer operations
-					if nextPageIdxFrameBuffer != nil && !nextPageIdxFrameBuffer.Bounds().Empty() {
-						clearFrame(nextPageIdxFrameBuffer, middleFrameWidth, middleFrameHeight)
-						renderMiddle(nextPageIdxFrameBuffer, &cfg, isSMS, localIdx)
-					}
-
-					middleFrameIdx := (middleFrames + 1) % 2
-					if middleFrameIdx < len(middleFramebuffers) && middleFramebuffers[middleFrameIdx] != nil && !middleFramebuffers[middleFrameIdx].Bounds().Empty() {
-						clearFrame(middleFramebuffers[middleFrameIdx], middleFrameWidth, middleFrameHeight)
-						renderMiddle(middleFramebuffers[middleFrameIdx], &cfg, isNextPageSMS, nextLocalIdx)
-					}
-
-					if stitchedFrame != nil && nextPageIdxFrameBuffer != nil {
-						copyImageToImageAt(stitchedFrame, nextPageIdxFrameBuffer, 0, 0)
-					}
-					if stitchedFrame != nil && middleFrameIdx < len(middleFramebuffers) && middleFramebuffers[middleFrameIdx] != nil {
-						copyImageToImageAt(stitchedFrame, middleFramebuffers[middleFrameIdx], middleFrameWidth, 0)
-					}
-				}
-
-				// Mark pre-calculated data as used/stale (with mutex protection)
-				preCalculationMutex.Lock()
-				preCalculatedReady = false
-				preCalculationMutex.Unlock()
-
-				// Cache FPS text to avoid string concatenation every frame
-				if showFPS && time.Since(lastFPSUpdate) > 100*time.Millisecond {
-					now := time.Now()
-					fps = 1 / now.Sub(lastUpdate).Seconds()
-					lastUpdate = now
-					lastFPSUpdate = now
-					cachedFPSText = "FPS:" + strconv.Itoa(int(fps)) + ", " + strconv.Itoa(middleFrames)
-				}
-
-				// Pre-calculate footer parameters outside loop for better performance
-				halfPages := numIntermediatePages / 2
-
-				// Calculate footer parameters for both phases
-				firstPhaseFooterIdx := nextLocalIdx
-				firstPhaseFooterPages := cfgNumPages
-				firstPhaseFooterIsSMS := isNextPageSMS
-				if firstPhaseFooterIsSMS {
-					firstPhaseFooterPages = lenSmsPagesImages
-				}
-
-				secondPhaseFooterIdx := localIdx
-				secondPhaseFooterPages := cfgNumPages
-				secondPhaseFooterIsSMS := isSMS
-				if secondPhaseFooterIsSMS {
-					secondPhaseFooterPages = lenSmsPagesImages
-				}
-
-				for i := 0; i < numIntermediatePages; i++ {
-					// Use pre-calculated values instead of recalculating
-					var currentFooterIdx int
-					var currentFooterPages int
-					var currentFooterIsSMS bool
-
-					if i <= halfPages {
-						currentFooterIdx = firstPhaseFooterIdx
-						currentFooterPages = firstPhaseFooterPages
-						currentFooterIsSMS = firstPhaseFooterIsSMS
-						if i == halfPages {
-							localIdx = nextLocalIdx
-							currPageIdx = nextPageIdx
-						}
+					// Check if this frame is pre-calculated (non-blocking)
+					transitionMutex.RLock()
+					if transitionFramesReady {
+						// All frames are ready
+						frameToSend = transitionFrames[i]
+						frameReady = true
+						copyTimings[i] = 0 // Mark as pre-calculated
 					} else {
-						currentFooterIdx = secondPhaseFooterIdx
-						currentFooterPages = secondPhaseFooterPages
-						currentFooterIsSMS = secondPhaseFooterIsSMS
+						// Check channel for ready frames (non-blocking)
+						select {
+						case readyIndex := <-transitionFrameChannel:
+							if readyIndex >= i {
+								frameToSend = transitionFrames[i]
+								frameReady = true
+								copyTimings[i] = 0 // Mark as pre-calculated
+								// Put the signal back for later frames
+								select {
+								case transitionFrameChannel <- readyIndex:
+								default:
+								}
+							} else {
+								// Put back and use fallback
+								select {
+								case transitionFrameChannel <- readyIndex:
+								default:
+								}
+							}
+						default:
+							// Channel empty, use fallback
+						}
+					}
+					transitionMutex.RUnlock()
+
+					if !frameReady {
+						// Fallback: calculate frame on-demand if not pre-calculated
+						log.Printf("🔨 Frame not ready")
+						copyStart := time.Now()
+						xPos := easingLookup[i]
+						copyImageRegion(croppedFrameBuffer, stitchedFrame, xPos, 0, middleFrameWidth, middleFrameHeight)
+						copyEnd := time.Now()
+						copyTimings[i] = int(copyEnd.Sub(copyStart).Microseconds())
+						frameToSend = croppedFrameBuffer
 					}
 
-					// Render footer only once at the beginning instead of at transition points
-					if i == 0 {
-						drawFooter(display, footerFramebuffers[middleFrames%2], currentFooterIdx, currentFooterPages, currentFooterIsSMS)
-					}
+					// Send frame immediately
+					sendStart := time.Now()
+					sendMiddle(display, frameToSend)
+					sendEnd := time.Now()
+					sendTimings[i] = int(sendEnd.Sub(sendStart).Microseconds())
 
-					// Use pre-calculated easing values instead of math.Pow for better performance
-					xPos := easingLookup[i]
-
-					// Use efficient region copy instead of cropImageAt to avoid allocations
-					copyImageRegion(croppedFrameBuffer, stitchedFrame, xPos, 0, middleFrameWidth, middleFrameHeight)
-
-					// Skip FPS text during transition for better performance
-					// if showFPS && cachedFPSText != "" {
-					//     drawText(croppedFrameBuffer, cachedFPSText, 10, 240, faceTiny, PCAT_RED, false)
-					// }
-
-					sendMiddle(display, croppedFrameBuffer)
 					middleFrames++
 					stitchedFrames++
+					frameTimestamps[i+1] = time.Now()
+				}
+				//=============== end of page change timing ===============
+				// Print detailed timing when page change animation is complete
+				pageChangeEnd := time.Now()
+				pageChangeDuration := pageChangeEnd.Sub(start)
+				renderingDuration := pageChangeEnd.Sub(renderStart)
+				setupDuration := renderStart.Sub(start)
+				pageChangeFPS := float64(numIntermediatePages) / pageChangeDuration.Seconds()
+
+				// Calculate frame-by-frame timing statistics
+				var frameDurations []int
+				var minFrameTime, maxFrameTime, totalFrameTime int
+				var totalCopyTime, totalSendTime int
+				minFrameTime = int(^uint(0) >> 1) // Max int value
+
+				for i := 1; i < len(frameTimestamps); i++ {
+					frameDuration := int(frameTimestamps[i].Sub(frameTimestamps[i-1]).Microseconds())
+					frameDurations = append(frameDurations, frameDuration)
+					totalFrameTime += frameDuration
+					if frameDuration < minFrameTime {
+						minFrameTime = frameDuration
+					}
+					if frameDuration > maxFrameTime {
+						maxFrameTime = frameDuration
+					}
 				}
 
-				// Update isSMS for main loop after animation completes
-				isSMS = isNextPageSMS
+				// Calculate sub-operation totals
+				for i := 0; i < len(copyTimings); i++ {
+					totalCopyTime += copyTimings[i]
+					totalSendTime += sendTimings[i]
+				}
 
-				// Print FPS when page change animation is complete
-				pageChangeDuration := time.Since(start)
-				pageChangeFPS := float64(numIntermediatePages) / pageChangeDuration.Seconds()
-				log.Printf("Page change completed in %.1fms, animation FPS: %.1f", float64(pageChangeDuration.Nanoseconds())/1e6, pageChangeFPS)
+				avgFrameTime := totalFrameTime / len(frameDurations)
+				avgCopyTime := totalCopyTime / len(copyTimings)
+				avgSendTime := totalSendTime / len(sendTimings)
+
+				log.Printf("✅ Page change completed +%dus | Setup: %dus, Rendering: %dus | FPS: %d",
+					int(pageChangeDuration.Microseconds()),
+					int(setupDuration.Microseconds()),
+					int(renderingDuration.Microseconds()),
+					int(pageChangeFPS))
+
+				log.Printf("📊 Frame timing: Avg=%dus, Min=%dus, Max=%dus, Total=%dus",
+					avgFrameTime, minFrameTime, maxFrameTime, totalFrameTime)
+
+				log.Printf("🔄 Sub-operation timing: Copy avg=%dus, Send avg=%dus, Copy total=%dus, Send total=%dus",
+					avgCopyTime, avgSendTime, totalCopyTime, totalSendTime)
+
+				// Print individual frame times for detailed analysis
+				frameTimingDetails := "🎬 Per-frame times (μs): "
+				for i, duration := range frameDurations {
+					if i > 0 {
+						frameTimingDetails += ", "
+					}
+					frameTimingDetails += strconv.Itoa(duration)
+				}
+				log.Printf("%s", frameTimingDetails)
+
+				// Print detailed per-frame breakdown with pre-calculated indicator
+				copyTimingDetails := "📋 Copy times (μs): "
+				preCalculatedCount := 0
+				for i, duration := range copyTimings {
+					if i > 0 {
+						copyTimingDetails += ", "
+					}
+					if duration == 0 {
+						copyTimingDetails += "0*" // Mark pre-calculated frames with *
+						preCalculatedCount++
+					} else {
+						copyTimingDetails += strconv.Itoa(duration)
+					}
+				}
+				log.Printf("%s", copyTimingDetails)
+				log.Printf("⚡ Pre-calculated frames used: %d/%d (%.1f%%)",
+					preCalculatedCount, len(copyTimings),
+					float64(preCalculatedCount)/float64(len(copyTimings))*100)
+
+				sendTimingDetails := "📡 Send times (μs): "
+				for i, duration := range sendTimings {
+					if i > 0 {
+						sendTimingDetails += ", "
+					}
+					sendTimingDetails += strconv.Itoa(duration)
+				}
+				log.Printf("%s", sendTimingDetails)
+				//=============== end of page change timing ===============
 
 				// Mark button press complete
 				buttonPressInProgress = false
+				httpChangePageTriggered = false
+				changePageTriggered = false
 			} else { //normal page rendering
 				// Only update top bar and footer when needed (every few frames) to save CPU
 				// Top bar contains mostly static information (time, battery, signal)
@@ -1076,4 +1134,70 @@ func getFooterFramebuffer(index int) *image.RGBA {
 		return footerFramebuffers[0]
 	}
 	return footerFramebuffers[index]
+}
+
+// initTransitionFrameBuffers initializes pre-allocated transition frame buffers
+func initTransitionFrameBuffers() {
+	transitionFrames = make([]*image.RGBA, numIntermediatePages)
+	for i := 0; i < numIntermediatePages; i++ {
+		transitionFrames[i] = image.NewRGBA(image.Rect(0, 0, middleFrameWidth, middleFrameHeight))
+	}
+	log.Printf("🎬 Initialized %d pre-allocated transition frame buffers", numIntermediatePages)
+}
+
+// calculateTransitionFramesAsync calculates all transition frames in the background
+func calculateTransitionFramesAsync(stitchedFrame *image.RGBA, easingValues []int) {
+	// Safety check
+	if stitchedFrame == nil || len(easingValues) != numIntermediatePages {
+		log.Printf("❌ calculateTransitionFramesAsync: invalid parameters")
+		return
+	}
+
+	transitionMutex.Lock()
+	if transitionCalculating {
+		transitionMutex.Unlock()
+		return // Already calculating
+	}
+	transitionCalculating = true
+	transitionFramesReady = false
+	transitionMutex.Unlock()
+
+	go func() {
+		defer func() {
+			transitionMutex.Lock()
+			transitionCalculating = false
+			transitionFramesReady = true
+			transitionMutex.Unlock()
+
+			// Signal completion
+			select {
+			case transitionCompleteChannel <- true:
+			default:
+			}
+		}()
+
+		// Clear any existing channel data
+		for len(transitionFrameChannel) > 0 {
+			<-transitionFrameChannel
+		}
+
+		// Pre-calculate transition frames starting from frame 1
+		for i := 1; i < numIntermediatePages; i++ {
+			// Safety bounds check
+			if i >= len(transitionFrames) || i >= len(easingValues) {
+				log.Printf("❌ Frame index %d out of bounds", i)
+				continue
+			}
+
+			xPos := easingValues[i]
+			copyImageRegion(transitionFrames[i], stitchedFrame, xPos, 0, middleFrameWidth, middleFrameHeight)
+
+			// Signal that this frame is ready (non-blocking)
+			select {
+			case transitionFrameChannel <- i:
+			default:
+				log.Printf("⚠️ Channel full, frame %d signal dropped", i)
+			}
+		}
+	}()
 }

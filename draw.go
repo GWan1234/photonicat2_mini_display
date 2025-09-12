@@ -459,26 +459,55 @@ func copyImageToImageAt(frame *image.RGBA, img *image.RGBA, x0, y0 int) error {
 		return fmt.Errorf("x, y is negative: %d,%d", x0, y0)
 	}
 
-	// Use optimized copying for fully opaque images
 	imgBounds := img.Bounds()
 	frameBounds := frame.Bounds()
+	frameStride := frame.Stride
+	imgStride := img.Stride
 	
-	// Fast path for fully opaque images
+	// Ultra-fast path: bulk memory copy for opaque images with optimal alignment
+	if isFullyOpaque(img) && x0 == 0 && targetWidth == frameBounds.Dx() && targetWidth == imgBounds.Dx() {
+		// Perfect alignment - copy entire rows at once
+		srcStart := (imgBounds.Min.Y * imgStride) + (imgBounds.Min.X * 4)
+		dstStart := (y0 * frameStride)
+		rowSize := targetWidth * 4 // 4 bytes per RGBA pixel
+		
+		for y := 0; y < targetHeight; y++ {
+			if y0+y >= frameBounds.Min.Y && y0+y < frameBounds.Max.Y {
+				srcOffset := srcStart + (y * imgStride)
+				dstOffset := dstStart + ((y0+y) * frameStride)
+				copy(frame.Pix[dstOffset:dstOffset+rowSize], img.Pix[srcOffset:srcOffset+rowSize])
+			}
+		}
+		return nil
+	}
+	
+	// Fast path for fully opaque images - row-wise copy when possible
 	if isFullyOpaque(img) {
-		// Use direct memory copy for better performance
 		for y := 0; y < targetHeight; y++ {
 			srcY := imgBounds.Min.Y + y
 			dstY := y0 + y
 			
 			if dstY >= frameBounds.Min.Y && dstY < frameBounds.Max.Y {
-				for x := 0; x < targetWidth; x++ {
-					srcX := imgBounds.Min.X + x
-					dstX := x0 + x
-					
-					if srcX >= imgBounds.Min.X && srcX < imgBounds.Max.X &&
-					   dstX >= frameBounds.Min.X && dstX < frameBounds.Max.X {
-						// Direct pixel copy for opaque images
-						frame.SetRGBA(dstX, dstY, img.RGBAAt(srcX, srcY))
+				// Calculate byte offsets for this row
+				srcRowStart := (srcY * imgStride) + (imgBounds.Min.X * 4)
+				dstRowStart := (dstY * frameStride) + (x0 * 4)
+				rowByteSize := targetWidth * 4
+				
+				// Bounds check for destination
+				if x0 >= frameBounds.Min.X && x0+targetWidth <= frameBounds.Max.X {
+					// Safe to copy entire row at once
+					copy(frame.Pix[dstRowStart:dstRowStart+rowByteSize], 
+						 img.Pix[srcRowStart:srcRowStart+rowByteSize])
+				} else {
+					// Pixel-by-pixel fallback for edge cases
+					for x := 0; x < targetWidth; x++ {
+						srcX := imgBounds.Min.X + x
+						dstX := x0 + x
+						
+						if srcX >= imgBounds.Min.X && srcX < imgBounds.Max.X &&
+						   dstX >= frameBounds.Min.X && dstX < frameBounds.Max.X {
+							frame.SetRGBA(dstX, dstY, img.RGBAAt(srcX, srcY))
+						}
 					}
 				}
 			}
@@ -486,7 +515,7 @@ func copyImageToImageAt(frame *image.RGBA, img *image.RGBA, x0, y0 int) error {
 		return nil
 	}
 
-	// Iterate over each pixel with alpha blending for transparent images.
+	// Fallback for images with transparency - use alpha blending
 	for y := 0; y < targetHeight; y++ {
 		for x := 0; x < targetWidth; x++ {
 			sample := img.RGBAAt(x, y)
@@ -536,7 +565,7 @@ func isFullyOpaque(img *image.RGBA) bool {
 	return true
 }
 
-// copyImageRegion efficiently copies a region from src to dst
+// copyImageRegion efficiently copies a region from src to dst using bulk memory operations
 func copyImageRegion(dst *image.RGBA, src *image.RGBA, x0, y0, width, height int) {
 	srcBounds := src.Bounds()
 	dstBounds := dst.Bounds()
@@ -563,20 +592,38 @@ func copyImageRegion(dst *image.RGBA, src *image.RGBA, x0, y0, width, height int
 		return
 	}
 	
-	// Use direct memory copying for better performance
+	// Ultra-fast bulk memory copy using direct Pix access
+	srcStride := src.Stride
+	dstStride := dst.Stride
+	rowByteSize := width * 4 // 4 bytes per RGBA pixel
+	
 	for y := 0; y < height; y++ {
 		srcY := y0 + y
 		dstY := y
 		
 		if srcY >= srcBounds.Min.Y && srcY < srcBounds.Max.Y && 
 		   dstY >= dstBounds.Min.Y && dstY < dstBounds.Max.Y {
-			for x := 0; x < width; x++ {
-				srcX := x0 + x
-				dstX := x
-				
-				if srcX >= srcBounds.Min.X && srcX < srcBounds.Max.X &&
-				   dstX >= dstBounds.Min.X && dstX < dstBounds.Max.X {
-					dst.SetRGBA(dstX, dstY, src.RGBAAt(srcX, srcY))
+			
+			// Calculate byte offsets for this row
+			srcOffset := (srcY * srcStride) + (x0 * 4)
+			dstOffset := (dstY * dstStride)
+			
+			// Bounds check to ensure we don't go out of bounds
+			if srcOffset >= 0 && srcOffset+rowByteSize <= len(src.Pix) &&
+			   dstOffset >= 0 && dstOffset+rowByteSize <= len(dst.Pix) {
+				// Ultra-fast row copy using built-in copy function
+				copy(dst.Pix[dstOffset:dstOffset+rowByteSize], 
+					 src.Pix[srcOffset:srcOffset+rowByteSize])
+			} else {
+				// Fallback to pixel-by-pixel for edge cases (shouldn't happen in normal use)
+				for x := 0; x < width; x++ {
+					srcX := x0 + x
+					dstX := x
+					
+					if srcX >= srcBounds.Min.X && srcX < srcBounds.Max.X &&
+					   dstX >= dstBounds.Min.X && dstX < dstBounds.Max.X {
+						dst.SetRGBA(dstX, dstY, src.RGBAAt(srcX, srcY))
+					}
 				}
 			}
 		}
