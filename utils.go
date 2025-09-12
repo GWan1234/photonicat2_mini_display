@@ -18,11 +18,12 @@ import (
 	"golang.org/x/image/font/opentype"
 )
 
-
 var (
-	fadeMu         sync.Mutex
-	fadeCancel     chan struct{}
-	swippingScreen bool
+	fadeMu              sync.Mutex
+	fadeCancel          chan struct{}
+	swippingScreen      bool
+	wasScreenIdle       bool  // Track if screen was idle when key was pressed
+	wasConsoleScreenIdle bool  // Track if screen was idle for console input
 )
 
 // loadConfig reads and unmarshals the config file.
@@ -64,7 +65,7 @@ func getFontFace(fontName string) (font.Face, int, error) {
 	if err != nil {
 		return nil, 0, fmt.Errorf("error reading font file: %v", err)
 	}
-	
+
 	var ttfFont *opentype.Font
 	// Handle TrueType Collections (.ttc files)
 	if strings.HasSuffix(cfg.FontPath, ".ttc") {
@@ -134,11 +135,9 @@ func getFontFaceForText(baseFontName string, text string) (font.Face, int, error
 // Pre-allocated clear buffer for efficient frame clearing
 var clearBuffer []uint8
 
-
-
 func clearFrame(frame *image.RGBA, width int, height int) {
 	pixelsNeeded := width * height * 4
-	
+
 	// Initialize clear buffer once with optimal size
 	if len(clearBuffer) < pixelsNeeded {
 		// Allocate larger buffer to handle future larger frames
@@ -150,12 +149,12 @@ func clearFrame(frame *image.RGBA, width int, height int) {
 			copy(clearBuffer[i:i+4], pattern)
 		}
 	}
-	
+
 	// Ensure frame buffer is correct size
 	if len(frame.Pix) < pixelsNeeded {
 		frame.Pix = make([]uint8, pixelsNeeded)
 	}
-	
+
 	// Fast bulk copy instead of pixel-by-pixel clearing
 	copy(frame.Pix[:pixelsNeeded], clearBuffer[:pixelsNeeded])
 }
@@ -173,17 +172,6 @@ func preCalculateEasing(numFrames int, frameWidth int) []int {
 		}
 	}
 	return easingLookup
-}
-
-// cleanupPerformanceBuffers returns performance buffers to pool for cleanup
-func cleanupPerformanceBuffers() {
-	if croppedFrameBuffer != nil {
-		ReturnFrameBuffer(croppedFrameBuffer)
-		croppedFrameBuffer = nil
-	}
-	// Clear easing lookup to free memory
-	easingLookup = nil
-	cachedFPSText = ""
 }
 
 func max(a, b int) int {
@@ -295,19 +283,29 @@ func monitorKeyboard(changePageTriggered *bool) {
 		if ev.Type == evdev.EV_KEY && ev.Code == evdev.KEY_POWER {
 			switch ev.Value {
 			case 1: // key press
-				log.Println("POWER pressed (key down), starting pre-calculation, state =", stateName(idleState))
-				if idleState == STATE_ACTIVE || idleState == STATE_FADE_IN {
-					swippingScreen = true
-					// Start pre-calculation on key down
-					go preCalculateScreenTransition()
-				}
+				log.Println("POWER pressed (key down), checking state =", stateName(idleState))
 				lastActivityMu.Lock()
 				lastActivity = now
 				lastActivityMu.Unlock()
 
+				if idleState == STATE_IDLE || idleState == STATE_OFF || idleState == STATE_FADE_OUT {
+					log.Println("Screen is idle/fading/off, preparing to wake up without changing page")
+					wasScreenIdle = true
+				} else if idleState == STATE_ACTIVE || idleState == STATE_FADE_IN {
+					log.Println("Screen is active, starting pre-calculation for page change")
+					wasScreenIdle = false
+					swippingScreen = true
+					// Start pre-calculation on key down
+					go preCalculateScreenTransition()
+				}
+
 			case 0: // key release
+
 				log.Println("POWER released (key up), triggering animation if ready, state =", stateName(idleState))
-				if idleState == STATE_ACTIVE || idleState == STATE_FADE_IN {
+				if wasScreenIdle {
+					log.Println("Screen was idle when key was pressed, waking up without changing page")
+					wasScreenIdle = false  // Reset flag
+				} else if idleState == STATE_ACTIVE || idleState == STATE_FADE_IN {
 					*changePageTriggered = true
 				}
 				// just update lastActivity
@@ -346,27 +344,35 @@ func monitorKeyboard(changePageTriggered *bool) {
 
 func monitorConsoleInput(changePageTriggered *bool) {
 	log.Println("Console input monitoring started. Press ENTER key to change screen.")
-	
+
 	for {
 		var input string
 		log.Println("DEBUG: Waiting for console input...")
 		n, err := fmt.Scanln(&input)
 		log.Printf("DEBUG: Received input: '%s', length: %d, bytes read: %d, error: %v", input, len(input), n, err)
-		
+
 		// Handle EOF or other input errors gracefully, but also treat empty input as valid
 		if err != nil && err.Error() != "unexpected newline" {
 			log.Printf("DEBUG: Input error: %v", err)
 			time.Sleep(100 * time.Millisecond)
 			continue
 		}
-		
+
 		// Trigger on any input (including empty/just Enter key) or space
 		now := time.Now()
-		log.Println("ENTER key detected via console, triggering page change, state =", stateName(idleState))
-		if idleState == STATE_ACTIVE || idleState == STATE_FADE_IN {
-			log.Println("DEBUG: Setting changePageTriggered to true")
-			swippingScreen = true
-			*changePageTriggered = true
+		log.Println("ENTER key detected via console, checking state =", stateName(idleState))
+		if idleState == STATE_IDLE || idleState == STATE_OFF || idleState == STATE_FADE_OUT {
+			log.Println("Screen is idle/fading/off, waking up without changing page")
+			wasConsoleScreenIdle = true
+		} else if idleState == STATE_ACTIVE || idleState == STATE_FADE_IN {
+			if wasConsoleScreenIdle {
+				log.Println("Screen was idle when console input started, not changing page")
+				wasConsoleScreenIdle = false  // Reset flag
+			} else {
+				log.Println("DEBUG: Setting changePageTriggered to true")
+				swippingScreen = true
+				*changePageTriggered = true
+			}
 		} else {
 			log.Printf("DEBUG: Not triggering because state is %s", stateName(idleState))
 		}
@@ -626,26 +632,26 @@ func mergeConfigs() error {
 func hasShowSmsInUserConfig() bool {
 	var userConfigPath string
 	localUserConfig := "user_config.json"
-	
+
 	// Determine which user config file to check
 	if _, err := os.Stat(localUserConfig); err == nil {
 		userConfigPath = localUserConfig
 	} else {
 		userConfigPath = ETC_USER_CONFIG_PATH
 	}
-	
+
 	// Read the raw JSON
 	raw, err := os.ReadFile(userConfigPath)
 	if err != nil {
 		return false
 	}
-	
+
 	// Parse into a generic map to check for presence of show_sms
 	var rawMap map[string]interface{}
 	if err := secureUnmarshal(raw, &rawMap); err != nil {
 		return false
 	}
-	
+
 	_, exists := rawMap["show_sms"]
 	return exists
 }
@@ -655,28 +661,28 @@ func preCalculateScreenTransition() {
 	// Lock to prevent concurrent pre-calculations
 	preCalculationMutex.Lock()
 	defer preCalculationMutex.Unlock()
-	
+
 	if isPreCalculating {
 		log.Println("Pre-calculation already in progress, skipping")
 		return
 	}
-	
+
 	isPreCalculating = true
 	preCalculatedReady = false
-	
+
 	log.Println("Starting screen transition pre-calculation...")
-	
+
 	// Calculate next page indices (same logic as in main loop)
 	preCalculatedNextIdx = (currPageIdx + 1) % totalNumPages
 	preCalculatedIsSMS = cfg.ShowSms && currPageIdx >= cfgNumPages
 	preCalculatedIsNextSMS = cfg.ShowSms && preCalculatedNextIdx >= cfgNumPages
-	
+
 	if preCalculatedIsSMS {
 		preCalculatedLocalIdx = currPageIdx - cfgNumPages
 	} else {
 		preCalculatedLocalIdx = currPageIdx
 	}
-	
+
 	if preCalculatedIsNextSMS {
 		if lenSmsPagesImages <= 0 {
 			lenSmsPagesImages = 1
@@ -689,22 +695,22 @@ func preCalculateScreenTransition() {
 			preCalculatedNextLocalIdx = 0
 		}
 	}
-	
+
 	// Ensure stitched frame is allocated
 	if preCalculatedStitched == nil {
 		preCalculatedStitched = image.NewRGBA(image.Rect(0, 0, middleFrameWidth*2, middleFrameHeight))
 	}
-	
+
 	// Create temporary buffers for rendering
 	currentPageBuffer := GetFrameBuffer(middleFrameWidth, middleFrameHeight)
 	nextPageBuffer := GetFrameBuffer(middleFrameWidth, middleFrameHeight)
-	
+
 	defer func() {
 		ReturnFrameBuffer(currentPageBuffer)
 		ReturnFrameBuffer(nextPageBuffer)
 		isPreCalculating = false
 	}()
-	
+
 	// Render current page with safety checks
 	if currentPageBuffer != nil && !currentPageBuffer.Bounds().Empty() {
 		clearFrame(currentPageBuffer, middleFrameWidth, middleFrameHeight)
@@ -713,8 +719,8 @@ func preCalculateScreenTransition() {
 		log.Println("Pre-calculation: invalid current page buffer, skipping")
 		return
 	}
-	
-	// Render next page with safety checks  
+
+	// Render next page with safety checks
 	if nextPageBuffer != nil && !nextPageBuffer.Bounds().Empty() {
 		clearFrame(nextPageBuffer, middleFrameWidth, middleFrameHeight)
 		renderMiddle(nextPageBuffer, &cfg, preCalculatedIsNextSMS, preCalculatedNextLocalIdx)
@@ -722,14 +728,14 @@ func preCalculateScreenTransition() {
 		log.Println("Pre-calculation: invalid next page buffer, skipping")
 		return
 	}
-	
+
 	// Create stitched frame: current page on left, next page on right
 	clearFrame(preCalculatedStitched, middleFrameWidth*2, middleFrameHeight)
 	copyImageToImageAt(preCalculatedStitched, currentPageBuffer, 0, 0)
 	copyImageToImageAt(preCalculatedStitched, nextPageBuffer, middleFrameWidth, 0)
-	
+
 	preCalculatedReady = true
-	log.Printf("Pre-calculation completed: current=%d->%d, SMS: %t->%t", 
+	log.Printf("Pre-calculation completed: current=%d->%d, SMS: %t->%t",
 		currPageIdx, preCalculatedNextIdx, preCalculatedIsSMS, preCalculatedIsNextSMS)
 }
 
