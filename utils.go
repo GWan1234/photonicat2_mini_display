@@ -358,35 +358,31 @@ func monitorConsoleInput(changePageTriggered *bool) {
 
 	for {
 		var input string
-		log.Println("DEBUG: Waiting for console input...")
-		n, err := fmt.Scanln(&input)
-		log.Printf("DEBUG: Received input: '%s', length: %d, bytes read: %d, error: %v", input, len(input), n, err)
+		_, err := fmt.Scanln(&input)
 
 		// Handle EOF or other input errors gracefully, but also treat empty input as valid
 		if err != nil && err.Error() != "unexpected newline" {
-			log.Printf("DEBUG: Input error: %v", err)
 			time.Sleep(100 * time.Millisecond)
 			continue
 		}
 
-		// Trigger on any input (including empty/just Enter key) or space
+		// Trigger on any input (including empty/just Enter key)
 		now := time.Now()
-		log.Println("ENTER key detected via console, checking state =", stateName(idleState))
+		log.Printf("⌨️  KEYBOARD ENTER HIT (state: %s)", stateName(idleState))
+		
 		if idleState == STATE_IDLE || idleState == STATE_OFF || idleState == STATE_FADE_OUT {
-			log.Println("Screen is idle/fading/off, waking up without changing page")
+			log.Println("Screen waking up")
 			wasConsoleScreenIdle = true
 		} else if idleState == STATE_ACTIVE || idleState == STATE_FADE_IN {
 			if wasConsoleScreenIdle {
-				log.Println("Screen was idle when console input started, not changing page")
+				log.Println("Screen already active, not changing page")
 				wasConsoleScreenIdle = false // Reset flag
 			} else {
-				log.Println("DEBUG: Setting changePageTriggered to true")
+				log.Println("Triggering page change")
 				swippingScreen = true
 				*changePageTriggered = true
 				signalPageChange()
 			}
-		} else {
-			log.Printf("DEBUG: Not triggering because state is %s", stateName(idleState))
 		}
 		lastActivityMu.Lock()
 		lastActivity = now

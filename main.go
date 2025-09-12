@@ -769,7 +769,15 @@ func mainLoop() {
 				log.Println("curr/next Idx:", currPageIdx, nextPageIdx, "json/sms/total:", cfgNumPages, lenSmsPagesImages, totalNumPages, "localIdx:", localIdx, "nextLocalIdx:", nextLocalIdx, "isSMS:", isSMS, "isNextPageSMS:", isNextPageSMS)
 
 				clearFrame(nextPageIdxFrameBuffer, middleFrameWidth, middleFrameHeight)
+				
+				// Time the next frame rendering
+				nextFrameRenderStart := time.Now()
 				renderMiddle(nextPageIdxFrameBuffer, &cfg, isNextPageSMS, nextLocalIdx)
+				nextFrameRenderEnd := time.Now()
+				nextFrameRenderDuration := nextFrameRenderEnd.Sub(nextFrameRenderStart)
+				
+				log.Printf("📱 Render next frame took: %.1fms (page %d)", 
+					float64(nextFrameRenderDuration.Nanoseconds())/1000000.0, nextPageIdx)
 
 				stitchStart := time.Now()
 				stitchStartTime = stitchStart // Record stitch start for button timing
@@ -801,7 +809,6 @@ func mainLoop() {
 
 				// Process all frames - use pre-calculated if ready, otherwise calculate on-demand
 				for i := 1; i < numIntermediatePages; i++ {
-					frameStart := time.Now() // Record start of this frame
 					// Update page indices at the halfway point
 					if i == numIntermediatePages/2 {
 						localIdx = nextLocalIdx
@@ -827,6 +834,9 @@ func mainLoop() {
 						frameToSend = transitionFrames[i]
 						frameReady = true
 						copyTimings[i] = 0 // Mark as pre-calculated
+						if showDetailedTiming && i <= 3 { // Log first few successful async uses
+							log.Printf("✅ Using pre-calculated frame %d", i)
+						}
 					} else {
 						// Check channel for ready frames (non-blocking)
 						select {
@@ -835,6 +845,9 @@ func mainLoop() {
 								frameToSend = transitionFrames[i]
 								frameReady = true
 								copyTimings[i] = 0 // Mark as pre-calculated
+								if showDetailedTiming && i <= 3 {
+									log.Printf("📨 Got frame %d from async channel", i)
+								}
 								// Put the signal back for later frames
 								select {
 								case transitionFrameChannel <- readyIndex:
@@ -872,10 +885,16 @@ func mainLoop() {
 
 					middleFrames++
 					stitchedFrames++
-					frameTimestamps[i] = frameStart // Record start time of this frame
+					frameTimestamps[i] = time.Now() // Record end time of this frame
 				}
 				// Record final timestamp for the last frame duration calculation
 				frameTimestamps[numIntermediatePages] = time.Now()
+				
+				// Print total transition time
+				transitionEnd := time.Now()
+				totalTransitionDuration := transitionEnd.Sub(frameTimestamps[0])
+				log.Printf("🎬 All transition frames rendered and sent in: %.1fms (%d frames)", 
+					float64(totalTransitionDuration.Nanoseconds())/1000000.0, numIntermediatePages-1)
 
 				//=============== end of page change timing ===============
 				// Print detailed timing when page change animation is complete
@@ -903,7 +922,8 @@ func mainLoop() {
 
 					// Validate duration is reasonable (between 1μs and 1 second)
 					if frameDuration < 1 || frameDuration > 1000000 {
-						log.Printf("⚠️ Invalid frame duration %dμs at index %d, skipping", frameDuration, i)
+						log.Printf("⚠️ Invalid frame duration %dμs at index %d (timestamps: %v -> %v), skipping", 
+							frameDuration, i, frameTimestamps[i-1].Format("15:04:05.000000"), frameTimestamps[i].Format("15:04:05.000000"))
 						continue
 					}
 
@@ -981,7 +1001,7 @@ func mainLoop() {
 						}
 					}
 					log.Printf("%s", copyTimingDetails)
-					log.Printf("⚡ Pre-calculated frames used: %d/%d (%.1f%%)",
+					log.Printf("⚡ Pre-calculated frames used: %d/%d (%.1f%%) - Async rendering efficiency",
 						preCalculatedCount, len(copyTimings),
 						float64(preCalculatedCount)/float64(len(copyTimings))*100)
 
@@ -1246,7 +1266,17 @@ func calculateTransitionFramesAsync(stitchedFrame *image.RGBA, easingValues []in
 	transitionMutex.Unlock()
 
 	go func() {
+		asyncStartTime := time.Now()
+		log.Printf("⚡ Starting async rendering of %d transition frames", numIntermediatePages-1)
+		
 		defer func() {
+			asyncEndTime := time.Now()
+			asyncTotalDuration := asyncEndTime.Sub(asyncStartTime)
+			log.Printf("🎭 Async rendering completed in %.1fms (%d frames, avg %.1fms per frame)",
+				float64(asyncTotalDuration.Nanoseconds())/1000000.0,
+				numIntermediatePages-1,
+				float64(asyncTotalDuration.Nanoseconds())/float64(numIntermediatePages-1)/1000000.0)
+			
 			transitionMutex.Lock()
 			transitionCalculating = false
 			transitionFramesReady = true
@@ -1264,8 +1294,11 @@ func calculateTransitionFramesAsync(stitchedFrame *image.RGBA, easingValues []in
 			<-transitionFrameChannel
 		}
 
+		var frameTimes []float64
 		// Pre-calculate transition frames starting from frame 1
 		for i := 1; i < numIntermediatePages; i++ {
+			frameRenderStart := time.Now()
+			
 			// Safety bounds check
 			if i >= len(transitionFrames) || i >= len(easingValues) {
 				log.Printf("❌ Frame index %d out of bounds", i)
@@ -1274,6 +1307,16 @@ func calculateTransitionFramesAsync(stitchedFrame *image.RGBA, easingValues []in
 
 			xPos := easingValues[i]
 			copyImageRegion(transitionFrames[i], stitchedFrame, xPos, 0, middleFrameWidth, middleFrameHeight)
+			
+			frameRenderEnd := time.Now()
+			frameRenderDuration := frameRenderEnd.Sub(frameRenderStart)
+			frameTimes = append(frameTimes, float64(frameRenderDuration.Nanoseconds())/1000000.0)
+			
+			// Log individual frame timing for detailed analysis (optional)
+			if showDetailedTiming && i <= 5 { // Only log first 5 frames to avoid spam
+				log.Printf("🖼️  Async frame %d rendered in %.1fms (x-pos: %d)", 
+					i, float64(frameRenderDuration.Nanoseconds())/1000000.0, xPos)
+			}
 
 			// Signal that this frame is ready (non-blocking)
 			select {
@@ -1281,6 +1324,25 @@ func calculateTransitionFramesAsync(stitchedFrame *image.RGBA, easingValues []in
 			default:
 				log.Printf("⚠️ Channel full, frame %d signal dropped", i)
 			}
+		}
+		
+		// Log timing statistics
+		if len(frameTimes) > 0 {
+			var minTime, maxTime, totalTime float64
+			minTime = frameTimes[0]
+			maxTime = frameTimes[0]
+			for _, t := range frameTimes {
+				totalTime += t
+				if t < minTime {
+					minTime = t
+				}
+				if t > maxTime {
+					maxTime = t
+				}
+			}
+			avgTime := totalTime / float64(len(frameTimes))
+			log.Printf("📊 Async frame timing: Min=%.1fms, Max=%.1fms, Avg=%.1fms, Total=%.1fms",
+				minTime, maxTime, avgTime, totalTime)
 		}
 	}()
 }
