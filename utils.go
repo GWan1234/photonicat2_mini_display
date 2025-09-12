@@ -19,11 +19,11 @@ import (
 )
 
 var (
-	fadeMu              sync.Mutex
-	fadeCancel          chan struct{}
-	swippingScreen      bool
-	wasScreenIdle       bool  // Track if screen was idle when key was pressed
-	wasConsoleScreenIdle bool  // Track if screen was idle for console input
+	fadeMu               sync.Mutex
+	fadeCancel           chan struct{}
+	swippingScreen       bool
+	wasScreenIdle        bool // Track if screen was idle when key was pressed
+	wasConsoleScreenIdle bool // Track if screen was idle for console input
 )
 
 // loadConfig reads and unmarshals the config file.
@@ -295,6 +295,7 @@ func monitorKeyboard(changePageTriggered *bool) {
 					log.Println("Screen is active, preparing for page change")
 					wasScreenIdle = false
 					swippingScreen = true
+					*changePageTriggered = true
 				}
 
 			case 0: // key release
@@ -302,9 +303,9 @@ func monitorKeyboard(changePageTriggered *bool) {
 				log.Println("POWER released (key up), triggering animation if ready, state =", stateName(idleState))
 				if wasScreenIdle {
 					log.Println("Screen was idle when key was pressed, waking up without changing page")
-					wasScreenIdle = false  // Reset flag
+					wasScreenIdle = false // Reset flag
 				} else if idleState == STATE_ACTIVE || idleState == STATE_FADE_IN {
-					*changePageTriggered = true
+					//*changePageTriggered = true
 				}
 				// just update lastActivity
 				lastActivityMu.Lock()
@@ -365,7 +366,7 @@ func monitorConsoleInput(changePageTriggered *bool) {
 		} else if idleState == STATE_ACTIVE || idleState == STATE_FADE_IN {
 			if wasConsoleScreenIdle {
 				log.Println("Screen was idle when console input started, not changing page")
-				wasConsoleScreenIdle = false  // Reset flag
+				wasConsoleScreenIdle = false // Reset flag
 			} else {
 				log.Println("DEBUG: Setting changePageTriggered to true")
 				swippingScreen = true
@@ -653,7 +654,6 @@ func hasShowSmsInUserConfig() bool {
 	_, exists := rawMap["show_sms"]
 	return exists
 }
-
 
 func loadAllConfigsToVariables() {
 	var err error

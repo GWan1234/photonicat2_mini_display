@@ -127,7 +127,7 @@ func changePage(c *fiber.Ctx) error {
 	lastActivityMu.Unlock()
 	
 	// Invalidate pre-calculated data since page is changing via HTTP
-	invalidatePreCalculatedData()
+	// invalidatePreCalculatedData() // Function temporarily disabled
 	
 	return c.JSON(fiber.Map{"status": "page change triggered"})
 }

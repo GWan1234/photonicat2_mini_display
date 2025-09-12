@@ -48,7 +48,7 @@ const (
 	DEFAULT_FPS               = 3
 	DEFAULT_IDLE_TIMEOUT      = 60 * time.Second
 	ON_CHARGING_IDLE_TIMEOUT  = 365 * 86400 * time.Second
-	KEYBOARD_DEBOUNCE_TIME    = 200 * time.Millisecond
+	KEYBOARD_DEBOUNCE_TIME    = 40 * time.Millisecond
 	ZERO_BACKLIGHT_DELAY      = 5 * time.Second
 	OFF_TIMEOUT               = 3 * time.Second
 	INTERVAL_SMS_COLLECT      = 60 * time.Second
@@ -62,50 +62,49 @@ var (
 	weAreRunning = true
 	runMainLoop  = true
 	offTime      = time.Now()
-	
+
 	// Shutdown monitoring
-	shutdownMonitor *ShutdownMonitor
-	PCAT_YELLOW  = color.RGBA{255, 229, 0, 255}
-	PCAT_WHITE   = color.RGBA{255, 255, 255, 255}
-	PCAT_RED     = color.RGBA{226, 72, 38, 255}
-	PCAT_GREY    = color.RGBA{98, 116, 130, 255}
-	PCAT_GREEN   = color.RGBA{70, 235, 145, 255}
-	PCAT_BLACK   = color.RGBA{0, 0, 0, 255}
+	//shutdownMonitor *ShutdownMonitor
+	PCAT_YELLOW = color.RGBA{255, 229, 0, 255}
+	PCAT_WHITE  = color.RGBA{255, 255, 255, 255}
+	PCAT_RED    = color.RGBA{226, 72, 38, 255}
+	PCAT_GREY   = color.RGBA{98, 116, 130, 255}
+	PCAT_GREEN  = color.RGBA{70, 235, 145, 255}
+	PCAT_BLACK  = color.RGBA{0, 0, 0, 255}
 
 	svgCache = make(map[string]*image.RGBA)
 
 	wanInterface = "null"
-	
-	// SPI DMA mode control
-	dmaMode = true
-	spiTransferOptimized = false
 
-	frameMutex         sync.RWMutex
+	// SPI DMA mode control
+	dmaMode              = true
+	spiTransferOptimized = true
+
+	dirtyTracker *DirtyRegionTracker
+	renderCache  *RenderCache
+
+	frameMutex sync.RWMutex
 	// Optimized buffer manager
-	bufferManager      *BufferManager
-	// Render cache for frequently used elements
-	renderCache        *RenderCache
-	// Dirty region tracker
-	dirtyTracker       *DirtyRegionTracker
-	frames             int
-	dataMutex          sync.RWMutex
-	dynamicData        map[string]string
-	imageCache         map[string]*image.RGBA
-	cfg                Config
-	dftCfg             Config
-	userCfg            Config
-	currPageIdx        int
-	fonts              map[string]FontConfig
-	assetsPrefix       = "."
-	globalData         sync.Map
-	autoRotatePages    = false
+	bufferManager   *BufferManager
+	frames          int
+	dataMutex       sync.RWMutex
+	dynamicData     map[string]string
+	imageCache      map[string]*image.RGBA
+	cfg             Config
+	dftCfg          Config
+	userCfg         Config
+	currPageIdx     int
+	fonts           map[string]FontConfig
+	assetsPrefix    = "."
+	globalData      sync.Map
+	autoRotatePages = false
 
 	// Frame buffer pool is now managed by BufferManager
 
 	lastActivity   = time.Now()
 	lastActivityMu sync.Mutex
 
-	numIntermediatePages = 16
+	numIntermediatePages = 8
 
 	// configuration for idle fade
 	fadeDuration = 2 * time.Second // how long the fade takes
@@ -122,7 +121,7 @@ var (
 	dataGatherInterval    = 2 * time.Second
 	networkGatherInterval = 3 * time.Second
 
-	desiredFPS = 5
+	desiredFPS = 6
 
 	lastBrightness = -1
 
@@ -135,36 +134,36 @@ var (
 	httpChangePageTriggered = false
 	changePageTriggered     = false
 	lastButtonPress         = time.Time{}
-	buttonDebounceDelay     = 100 * time.Millisecond
+	buttonDebounceDelay     = 40 * time.Millisecond
 	buttonPressInProgress   = false
 	// Pre-calculation optimization variables
-	isPreCalculating        = false
-	preCalculatedReady      = false
-	preCalculatedStitched   *image.RGBA
-	preCalculatedNextIdx    = 0
-	preCalculatedIsSMS      = false
-	preCalculatedIsNextSMS  = false
-	preCalculatedLocalIdx   = 0
+	isPreCalculating          = false
+	preCalculatedReady        = false
+	preCalculatedStitched     *image.RGBA
+	preCalculatedNextIdx      = 0
+	preCalculatedIsSMS        = false
+	preCalculatedIsNextSMS    = false
+	preCalculatedLocalIdx     = 0
 	preCalculatedNextLocalIdx = 0
-	preCalculationMutex     sync.RWMutex
+	preCalculationMutex       sync.RWMutex
 	// nextPageIdxFrameBuffer is now managed by BufferManager
-	showFPS                 = false
-	fps                     = 0.0
-	lastUpdate              = time.Now()
+	showFPS                = false
+	fps                    = 0.0
+	lastUpdate             = time.Now()
 	totalFrames            = 0
 	stitchedFrames         = 0
-	localConfigExists       = false
-	stitchedFrame           *image.RGBA
-	totalNumPages           = -1
-	middleFrames            = 0
+	localConfigExists      = false
+	stitchedFrame          *image.RGBA
+	totalNumPages          = -1
+	middleFrames           = 0
 	topFrames              = 0
 	nextPageIdxFrameBuffer *image.RGBA
 	croppedFrameBuffer     *image.RGBA
 
 	// Performance optimization
-	easingLookup       []int
-	cachedFPSText      string
-	lastFPSUpdate      time.Time
+	easingLookup  []int
+	cachedFPSText string
+	lastFPSUpdate time.Time
 
 	topBarFrameWidth  = PCAT2_LCD_WIDTH
 	topBarFrameHeight = PCAT2_TOP_BAR_HEIGHT
@@ -193,7 +192,7 @@ var (
 		lastSuccess int64
 		mu          sync.RWMutex
 	}{lastSuccess: -1}
-	
+
 	ping1Stats = struct {
 		total       int
 		successful  int
@@ -249,14 +248,14 @@ type DisplayElement struct {
 	UnitsFont   string       `json:"units_font,omitempty"`
 	IconPath    string       `json:"icon_path,omitempty"`
 	Enable      int          `json:"enable,omitempty"`
-	Size        *Size        `json:"size,omitempty"`  // for icons, if provided
-	Size2       *Size        `json:"_size,omitempty"` // sometimes provided as _size
+	Size        *Size        `json:"size,omitempty"`         // for icons, if provided
+	Size2       *Size        `json:"_size,omitempty"`        // sometimes provided as _size
 	GraphConfig *GraphConfig `json:"graph_config,omitempty"` // for graph elements
 }
 
 // GraphConfig holds configuration for graph elements
 type GraphConfig struct {
-	GraphType     string `json:"graph_type"`     // e.g., "power"
+	GraphType     string `json:"graph_type"`      // e.g., "power"
 	TimeFrameMins int    `json:"time_frame_mins"` // time frame in minutes
 }
 
@@ -288,15 +287,15 @@ func checkDMAAvailability() error {
 	// Check for DMA channel files
 	dmaRxPath := "/sys/devices/platform/soc/2ad00000.spi/dma:rx"
 	dmaTxPath := "/sys/devices/platform/soc/2ad00000.spi/dma:tx"
-	
+
 	if _, err := os.Stat(dmaRxPath); os.IsNotExist(err) {
 		return fmt.Errorf("DMA RX channel not found at %s", dmaRxPath)
 	}
-	
+
 	if _, err := os.Stat(dmaTxPath); os.IsNotExist(err) {
 		return fmt.Errorf("DMA TX channel not found at %s", dmaTxPath)
 	}
-	
+
 	log.Printf("DMA channels found: RX=%s, TX=%s", dmaRxPath, dmaTxPath)
 	return nil
 }
@@ -374,17 +373,17 @@ func (dw *DisplayWrapper) fillRectangleChunked(x, y, width, height int16, img *i
 	if chunkHeight > height {
 		chunkHeight = height
 	}
-	
+
 	for currentY := y; currentY < y+height; currentY += chunkHeight {
 		remainingHeight := y + height - currentY
 		if remainingHeight < chunkHeight {
 			chunkHeight = remainingHeight
 		}
-		
+
 		// Create a sub-image for this chunk
 		chunkBounds := image.Rect(0, int(currentY-y), int(width), int(currentY-y+chunkHeight))
 		chunkImg := img.SubImage(chunkBounds).(*image.RGBA)
-		
+
 		// Send this chunk
 		dw.device.FillRectangleWithImage(x, currentY, width, chunkHeight, chunkImg)
 	}
@@ -424,7 +423,7 @@ func main() {
 	} else {
 		log.Println("SPI DMA mode: DISABLED")
 	}
-	
+
 	// Check if DMA channels are available
 	if err := checkDMAAvailability(); err != nil {
 		log.Printf("DMA not available, falling back to non-DMA mode: %v", err)
@@ -436,7 +435,7 @@ func main() {
 			log.Println("DMA channels detected and enabled for optimized transfers")
 		}
 	}
-	
+
 	// Log the current SPI configuration
 	logSPIMode()
 
@@ -481,7 +480,7 @@ func main() {
 		"huge":      {FontPath: assetsPrefix + "/assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 34},
 		"gigantic":  {FontPath: assetsPrefix + "/assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 48},
 		// Chinese font variants
-		"unit_cjk":  {FontPath: assetsPrefix + "/assets/fonts/NotoSansMonoCJK-VF.ttf.ttc", FontSize: 15},
+		"unit_cjk": {FontPath: assetsPrefix + "/assets/fonts/NotoSansMonoCJK-VF.ttf.ttc", FontSize: 15},
 	}
 
 	imageCache = make(map[string]*image.RGBA)
@@ -498,38 +497,40 @@ func main() {
 		VSyncLines:   gc9307.MAX_VSYNC_SCANLINES,
 		UseCS:        false,
 	})
-	
+
 	// Initialize display wrapper with DMA optimization
 	displayWrapper = NewDisplayWrapper(display)
 	log.Printf("Display wrapper initialized with transfer stats: %+v", displayWrapper.GetTransferStats())
-	
-	// Initialize shutdown monitoring
+
+	// Initialize shutdown monitoring (temporarily disabled for testing)
 	// This monitors system shutdown/restart before SIGTERM is sent
 	// EnableDBusLogind: monitors D-Bus logind PrepareForShutdown/PrepareForSleep signals
 	// EnableProcComm: monitors /proc/1/comm for init process changes
 	// Both methods detect shutdown earlier than SIGTERM for instant shutdown screen display
-	shutdownConfig := ShutdownMonitorConfig{
-		EnableDBusLogind: true,  // Monitor D-Bus logind signals (recommended)
-		EnableProcComm:   true,  // Monitor /proc/1/comm changes (backup method)
-	}
-	
-	if shutdownConfig.EnableDBusLogind || shutdownConfig.EnableProcComm {
-		shutdownMonitor = NewShutdownMonitor(shutdownConfig)
-		if err := shutdownMonitor.Start(); err != nil {
-			log.Printf("Failed to start shutdown monitoring: %v", err)
-		} else {
-			log.Printf("Shutdown monitoring started (D-Bus: %v, /proc/1/comm: %v)", 
-				shutdownConfig.EnableDBusLogind, shutdownConfig.EnableProcComm)
+	/*
+		shutdownConfig := ShutdownMonitorConfig{
+			EnableDBusLogind: true,  // Monitor D-Bus logind signals (recommended)
+			EnableProcComm:   true,  // Monitor /proc/1/comm changes (backup method)
 		}
-	}
+
+		if shutdownConfig.EnableDBusLogind || shutdownConfig.EnableProcComm {
+			shutdownMonitor = NewShutdownMonitor(shutdownConfig)
+			if err := shutdownMonitor.Start(); err != nil {
+				log.Printf("Failed to start shutdown monitoring: %v", err)
+			} else {
+				log.Printf("Shutdown monitoring started (D-Bus: %v, /proc/1/comm: %v)",
+					shutdownConfig.EnableDBusLogind, shutdownConfig.EnableProcComm)
+			}
+		}
+	*/
 
 	wg.Add(1) //first show welcome and do some other things and wait
 	go func() {
 		defer wg.Done()
-		
+
 		// Check if we should show welcome screen
 		shouldShowWelcome := *forceColdBoot // Always show if forced
-		
+
 		if !shouldShowWelcome {
 			// Check system uptime - skip welcome if uptime > 1 minute (60 seconds)
 			if uptimeSeconds, err := getUptimeSeconds(); err != nil {
@@ -545,7 +546,7 @@ func main() {
 		} else {
 			log.Println("Welcome screen forced by --force-cold-boot flag")
 		}
-		
+
 		if shouldShowWelcome {
 			if *forceColdBoot {
 				// Force mode: show logo for 1 second only, no progress bar
@@ -597,11 +598,11 @@ func main() {
 
 	go collectFixedData()
 	go getSmsPages()
-	go httpServer(addr)                      //listen local for http request
-	go monitorKeyboard(&changePageTriggered) // Start keyboard monitoring in a goroutine
+	go httpServer(addr)                          //listen local for http request
+	go monitorKeyboard(&changePageTriggered)     // Start keyboard monitoring in a goroutine
 	go monitorConsoleInput(&changePageTriggered) // Start console input monitoring in a goroutine
-	go idleDimmer()                          //control backlight
-	
+	go idleDimmer()                              //control backlight
+
 	// Initialize power graph data recording
 	initPowerDataRecording()
 
@@ -631,14 +632,16 @@ func registerExitHandler() {
 		log.Printf("Received signal: %v", sig)
 		weAreRunning = false
 		offTime = time.Now()
-		
-		// Stop shutdown monitoring
-		if shutdownMonitor != nil {
-			shutdownMonitor.Stop()
-		}
-		
+
+		// Stop shutdown monitoring (temporarily disabled)
+		/*
+			if shutdownMonitor != nil {
+				shutdownMonitor.Stop()
+			}
+		*/
+
 		time.Sleep(200 * time.Millisecond)
-		
+
 		// Different behavior for SIGTERM vs SIGINT
 		if sig == syscall.SIGTERM {
 			log.Println("System shutdown detected, showing shutdown screen")
@@ -648,7 +651,7 @@ func registerExitHandler() {
 			log.Println("Manual interruption detected, showing shutdown screen but dimming instantly")
 			showCiaoInstant(display, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT)
 		}
-		
+
 		os.Exit(0)
 	}()
 }
@@ -669,7 +672,7 @@ func prepareMainLoop() {
 	stitchedFrame = image.NewRGBA(image.Rect(0, 0, middleFrameWidth*2, middleFrameHeight))
 	croppedFrameBuffer = image.NewRGBA(image.Rect(0, 0, middleFrameWidth, middleFrameHeight))
 	nextPageIdxFrameBuffer = image.NewRGBA(image.Rect(0, 0, middleFrameWidth, middleFrameHeight))
-	
+
 	// Initialize performance optimization
 	easingLookup = preCalculateEasing(numIntermediatePages, middleFrameWidth)
 	lastFPSUpdate = time.Now()
@@ -697,22 +700,26 @@ func mainLoop() {
 			if changePageTriggered || httpChangePageTriggered { //changing page
 				// Debouncing: check if enough time has passed since last button press
 				now := time.Now()
-				if buttonPressInProgress || now.Sub(lastButtonPress) < buttonDebounceDelay {
+				//if buttonPressInProgress || now.Sub(lastButtonPress) < buttonDebounceDelay {
+				if buttonPressInProgress {
 					// Too soon, skip this press
 					changePageTriggered = false
 					httpChangePageTriggered = false
 					continue
 				}
-				
-				// Mark button press in progress
+
+				// Mark button press in progress and immediately set activity
 				buttonPressInProgress = true
 				lastButtonPress = now
-				
+				lastActivityMu.Lock()
+				lastActivity = now
+				lastActivityMu.Unlock()
+
 				httpChangePageTriggered = false
 				changePageTriggered = false
 
 				var usePreCalculated bool
-				
+
 				// Check if we can use pre-calculated results (with mutex protection)
 				preCalculationMutex.RLock()
 				canUsePreCalculated := preCalculatedReady && !isPreCalculating
@@ -722,29 +729,29 @@ func mainLoop() {
 					if preCalculatedNextIdx == expectedNextIdx {
 						usePreCalculated = true
 						log.Println("Using pre-calculated stitched frame for instant animation")
-						
+
 						// Use pre-calculated values
 						nextPageIdx = preCalculatedNextIdx
 						isSMS = preCalculatedIsSMS
 						isNextPageSMS = preCalculatedIsNextSMS
 						localIdx = preCalculatedLocalIdx
 						nextLocalIdx = preCalculatedNextLocalIdx
-						
+
 						// Use pre-calculated stitched frame
 						if preCalculatedStitched != nil && stitchedFrame != nil {
 							copy(stitchedFrame.Pix, preCalculatedStitched.Pix)
 						}
-						
+
 						log.Println("PRE-CALC curr/next Idx:", currPageIdx, nextPageIdx, "json/sms/total:", cfgNumPages, lenSmsPagesImages, totalNumPages, "localIdx:", localIdx, "nextLocalIdx:", nextLocalIdx, "isSMS:", isSMS, "isNextPageSMS:", isNextPageSMS)
 					} else {
 						log.Printf("Pre-calculated data stale: expected next=%d, got=%d", expectedNextIdx, preCalculatedNextIdx)
 					}
 				}
 				preCalculationMutex.RUnlock()
-				
+
 				if !usePreCalculated {
 					log.Println("Pre-calculated data not available, calculating on-demand")
-					
+
 					// Optimize page calculations - calculate once and reuse
 					currPageIdx = currPageIdx % totalNumPages
 					nextPageIdx = (currPageIdx + 1) % totalNumPages
@@ -780,7 +787,7 @@ func mainLoop() {
 						renderMiddle(nextPageIdxFrameBuffer, &cfg, isSMS, localIdx)
 					}
 
-					middleFrameIdx := (middleFrames+1)%2
+					middleFrameIdx := (middleFrames + 1) % 2
 					if middleFrameIdx < len(middleFramebuffers) && middleFramebuffers[middleFrameIdx] != nil && !middleFramebuffers[middleFrameIdx].Bounds().Empty() {
 						clearFrame(middleFramebuffers[middleFrameIdx], middleFrameWidth, middleFrameHeight)
 						renderMiddle(middleFramebuffers[middleFrameIdx], &cfg, isNextPageSMS, nextLocalIdx)
@@ -793,7 +800,7 @@ func mainLoop() {
 						copyImageToImageAt(stitchedFrame, middleFramebuffers[middleFrameIdx], middleFrameWidth, 0)
 					}
 				}
-				
+
 				// Mark pre-calculated data as used/stale (with mutex protection)
 				preCalculationMutex.Lock()
 				preCalculatedReady = false
@@ -846,8 +853,8 @@ func mainLoop() {
 						currentFooterIsSMS = secondPhaseFooterIsSMS
 					}
 
-					// Render footer only at transition points
-					if i == 0 || i == halfPages {
+					// Render footer only once at the beginning instead of at transition points
+					if i == 0 {
 						drawFooter(display, footerFramebuffers[middleFrames%2], currentFooterIdx, currentFooterPages, currentFooterIsSMS)
 					}
 
@@ -857,10 +864,10 @@ func mainLoop() {
 					// Use efficient region copy instead of cropImageAt to avoid allocations
 					copyImageRegion(croppedFrameBuffer, stitchedFrame, xPos, 0, middleFrameWidth, middleFrameHeight)
 
-					// Add FPS text only if needed and use cached string
-					if showFPS && cachedFPSText != "" {
-						drawText(croppedFrameBuffer, cachedFPSText, 10, 240, faceTiny, PCAT_RED, false)
-					}
+					// Skip FPS text during transition for better performance
+					// if showFPS && cachedFPSText != "" {
+					//     drawText(croppedFrameBuffer, cachedFPSText, 10, 240, faceTiny, PCAT_RED, false)
+					// }
 
 					sendMiddle(display, croppedFrameBuffer)
 					middleFrames++
@@ -874,21 +881,23 @@ func mainLoop() {
 				pageChangeDuration := time.Since(start)
 				pageChangeFPS := float64(numIntermediatePages) / pageChangeDuration.Seconds()
 				log.Printf("Page change completed in %.1fms, animation FPS: %.1f", float64(pageChangeDuration.Nanoseconds())/1e6, pageChangeFPS)
-				
+
 				// Mark button press complete
 				buttonPressInProgress = false
 			} else { //normal page rendering
 				// Only update top bar and footer when needed (every few frames) to save CPU
 				// Top bar contains mostly static information (time, battery, signal)
 				// Update it less frequently to improve performance
-				if middleFrames%10 == 0 { // Update top bar every 10 frames instead of every frame
+				if middleFrames%15 == 0 { // Update top bar every 15 frames instead of every frame
 					drawTopBar(display, topBarFramebuffers[topFrames%2])
 				}
 
 				// Update footer less frequently as well, except when showing SMS
 				if cfg.ShowSms && isSMS {
-					drawFooter(display, footerFramebuffers[middleFrames%2], localIdx, len(smsPagesImages), isSMS)
-				} else if middleFrames%5 == 0 { // Update footer every 5 frames for non-SMS pages
+					if middleFrames%3 == 0 { // Even SMS footer doesn't need to update every frame
+						drawFooter(display, footerFramebuffers[middleFrames%2], localIdx, len(smsPagesImages), isSMS)
+					}
+				} else if middleFrames%10 == 0 { // Update footer every 10 frames for non-SMS pages
 					drawFooter(display, footerFramebuffers[middleFrames%2], localIdx, cfgNumPages, isSMS)
 				}
 
@@ -949,10 +958,10 @@ func (db *DoubleBuffer) GetActive() *image.RGBA {
 
 // BufferManager manages frame buffers
 type BufferManager struct {
-	topBar  *DoubleBuffer
-	middle  *DoubleBuffer
-	footer  *DoubleBuffer
-	mutex   sync.RWMutex
+	topBar *DoubleBuffer
+	middle *DoubleBuffer
+	footer *DoubleBuffer
+	mutex  sync.RWMutex
 }
 
 // NewBufferManager creates a new buffer manager
@@ -1031,10 +1040,10 @@ func mainLoopOptimized() {
 func initLegacyBuffers() {
 	topBarFramebuffers[0] = image.NewRGBA(image.Rect(0, 0, topBarFrameWidth, topBarFrameHeight))
 	topBarFramebuffers[1] = image.NewRGBA(image.Rect(0, 0, topBarFrameWidth, topBarFrameHeight))
-	
+
 	middleFramebuffers[0] = image.NewRGBA(image.Rect(0, 0, middleFrameWidth, middleFrameHeight))
 	middleFramebuffers[1] = image.NewRGBA(image.Rect(0, 0, middleFrameWidth, middleFrameHeight))
-	
+
 	footerFramebuffers[0] = image.NewRGBA(image.Rect(0, 0, footerFrameWidth, footerFrameHeight))
 	footerFramebuffers[1] = image.NewRGBA(image.Rect(0, 0, footerFrameWidth, footerFrameHeight))
 }
