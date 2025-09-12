@@ -283,7 +283,10 @@ func monitorKeyboard(changePageTriggered *bool) {
 		if ev.Type == evdev.EV_KEY && ev.Code == evdev.KEY_POWER {
 			switch ev.Value {
 			case 1: // key press
-				log.Println("POWER pressed (key down), checking state =", stateName(idleState))
+				buttonKeydownTime = now // Record button press timing
+				if showDetailedTiming {
+					log.Printf("⏱️  POWER pressed (key down) at +0.0ms, checking state = %s", stateName(idleState))
+				}
 				lastActivityMu.Lock()
 				lastActivity = now
 				lastActivityMu.Unlock()
@@ -299,8 +302,15 @@ func monitorKeyboard(changePageTriggered *bool) {
 				}
 
 			case 0: // key release
-
-				log.Println("POWER released (key up), triggering animation if ready, state =", stateName(idleState))
+				buttonKeyupTime = now // Record button release timing
+				var keyPressDurationMs float64
+				if !buttonKeydownTime.IsZero() {
+					keyPressDurationMs = durationToMs(now.Sub(buttonKeydownTime))
+				}
+				if showDetailedTiming {
+					log.Printf("⏱️  POWER released (key up) +%.1fms after keydown, triggering animation if ready, state = %s", 
+						keyPressDurationMs, stateName(idleState))
+				}
 				if wasScreenIdle {
 					log.Println("Screen was idle when key was pressed, waking up without changing page")
 					wasScreenIdle = false // Reset flag
