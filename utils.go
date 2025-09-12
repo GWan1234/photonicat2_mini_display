@@ -387,7 +387,12 @@ func getBacklight() int {
 		log.Printf("getBacklight error: %v", err)
 		return 0
 	}
-	return int(data[0])
+	brightness, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		log.Printf("getBacklight parse error: %v", err)
+		return 0
+	}
+	return brightness
 }
 
 func fadeBacklight(wantValue int, timePeriod time.Duration) {
