@@ -150,6 +150,9 @@ func changePage(c *fiber.Ctx) error {
 	lastActivity = time.Now() // Set to current time to avoid triggering fade-in
 	lastActivityMu.Unlock()
 	
+	// Signal the main loop to interrupt FPS sleep
+	signalPageChange()
+	
 	// Set swippingScreen to prevent backlight fade-in during HTTP page changes
 	swippingScreen = true
 	

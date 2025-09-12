@@ -299,6 +299,7 @@ func monitorKeyboard(changePageTriggered *bool) {
 					wasScreenIdle = false
 					swippingScreen = true
 					*changePageTriggered = true
+					signalPageChange()
 				}
 
 			case 0: // key release
@@ -341,6 +342,7 @@ func monitorKeyboard(changePageTriggered *bool) {
 				           if idleState == STATE_ACTIVE{
 				               swippingScreen = true
 				               *changePageTriggered = true
+				               signalPageChange()
 				           }
 				           lastActivityMu.Lock()
 				           lastActivity = now
@@ -381,6 +383,7 @@ func monitorConsoleInput(changePageTriggered *bool) {
 				log.Println("DEBUG: Setting changePageTriggered to true")
 				swippingScreen = true
 				*changePageTriggered = true
+				signalPageChange()
 			}
 		} else {
 			log.Printf("DEBUG: Not triggering because state is %s", stateName(idleState))

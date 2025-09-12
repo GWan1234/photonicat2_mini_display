@@ -136,6 +136,8 @@ var (
 	lastButtonPress         = time.Time{}
 	buttonDebounceDelay     = 40 * time.Millisecond
 	buttonPressInProgress   = false
+	// Signal channel for interrupting FPS sleep on page changes
+	pageChangeSignal        = make(chan struct{}, 1)
 	// Button timing tracking
 	buttonKeydownTime = time.Time{}
 	buttonKeyupTime   = time.Time{}
@@ -1047,21 +1049,17 @@ func mainLoop() {
 				sendMiddle(display, middleFramebuffers[middleFrames%2])
 				middleFrames++
 
-				// stable‐FPS sleep with interruptible wait for page changes
+				// stable‐FPS sleep with signal-based interruption for page changes
 				if delta := (time.Second/time.Duration(desiredFPS) - time.Since(start)); delta > 0 {
 					sleepDuration := time.Duration(float64(delta) * 0.99)
-					// Break sleep into small chunks to check for page changes
-					const checkInterval = 5 * time.Millisecond
-					for sleepDuration > 0 {
-						if changePageTriggered || httpChangePageTriggered {
-							break // Exit sleep immediately on page change
+					select {
+					case <-pageChangeSignal:
+						// Page change triggered, exit sleep immediately
+						if showDetailedTiming {
+							log.Printf("⚡ FPS sleep interrupted for immediate page change")
 						}
-						chunkSleep := checkInterval
-						if sleepDuration < checkInterval {
-							chunkSleep = sleepDuration
-						}
-						time.Sleep(chunkSleep)
-						sleepDuration -= chunkSleep
+					case <-time.After(sleepDuration):
+						// Normal sleep completion
 					}
 				}
 			}
@@ -1069,6 +1067,8 @@ func mainLoop() {
 			if middleFrames%100 == 0 {
 				if autoRotatePages {
 					changePageTriggered = true
+					// Signal the main loop to interrupt FPS sleep
+					signalPageChange()
 				}
 				now := time.Now()
 				fps = 100 / now.Sub(lastUpdate).Seconds()
@@ -1293,4 +1293,12 @@ func durationToMs(d time.Duration) float64 {
 // Helper function to format timing as milliseconds string
 func formatTiming(d time.Duration) string {
 	return fmt.Sprintf("%.1fms", durationToMs(d))
+}
+
+// Helper function to signal page change for FPS sleep interruption
+func signalPageChange() {
+	select {
+	case pageChangeSignal <- struct{}{}:
+	default: // Channel full, signal already sent
+	}
 }
