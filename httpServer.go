@@ -123,8 +123,11 @@ func indexHandler(c *fiber.Ctx) error {
 func changePage(c *fiber.Ctx) error {
 	lastActivityMu.Lock()
 	httpChangePageTriggered = true
-	lastActivity = time.Now().Add(-1 * time.Second) //add small time to not enter FADE_IN state.
+	lastActivity = time.Now() // Set to current time to avoid triggering fade-in
 	lastActivityMu.Unlock()
+	
+	// Set swippingScreen to prevent backlight fade-in during HTTP page changes
+	swippingScreen = true
 	
 	// Invalidate pre-calculated data since page is changing via HTTP
 	// invalidatePreCalculatedData() // Function temporarily disabled
