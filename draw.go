@@ -717,6 +717,85 @@ func copyImageToImageAt(frame *image.RGBA, img *image.RGBA, x0, y0 int) error {
 	return nil
 }
 
+// stitchFramesOptimized combines two frames horizontally in a single operation for maximum performance
+func stitchFramesOptimized(dst *image.RGBA, leftFrame, rightFrame *image.RGBA) error {
+	// Validate inputs
+	if dst == nil || leftFrame == nil || rightFrame == nil {
+		return fmt.Errorf("nil image provided to stitchFramesOptimized")
+	}
+	
+	leftBounds := leftFrame.Bounds()
+	rightBounds := rightFrame.Bounds()
+	dstBounds := dst.Bounds()
+	
+	leftWidth := leftBounds.Dx()
+	leftHeight := leftBounds.Dy()
+	rightWidth := rightBounds.Dx()
+	rightHeight := rightBounds.Dy()
+	
+	// Ensure frames are the same height and fit in destination
+	if leftHeight != rightHeight {
+		return fmt.Errorf("frames must have same height: left=%d, right=%d", leftHeight, rightHeight)
+	}
+	if leftWidth + rightWidth > dstBounds.Dx() || leftHeight > dstBounds.Dy() {
+		return fmt.Errorf("combined frames exceed destination bounds")
+	}
+	
+	// Ultra-fast path: if both frames have simple bounds starting at (0,0), use bulk copy
+	if leftBounds.Min.X == 0 && leftBounds.Min.Y == 0 && rightBounds.Min.X == 0 && rightBounds.Min.Y == 0 &&
+	   leftFrame.Stride == leftWidth*4 && rightFrame.Stride == rightWidth*4 && dst.Stride == (leftWidth+rightWidth)*4 {
+		
+		// Interleave copy: copy rows from both frames simultaneously
+		for y := 0; y < leftHeight; y++ {
+			leftRowStart := y * leftWidth * 4
+			rightRowStart := y * rightWidth * 4
+			dstRowStart := y * (leftWidth + rightWidth) * 4
+			
+			// Copy left frame row
+			copy(dst.Pix[dstRowStart:dstRowStart+leftWidth*4], 
+				 leftFrame.Pix[leftRowStart:leftRowStart+leftWidth*4])
+			
+			// Copy right frame row immediately after
+			copy(dst.Pix[dstRowStart+leftWidth*4:dstRowStart+leftWidth*4+rightWidth*4], 
+				 rightFrame.Pix[rightRowStart:rightRowStart+rightWidth*4])
+		}
+		return nil
+	}
+	
+	// Standard path with stride calculations (fallback for complex bounds)
+	leftStride := leftFrame.Stride
+	rightStride := rightFrame.Stride
+	dstStride := dst.Stride
+	
+	// Copy both frames with proper stride handling
+	for y := 0; y < leftHeight; y++ {
+		// Source row offsets
+		leftSrcRow := (leftBounds.Min.Y + y) * leftStride + leftBounds.Min.X * 4
+		rightSrcRow := (rightBounds.Min.Y + y) * rightStride + rightBounds.Min.X * 4
+		
+		// Destination row offsets
+		dstLeftRow := y * dstStride
+		dstRightRow := y * dstStride + leftWidth * 4
+		
+		// Bounds checking
+		if leftSrcRow + leftWidth*4 <= len(leftFrame.Pix) &&
+		   rightSrcRow + rightWidth*4 <= len(rightFrame.Pix) &&
+		   dstLeftRow + leftWidth*4 <= len(dst.Pix) &&
+		   dstRightRow + rightWidth*4 <= len(dst.Pix) {
+			
+			// Copy left frame row
+			copy(dst.Pix[dstLeftRow:dstLeftRow+leftWidth*4], 
+				 leftFrame.Pix[leftSrcRow:leftSrcRow+leftWidth*4])
+			
+			// Copy right frame row immediately after
+			copy(dst.Pix[dstRightRow:dstRightRow+rightWidth*4], 
+				 rightFrame.Pix[rightSrcRow:rightSrcRow+rightWidth*4])
+		}
+	}
+	
+	return nil
+}
+
 // isFullyOpaque checks if an image is fully opaque (no transparency)
 func isFullyOpaque(img *image.RGBA) bool {
 	bounds := img.Bounds()
@@ -1331,12 +1410,10 @@ func drawFooter(display gc9307.Device, frame *image.RGBA, currPage int, numOfPag
 	clearFrame(frame, footerFrameWidth, footerFrameHeight)
 
 	if isSMS {
-		log.Printf("Drawing SMS footer")
 		footerText := "SMS: " + strconv.Itoa(currPage+1) + "/" + strconv.Itoa(numOfPages)
 		drawText(frame, footerText, 172/2, 2, faceMicro, PCAT_WHITE, true)
 
 	}else{
-		log.Printf("Drawing normal footer")
 		cir, _, _, err := loadImage(assetsPrefix+"/assets/svg/dotCircle.svg")
 		if err != nil {
 			log.Printf("Error loading circle_dot from %s: %v", "assets/svg/dotCircle.svg", err)
