@@ -196,18 +196,38 @@ func copyImageToFrameBuffer(img *image.RGBA, frame []color.RGBA) {
 }
 
 func sendTopBar(display gc9307.Device, frame *image.RGBA) {
+	// Early exit for nil frames
+	if frame == nil {
+		return
+	}
+	
+	// Early exit for empty frames
+	if frame.Bounds().Empty() {
+		return
+	}
+	
 	if displayWrapper != nil {
-		displayWrapper.FillRectangleWithImageOptimized(0, 0, PCAT2_LCD_WIDTH, PCAT2_TOP_BAR_HEIGHT, frame)
+		displayWrapper.FillRectangleWithImageOptimized(0, 0, topBarSendWidth, topBarSendHeight, frame)
 	} else {
-		display.FillRectangleWithImage(0, 0, PCAT2_LCD_WIDTH, PCAT2_TOP_BAR_HEIGHT, frame)
+		display.FillRectangleWithImage(0, 0, topBarSendWidth, topBarSendHeight, frame)
 	}
 }
 
 func sendFooter(display gc9307.Device, frame *image.RGBA) {
+	// Early exit for nil frames
+	if frame == nil {
+		return
+	}
+	
+	// Early exit for empty frames
+	if frame.Bounds().Empty() {
+		return
+	}
+	
 	if displayWrapper != nil {
-		displayWrapper.FillRectangleWithImageOptimized(0, PCAT2_LCD_HEIGHT-PCAT2_FOOTER_HEIGHT, PCAT2_LCD_WIDTH, PCAT2_FOOTER_HEIGHT, frame)
+		displayWrapper.FillRectangleWithImageOptimized(0, footerSendY, footerSendWidth, footerSendHeight, frame)
 	} else {
-		display.FillRectangleWithImage(0, PCAT2_LCD_HEIGHT-PCAT2_FOOTER_HEIGHT, PCAT2_LCD_WIDTH, PCAT2_FOOTER_HEIGHT, frame)
+		display.FillRectangleWithImage(0, footerSendY, footerSendWidth, footerSendHeight, frame)
 	}
 }
 
@@ -285,20 +305,137 @@ func sendMiddlePartial(display gc9307.Device, frame *image.RGBA) {
 	}
 }
 
+// Pre-calculated constants for send functions performance
+var (
+	// Middle area
+	middleSendY      = int16(PCAT2_TOP_BAR_HEIGHT)
+	middleSendWidth  = int16(PCAT2_LCD_WIDTH)
+	middleSendHeight = int16(PCAT2_LCD_HEIGHT - PCAT2_TOP_BAR_HEIGHT - PCAT2_FOOTER_HEIGHT)
+	
+	// Top bar area
+	topBarSendWidth  = int16(PCAT2_LCD_WIDTH)
+	topBarSendHeight = int16(PCAT2_TOP_BAR_HEIGHT)
+	
+	// Footer area
+	footerSendY      = int16(PCAT2_LCD_HEIGHT - PCAT2_FOOTER_HEIGHT)
+	footerSendWidth  = int16(PCAT2_LCD_WIDTH)
+	footerSendHeight = int16(PCAT2_FOOTER_HEIGHT)
+	
+	// Full area
+	fullSendWidth    = int16(PCAT2_LCD_WIDTH)
+	fullSendHeight   = int16(PCAT2_LCD_HEIGHT)
+)
+
+// sendMiddle sends the middle frame area with performance optimizations
 func sendMiddle(display gc9307.Device, frame *image.RGBA) {
-	//crop some frame to save data transfer
+	// Early exit for nil frames
+	if frame == nil {
+		return
+	}
+	
+	// Early exit for empty frames
+	bounds := frame.Bounds()
+	if bounds.Empty() {
+		return
+	}
+	
+	// Use optimized path with pre-calculated constants
 	if displayWrapper != nil {
-		displayWrapper.FillRectangleWithImageOptimized(0, PCAT2_TOP_BAR_HEIGHT, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT-PCAT2_TOP_BAR_HEIGHT-PCAT2_FOOTER_HEIGHT, frame)
+		displayWrapper.FillRectangleWithImageOptimized(0, middleSendY, middleSendWidth, middleSendHeight, frame)
 	} else {
-		display.FillRectangleWithImage(0, PCAT2_TOP_BAR_HEIGHT, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT-PCAT2_TOP_BAR_HEIGHT-PCAT2_FOOTER_HEIGHT, frame)
+		display.FillRectangleWithImage(0, middleSendY, middleSendWidth, middleSendHeight, frame)
 	}
 }
 
+// Global variable to store the last sent middle frame for comparison
+var lastMiddleFrame *image.RGBA
+
+// areFramesIdentical performs a fast comparison of two frames
+func areFramesIdentical(frame1, frame2 *image.RGBA) bool {
+	if frame1 == nil || frame2 == nil {
+		return frame1 == frame2
+	}
+	
+	bounds1 := frame1.Bounds()
+	bounds2 := frame2.Bounds()
+	
+	// Quick bounds check
+	if bounds1 != bounds2 {
+		return false
+	}
+	
+	// Quick pixel data length check
+	if len(frame1.Pix) != len(frame2.Pix) {
+		return false
+	}
+	
+	// Fast byte-by-byte comparison of pixel data
+	pix1 := frame1.Pix
+	pix2 := frame2.Pix
+	
+	// Compare in chunks for better performance
+	chunkSize := 1024 // Compare 1KB chunks at a time
+	for i := 0; i < len(pix1); i += chunkSize {
+		end := i + chunkSize
+		if end > len(pix1) {
+			end = len(pix1)
+		}
+		
+		// Compare chunk
+		for j := i; j < end; j++ {
+			if pix1[j] != pix2[j] {
+				return false
+			}
+		}
+	}
+	
+	return true
+}
+
+// sendMiddleOptimized sends middle frame only if it has changed from the last frame
+func sendMiddleOptimized(display gc9307.Device, frame *image.RGBA) {
+	// Early exit for nil frames
+	if frame == nil {
+		return
+	}
+	
+	// Early exit for empty frames
+	bounds := frame.Bounds()
+	if bounds.Empty() {
+		return
+	}
+	
+	// Skip sending if frame is identical to the last one
+	if lastMiddleFrame != nil && areFramesIdentical(frame, lastMiddleFrame) {
+		return // Frame unchanged, skip send
+	}
+	
+	// Send the frame
+	sendMiddle(display, frame)
+	
+	// Store a copy of this frame for next comparison
+	// Note: This creates a memory copy - consider using a hash instead for memory efficiency
+	if lastMiddleFrame == nil || !lastMiddleFrame.Bounds().Eq(bounds) {
+		lastMiddleFrame = image.NewRGBA(bounds)
+	}
+	copy(lastMiddleFrame.Pix, frame.Pix)
+}
+
 func sendFull(display gc9307.Device, frame *image.RGBA) {
+	// Early exit for nil frames
+	if frame == nil {
+		return
+	}
+	
+	// Early exit for empty frames
+	if frame.Bounds().Empty() {
+		return
+	}
+	
 	if displayWrapper != nil {
-		displayWrapper.FillRectangleWithImageOptimized(0, 0, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT, frame)
+		displayWrapper.FillRectangleWithImageOptimized(0, 0, fullSendWidth, fullSendHeight, frame)
 	} else {
-		display.FillRectangleWithImage(0, 0, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT, frame)
+		display.FillRectangleWithImage(0, 0, fullSendWidth, fullSendHeight, frame)
 	}
 }
 
