@@ -121,7 +121,7 @@ var (
 	dataGatherInterval    = 2 * time.Second
 	networkGatherInterval = 3 * time.Second
 
-	desiredFPS = 6
+	desiredFPS = DEFAULT_FPS
 
 	lastBrightness = -1
 
@@ -137,9 +137,9 @@ var (
 	buttonDebounceDelay     = 40 * time.Millisecond
 	buttonPressInProgress   = false
 	// Button timing tracking
-	buttonKeydownTime       = time.Time{}
-	buttonKeyupTime         = time.Time{}
-	stitchStartTime         = time.Time{}
+	buttonKeydownTime = time.Time{}
+	buttonKeyupTime   = time.Time{}
+	stitchStartTime   = time.Time{}
 	// Pre-calculation optimization variables
 	isPreCalculating          = false
 	preCalculatedReady        = false
@@ -160,7 +160,7 @@ var (
 	transitionCompleteChannel = make(chan bool, 1)
 	// nextPageIdxFrameBuffer is now managed by BufferManager
 	showFPS                = false
-	showDetailedTiming     = true  // Toggle for detailed timing output
+	showDetailedTiming     = true // Toggle for detailed timing output
 	fps                    = 0.0
 	lastUpdate             = time.Now()
 	totalFrames            = 0
@@ -776,7 +776,7 @@ func mainLoop() {
 				copyImageToImageAt(stitchedFrame, nextPageIdxFrameBuffer, middleFrameWidth, 0)  //next frame
 
 				stitchEnd := time.Now()
-				
+
 				// Calculate timing from button events to stitch completion
 				stitchDuration := stitchEnd.Sub(stitchStart)
 				var keydownToStitchMs, keyupToStitchMs float64
@@ -786,9 +786,9 @@ func mainLoop() {
 				if !buttonKeyupTime.IsZero() {
 					keyupToStitchMs = durationToMs(stitchStart.Sub(buttonKeyupTime))
 				}
-				
+
 				if showDetailedTiming {
-					log.Printf("🔧 stitch took %.1fms | Keydown→Stitch: %.1fms, Keyup→Stitch: %.1fms", 
+					log.Printf("🔧 stitch took %.1fms | Keydown→Stitch: %.1fms, Keyup→Stitch: %.1fms",
 						durationToMs(stitchDuration), keydownToStitchMs, keyupToStitchMs)
 				}
 
@@ -797,7 +797,7 @@ func mainLoop() {
 				// Initialize frame timing tracking
 				frameTimestamps[0] = time.Now() // Start of transition
 
-				// Process all frames - use pre-calculated if ready, otherwise calculate on-demand  
+				// Process all frames - use pre-calculated if ready, otherwise calculate on-demand
 				for i := 1; i < numIntermediatePages; i++ {
 					frameStart := time.Now() // Record start of this frame
 					// Update page indices at the halfway point
@@ -874,7 +874,7 @@ func mainLoop() {
 				}
 				// Record final timestamp for the last frame duration calculation
 				frameTimestamps[numIntermediatePages] = time.Now()
-				
+
 				//=============== end of page change timing ===============
 				// Print detailed timing when page change animation is complete
 				pageChangeEnd := time.Now()
@@ -895,16 +895,16 @@ func mainLoop() {
 						log.Printf("⚠️ Invalid timestamp at index %d, skipping", i)
 						continue
 					}
-					
+
 					duration := frameTimestamps[i].Sub(frameTimestamps[i-1])
 					frameDuration := int(duration.Microseconds())
-					
+
 					// Validate duration is reasonable (between 1μs and 1 second)
 					if frameDuration < 1 || frameDuration > 1000000 {
 						log.Printf("⚠️ Invalid frame duration %dμs at index %d, skipping", frameDuration, i)
 						continue
 					}
-					
+
 					frameDurations = append(frameDurations, frameDuration)
 					totalFrameTime += frameDuration
 					if frameDuration < minFrameTime {
@@ -932,7 +932,7 @@ func mainLoop() {
 				if len(sendTimings) > 0 {
 					avgSendTime = totalSendTime / len(sendTimings)
 				}
-				
+
 				// Fix min/max values if no valid frames were processed
 				if len(frameDurations) == 0 {
 					minFrameTime = 0
@@ -992,20 +992,20 @@ func mainLoop() {
 					}
 					log.Printf("%s", sendTimingDetails)
 				}
-				
+
 				// Button-to-Animation Latency Summary
 				if showDetailedTiming && !buttonKeydownTime.IsZero() && !buttonKeyupTime.IsZero() && !stitchStartTime.IsZero() {
 					keydownToKeyupMs := durationToMs(buttonKeyupTime.Sub(buttonKeydownTime))
 					keyupToStitchMs := durationToMs(stitchStartTime.Sub(buttonKeyupTime))
 					keydownToFirstFrameMs := durationToMs(frameTimestamps[0].Sub(buttonKeydownTime))
-					
+
 					log.Printf("🎯 Button Latency Summary:")
 					log.Printf("   ⏱️  Keydown → Keyup: %.1fms", keydownToKeyupMs)
-					log.Printf("   ⏱️  Keyup → Stitch Start: %.1fms", keyupToStitchMs) 
+					log.Printf("   ⏱️  Keyup → Stitch Start: %.1fms", keyupToStitchMs)
 					log.Printf("   ⏱️  Keydown → First Frame: %.1fms", keydownToFirstFrameMs)
 					log.Printf("   ⏱️  Total Button → Animation: %.1fms", keydownToFirstFrameMs)
 				}
-				
+
 				//=============== end of page change timing ===============
 
 				// Mark button press complete
@@ -1047,9 +1047,22 @@ func mainLoop() {
 				sendMiddle(display, middleFramebuffers[middleFrames%2])
 				middleFrames++
 
-				// stable‐FPS sleep
+				// stable‐FPS sleep with interruptible wait for page changes
 				if delta := (time.Second/time.Duration(desiredFPS) - time.Since(start)); delta > 0 {
-					time.Sleep(time.Duration(float64(delta) * 0.99))
+					sleepDuration := time.Duration(float64(delta) * 0.99)
+					// Break sleep into small chunks to check for page changes
+					const checkInterval = 5 * time.Millisecond
+					for sleepDuration > 0 {
+						if changePageTriggered || httpChangePageTriggered {
+							break // Exit sleep immediately on page change
+						}
+						chunkSleep := checkInterval
+						if sleepDuration < checkInterval {
+							chunkSleep = sleepDuration
+						}
+						time.Sleep(chunkSleep)
+						sleepDuration -= chunkSleep
+					}
 				}
 			}
 
