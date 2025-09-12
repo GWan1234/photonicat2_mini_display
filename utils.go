@@ -292,11 +292,9 @@ func monitorKeyboard(changePageTriggered *bool) {
 					log.Println("Screen is idle/fading/off, preparing to wake up without changing page")
 					wasScreenIdle = true
 				} else if idleState == STATE_ACTIVE || idleState == STATE_FADE_IN {
-					log.Println("Screen is active, starting pre-calculation for page change")
+					log.Println("Screen is active, preparing for page change")
 					wasScreenIdle = false
 					swippingScreen = true
-					// Start pre-calculation on key down
-					go preCalculateScreenTransition()
 				}
 
 			case 0: // key release
@@ -656,94 +654,6 @@ func hasShowSmsInUserConfig() bool {
 	return exists
 }
 
-// preCalculateScreenTransition pre-calculates the next screen transition for immediate display on key release
-func preCalculateScreenTransition() {
-	// Lock to prevent concurrent pre-calculations
-	preCalculationMutex.Lock()
-	defer preCalculationMutex.Unlock()
-
-	if isPreCalculating {
-		log.Println("Pre-calculation already in progress, skipping")
-		return
-	}
-
-	isPreCalculating = true
-	preCalculatedReady = false
-
-	log.Println("Starting screen transition pre-calculation...")
-
-	// Calculate next page indices (same logic as in main loop)
-	preCalculatedNextIdx = (currPageIdx + 1) % totalNumPages
-	preCalculatedIsSMS = cfg.ShowSms && currPageIdx >= cfgNumPages
-	preCalculatedIsNextSMS = cfg.ShowSms && preCalculatedNextIdx >= cfgNumPages
-
-	if preCalculatedIsSMS {
-		preCalculatedLocalIdx = currPageIdx - cfgNumPages
-	} else {
-		preCalculatedLocalIdx = currPageIdx
-	}
-
-	if preCalculatedIsNextSMS {
-		if lenSmsPagesImages <= 0 {
-			lenSmsPagesImages = 1
-		}
-		preCalculatedNextLocalIdx = (preCalculatedNextIdx - cfgNumPages) % lenSmsPagesImages
-	} else {
-		if cfgNumPages > 0 {
-			preCalculatedNextLocalIdx = preCalculatedNextIdx % cfgNumPages
-		} else {
-			preCalculatedNextLocalIdx = 0
-		}
-	}
-
-	// Ensure stitched frame is allocated
-	if preCalculatedStitched == nil {
-		preCalculatedStitched = image.NewRGBA(image.Rect(0, 0, middleFrameWidth*2, middleFrameHeight))
-	}
-
-	// Create temporary buffers for rendering
-	currentPageBuffer := GetFrameBuffer(middleFrameWidth, middleFrameHeight)
-	nextPageBuffer := GetFrameBuffer(middleFrameWidth, middleFrameHeight)
-
-	defer func() {
-		ReturnFrameBuffer(currentPageBuffer)
-		ReturnFrameBuffer(nextPageBuffer)
-		isPreCalculating = false
-	}()
-
-	// Render current page with safety checks
-	if currentPageBuffer != nil && !currentPageBuffer.Bounds().Empty() {
-		clearFrame(currentPageBuffer, middleFrameWidth, middleFrameHeight)
-		renderMiddle(currentPageBuffer, &cfg, preCalculatedIsSMS, preCalculatedLocalIdx)
-	} else {
-		log.Println("Pre-calculation: invalid current page buffer, skipping")
-		return
-	}
-
-	// Render next page with safety checks
-	if nextPageBuffer != nil && !nextPageBuffer.Bounds().Empty() {
-		clearFrame(nextPageBuffer, middleFrameWidth, middleFrameHeight)
-		renderMiddle(nextPageBuffer, &cfg, preCalculatedIsNextSMS, preCalculatedNextLocalIdx)
-	} else {
-		log.Println("Pre-calculation: invalid next page buffer, skipping")
-		return
-	}
-
-	// Create stitched frame: current page on left, next page on right
-	clearFrame(preCalculatedStitched, middleFrameWidth*2, middleFrameHeight)
-	copyImageToImageAt(preCalculatedStitched, currentPageBuffer, 0, 0)
-	copyImageToImageAt(preCalculatedStitched, nextPageBuffer, middleFrameWidth, 0)
-
-	preCalculatedReady = true
-	log.Printf("Pre-calculation completed: current=%d->%d, SMS: %t->%t",
-		currPageIdx, preCalculatedNextIdx, preCalculatedIsSMS, preCalculatedIsNextSMS)
-}
-
-// invalidatePreCalculatedData marks pre-calculated data as stale when page changes occur
-func invalidatePreCalculatedData() {
-	preCalculatedReady = false
-	log.Println("Pre-calculated data invalidated")
-}
 
 func loadAllConfigsToVariables() {
 	var err error
