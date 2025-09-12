@@ -474,8 +474,28 @@ func copyImageToImageAt(frame *image.RGBA, img *image.RGBA, x0, y0 int) error {
 		for y := 0; y < targetHeight; y++ {
 			if y0+y >= frameBounds.Min.Y && y0+y < frameBounds.Max.Y {
 				srcOffset := srcStart + (y * imgStride)
-				dstOffset := dstStart + ((y0+y) * frameStride)
-				copy(frame.Pix[dstOffset:dstOffset+rowSize], img.Pix[srcOffset:srcOffset+rowSize])
+				dstOffset := dstStart + (y * frameStride)
+				
+				// Add bounds checking to prevent panic
+				if srcOffset >= 0 && srcOffset+rowSize <= len(img.Pix) &&
+				   dstOffset >= 0 && dstOffset+rowSize <= len(frame.Pix) {
+					copy(frame.Pix[dstOffset:dstOffset+rowSize], img.Pix[srcOffset:srcOffset+rowSize])
+				} else {
+					// Log error and use safe fallback
+					log.Printf("⚠️ Ultra-fast path bounds error: y=%d, src[%d:%d] (cap:%d), dst[%d:%d] (cap:%d)",
+						y, srcOffset, srcOffset+rowSize, len(img.Pix),
+						dstOffset, dstOffset+rowSize, len(frame.Pix))
+					
+					// Safe pixel-by-pixel fallback for this row
+					for x := 0; x < targetWidth; x++ {
+						srcX := imgBounds.Min.X + x
+						dstX := x0 + x
+						if srcX >= imgBounds.Min.X && srcX < imgBounds.Max.X &&
+						   dstX >= frameBounds.Min.X && dstX < frameBounds.Max.X {
+							frame.SetRGBA(dstX, y0+y, img.RGBAAt(srcX, imgBounds.Min.Y+y))
+						}
+					}
+				}
 			}
 		}
 		return nil
@@ -493,12 +513,20 @@ func copyImageToImageAt(frame *image.RGBA, img *image.RGBA, x0, y0 int) error {
 				dstRowStart := (dstY * frameStride) + (x0 * 4)
 				rowByteSize := targetWidth * 4
 				
-				// Bounds check for destination
-				if x0 >= frameBounds.Min.X && x0+targetWidth <= frameBounds.Max.X {
+				// Bounds check for destination and buffer capacity
+				if x0 >= frameBounds.Min.X && x0+targetWidth <= frameBounds.Max.X &&
+				   srcRowStart >= 0 && srcRowStart+rowByteSize <= len(img.Pix) &&
+				   dstRowStart >= 0 && dstRowStart+rowByteSize <= len(frame.Pix) {
 					// Safe to copy entire row at once
 					copy(frame.Pix[dstRowStart:dstRowStart+rowByteSize], 
 						 img.Pix[srcRowStart:srcRowStart+rowByteSize])
 				} else {
+					// Log bounds error if it's a buffer capacity issue
+					if srcRowStart+rowByteSize > len(img.Pix) || dstRowStart+rowByteSize > len(frame.Pix) {
+						log.Printf("⚠️ Fast path bounds error: y=%d, src[%d:%d] (cap:%d), dst[%d:%d] (cap:%d)",
+							y, srcRowStart, srcRowStart+rowByteSize, len(img.Pix),
+							dstRowStart, dstRowStart+rowByteSize, len(frame.Pix))
+					}
 					// Pixel-by-pixel fallback for edge cases
 					for x := 0; x < targetWidth; x++ {
 						srcX := imgBounds.Min.X + x

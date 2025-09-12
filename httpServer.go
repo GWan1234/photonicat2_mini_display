@@ -84,19 +84,43 @@ func serveFrame(c *fiber.Ctx) error {
 	middleBuffer = getMiddleFramebuffer(0)
 	footerBuffer = getFooterFramebuffer(frames%2)
 
+	// Safety checks for nil buffers
+	if topBuffer == nil {
+		frameMutex.RUnlock()
+		log.Printf("⚠️ HTTP serveFrame: topBuffer is nil")
+		return c.Status(fiber.StatusServiceUnavailable).SendString("Top bar frame buffer not available")
+	}
+	if middleBuffer == nil {
+		frameMutex.RUnlock()
+		log.Printf("⚠️ HTTP serveFrame: middleBuffer is nil")
+		return c.Status(fiber.StatusServiceUnavailable).SendString("Middle frame buffer not available")
+	}
+	if footerBuffer == nil {
+		frameMutex.RUnlock()
+		log.Printf("⚠️ HTTP serveFrame: footerBuffer is nil")
+		return c.Status(fiber.StatusServiceUnavailable).SendString("Footer frame buffer not available")
+	}
+
+	// Copy frame buffers with proper bounds - each buffer has its own dimensions
+	// Top bar: 172×32 at y=0
 	err = copyImageToImageAt(webFrame, topBuffer, 0, 0)
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).SendString("Failed to copy top bar frame")
+		log.Printf("❌ HTTP serveFrame: Failed to copy top bar frame (172×32 at y=0): %v", err)
+		return c.Status(fiber.StatusInternalServerError).SendString("Failed to copy top bar frame: " + err.Error())
 	}
 
+	// Middle: 172×266 at y=32  
 	err = copyImageToImageAt(webFrame, middleBuffer, 0, PCAT2_TOP_BAR_HEIGHT)
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).SendString("Failed to copy middle frame")
+		log.Printf("❌ HTTP serveFrame: Failed to copy middle frame (172×266 at y=%d): %v", PCAT2_TOP_BAR_HEIGHT, err)
+		return c.Status(fiber.StatusInternalServerError).SendString("Failed to copy middle frame: " + err.Error())
 	}
 
+	// Footer: 172×22 at y=298
 	err = copyImageToImageAt(webFrame, footerBuffer, 0, PCAT2_LCD_HEIGHT-PCAT2_FOOTER_HEIGHT)
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).SendString("Failed to copy footer frame")
+		log.Printf("❌ HTTP serveFrame: Failed to copy footer frame (172×22 at y=%d): %v", PCAT2_LCD_HEIGHT-PCAT2_FOOTER_HEIGHT, err)
+		return c.Status(fiber.StatusInternalServerError).SendString("Failed to copy footer frame: " + err.Error())
 	}
 	frameMutex.RUnlock()
 
