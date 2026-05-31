@@ -552,6 +552,10 @@ func main() {
 		FrameRate:    gc9307.FRAMERATE_60,
 		VSyncLines:   gc9307.MAX_VSYNC_SCANLINES,
 		UseCS:        false,
+		// Stream frames in the largest SPI transfers the kernel allows
+		// (spidev bufsiz, ~4096 bytes) instead of tiny per-line batches.
+		// Cuts a middle-frame send from ~143 Tx syscalls to ~23.
+		UseDMA: dmaMode,
 	})
 
 	// Initialize display wrapper with DMA optimization
