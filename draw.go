@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
 	"fmt"
 	"image"
 	"image/color"
@@ -10,6 +12,7 @@ import (
 	"image/gif"
 	"io"
 	"log"
+	"net/http"
 	"os"
 	"time"
 	"bytes"
@@ -98,17 +101,82 @@ func drawText(img *image.RGBA, text string, posX, posY int, face font.Face, clr 
     return
 }
 
+// remoteImageCacheDir is where downloaded remote icons are stored on disk.
+const remoteImageCacheDir = "/tmp/pcat_remote_icons"
+
+// fetchRemoteImage downloads an http(s) image URL to a deterministic local
+// file (named by the URL hash, keeping the original extension) and returns the
+// local path. If the file already exists on disk it is reused without
+// re-downloading, so restarts are cheap.
+func fetchRemoteImage(url string) (string, error) {
+	ext := strings.ToLower(filepath.Ext(url))
+	if ext == "" {
+		ext = ".svg" // assume SVG when the URL carries no extension
+	}
+	sum := sha1.Sum([]byte(url))
+	dest := filepath.Join(remoteImageCacheDir, hex.EncodeToString(sum[:])+ext)
+
+	if _, err := os.Stat(dest); err == nil {
+		return dest, nil // already cached on disk
+	}
+
+	if err := os.MkdirAll(remoteImageCacheDir, 0o755); err != nil {
+		return "", err
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+
+	// Write atomically via a temp file so a partial download is never read.
+	tmp := dest + ".tmp"
+	out, err := os.Create(tmp)
+	if err != nil {
+		return "", err
+	}
+	if _, err := io.Copy(out, io.LimitReader(resp.Body, 8<<20)); err != nil { // cap 8 MiB
+		out.Close()
+		os.Remove(tmp)
+		return "", err
+	}
+	out.Close()
+	if err := os.Rename(tmp, dest); err != nil {
+		os.Remove(tmp)
+		return "", err
+	}
+	return dest, nil
+}
+
 func loadImage(filePath string) (*image.RGBA, int, int, error) {
-	// Check if image is in cache.
+	// Check if image is in cache (keyed by the original path/URL, so a remote
+	// icon is only downloaded and rendered once per process).
 	if cachedImg, ok := imageCache[filePath]; ok {
 		bounds := cachedImg.Bounds()
 		return cachedImg, bounds.Dx(), bounds.Dy(), nil
 	}
 
-	ext := strings.ToLower(filepath.Ext(filePath))
+	// Remote icon support: an http(s):// icon_path is downloaded to a local
+	// cache file, then decoded by the normal path below. The firmware itself
+	// has no networked file system, so the fetch happens here once.
+	localPath := filePath
+	if strings.HasPrefix(filePath, "http://") || strings.HasPrefix(filePath, "https://") {
+		p, err := fetchRemoteImage(filePath)
+		if err != nil {
+			return nil, 0, 0, fmt.Errorf("fetch remote image %q: %w", filePath, err)
+		}
+		localPath = p
+	}
+
+	ext := strings.ToLower(filepath.Ext(localPath))
 
 	// Open the file.
-	f, err := os.Open(filePath)
+	f, err := os.Open(localPath)
 	if err != nil {
 		return nil, 0, 0, err
 	}

@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
 	"regexp"
@@ -59,7 +61,7 @@ type GlobalMetricSettings struct {
 
 // SourceConfig is the configuration for a single metric source
 type SourceConfig struct {
-	Type    string                 `json:"type"`    // "http_endpoint", "command", "env", "json_file"
+	Type    string                 `json:"type"`    // "http_endpoint", "http_poll", "command", "env", "json_file"
 	Name    string                 `json:"name"`
 	Enabled int                    `json:"enabled"` // 0 or 1
 	Config  map[string]interface{} `json:"config"`
@@ -109,6 +111,8 @@ func createSource(config SourceConfig, globalSettings GlobalMetricSettings) (Met
 		return NewHTTPSource(config, globalSettings)
 	case "command":
 		return NewCommandSource(config, globalSettings)
+	case "http_poll":
+		return NewHTTPPollSource(config, globalSettings)
 	case "env":
 		return NewEnvVarSource(config, globalSettings)
 	case "json_file":
@@ -533,6 +537,247 @@ func (s *CommandSource) GetType() string {
 // ExecuteNow triggers an immediate execution (for API calls)
 func (s *CommandSource) ExecuteNow() {
 	go s.executeCommand()
+}
+
+// ============================================================================
+// HTTP Poll Source - Actively fetches a URL on an interval
+// ============================================================================
+
+// HTTPPollSource periodically GETs (or POSTs) a URL and stores the parsed
+// response body under data_key. Unlike http_endpoint (which is passive and
+// waits for a push), this source pulls the value itself on a ticker.
+type HTTPPollSource struct {
+	name           string
+	url            string
+	method         string
+	headers        map[string]string
+	interval       int
+	timeout        int
+	parser         string
+	dataKey        string
+	enabled        int
+	globalSettings GlobalMetricSettings
+	stopChan       chan struct{}
+	mu             sync.RWMutex
+	status         SourceStatus
+}
+
+// HTTPPollSourceConfig is the configuration for an http_poll source
+type HTTPPollSourceConfig struct {
+	URL      string            `json:"url"`
+	Method   string            `json:"method"`   // GET (default) or POST
+	Headers  map[string]string `json:"headers"`  // optional request headers
+	Interval int               `json:"interval"` // seconds
+	Timeout  int               `json:"timeout"`  // seconds
+	Parser   string            `json:"parser"`   // "stdout", "json:path", "line:N", "regex:pattern"
+	DataKey  string            `json:"data_key"`
+}
+
+// NewHTTPPollSource creates a new HTTP poll source
+func NewHTTPPollSource(config SourceConfig, globalSettings GlobalMetricSettings) (*HTTPPollSource, error) {
+	var pollConfig HTTPPollSourceConfig
+	configBytes, _ := json.Marshal(config.Config)
+	if err := json.Unmarshal(configBytes, &pollConfig); err != nil {
+		return nil, fmt.Errorf("invalid http_poll source config: %v", err)
+	}
+
+	if pollConfig.URL == "" {
+		return nil, fmt.Errorf("url is required")
+	}
+	if pollConfig.DataKey == "" {
+		return nil, fmt.Errorf("data_key is required")
+	}
+	if pollConfig.Interval < 1 {
+		pollConfig.Interval = 60
+	}
+	if pollConfig.Timeout < 1 {
+		pollConfig.Timeout = 10
+	}
+	if pollConfig.Parser == "" {
+		pollConfig.Parser = "stdout"
+	}
+	if pollConfig.Method == "" {
+		pollConfig.Method = "GET"
+	}
+
+	source := &HTTPPollSource{
+		name:           config.Name,
+		url:            pollConfig.URL,
+		method:         strings.ToUpper(pollConfig.Method),
+		headers:        pollConfig.Headers,
+		interval:       pollConfig.Interval,
+		timeout:        pollConfig.Timeout,
+		parser:         pollConfig.Parser,
+		dataKey:        pollConfig.DataKey,
+		enabled:        config.Enabled,
+		globalSettings: globalSettings,
+		stopChan:       make(chan struct{}),
+		status: SourceStatus{
+			Name:     config.Name,
+			Type:     "http_poll",
+			Enabled:  config.Enabled,
+			Running:  false,
+			DataKeys: []string{pollConfig.DataKey},
+			CustomInfo: map[string]string{
+				"url":      pollConfig.URL,
+				"interval": fmt.Sprintf("%ds", pollConfig.Interval),
+				"parser":   pollConfig.Parser,
+			},
+		},
+	}
+
+	return source, nil
+}
+
+func (s *HTTPPollSource) Start() error {
+	s.mu.Lock()
+	s.status.Running = true
+	s.status.Stats.StartTime = time.Now()
+	s.mu.Unlock()
+
+	go s.run()
+
+	if s.globalSettings.EnableLogging != 0 {
+		log.Printf("CustomMetrics: HTTPPollSource '%s' started (interval: %ds, url: %s)", s.name, s.interval, s.url)
+	}
+
+	return nil
+}
+
+func (s *HTTPPollSource) Stop() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if !s.status.Running {
+		return nil
+	}
+
+	close(s.stopChan)
+	s.status.Running = false
+
+	if s.globalSettings.EnableLogging != 0 {
+		log.Printf("CustomMetrics: HTTPPollSource '%s' stopped", s.name)
+	}
+
+	return nil
+}
+
+func (s *HTTPPollSource) run() {
+	// Fetch immediately on start
+	s.fetch()
+
+	ticker := time.NewTicker(time.Duration(s.interval) * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-s.stopChan:
+			return
+		case <-ticker.C:
+			s.fetch()
+		}
+	}
+}
+
+func (s *HTTPPollSource) fetch() {
+	startTime := time.Now()
+
+	if s.globalSettings.EnableLogging != 0 {
+		log.Printf("CustomMetrics: HTTPPollSource '%s' fetching: %s", s.name, s.url)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(s.timeout)*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, s.method, s.url, nil)
+	if err != nil {
+		s.recordError(fmt.Sprintf("bad request: %v", err), "ERROR")
+		return
+	}
+	for k, v := range s.headers {
+		req.Header.Set(k, v)
+	}
+
+	client := &http.Client{Timeout: time.Duration(s.timeout) * time.Second}
+	resp, err := client.Do(req)
+
+	duration := time.Since(startTime).Milliseconds()
+	s.mu.Lock()
+	s.status.Stats.LastDuration = duration
+	s.mu.Unlock()
+
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			s.recordError(fmt.Sprintf("timeout after %ds", s.timeout), "TIMEOUT")
+		} else {
+			s.recordError(fmt.Sprintf("request failed: %v", err), "ERROR")
+		}
+		return
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // cap at 1 MiB
+	if err != nil {
+		s.recordError(fmt.Sprintf("read failed: %v", err), "ERROR")
+		return
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		s.recordError(fmt.Sprintf("HTTP %d", resp.StatusCode), "ERROR")
+		return
+	}
+
+	result, err := parseCommandOutput(string(body), s.parser)
+	if err != nil {
+		s.recordError(fmt.Sprintf("parse error: %v", err), "PARSE_ERROR")
+		return
+	}
+
+	globalData.Store(s.dataKey, result)
+
+	s.mu.Lock()
+	s.status.LastUpdate = time.Now()
+	s.status.Stats.SuccessCount++
+	s.status.LastError = ""
+	s.mu.Unlock()
+
+	if s.globalSettings.EnableLogging != 0 {
+		log.Printf("CustomMetrics: HTTPPollSource '%s' result: %s = %s (took %dms)",
+			s.name, s.dataKey, result, duration)
+	}
+}
+
+// recordError stores a sentinel value under data_key and bumps error stats.
+func (s *HTTPPollSource) recordError(msg, sentinel string) {
+	s.mu.Lock()
+	s.status.Stats.ErrorCount++
+	s.status.LastError = msg
+	s.mu.Unlock()
+
+	globalData.Store(s.dataKey, sentinel)
+
+	if s.globalSettings.EnableLogging != 0 {
+		log.Printf("CustomMetrics: HTTPPollSource '%s' error: %s", s.name, msg)
+	}
+}
+
+func (s *HTTPPollSource) GetStatus() SourceStatus {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.status
+}
+
+func (s *HTTPPollSource) GetName() string {
+	return s.name
+}
+
+func (s *HTTPPollSource) GetType() string {
+	return "http_poll"
+}
+
+// ExecuteNow triggers an immediate fetch (for API calls)
+func (s *HTTPPollSource) ExecuteNow() {
+	go s.fetch()
 }
 
 // ============================================================================

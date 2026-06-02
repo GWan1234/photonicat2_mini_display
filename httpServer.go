@@ -855,9 +855,16 @@ func executeCustomMetricsSource(c *fiber.Ctx) error {
 		})
 	}
 
-	// Only command sources support immediate execution
+	// Command and http_poll sources support immediate execution
 	if cmdSource, ok := source.(*CommandSource); ok {
 		cmdSource.ExecuteNow()
+		return c.JSON(fiber.Map{
+			"status": "triggered",
+			"source": sourceName,
+		})
+	}
+	if pollSource, ok := source.(*HTTPPollSource); ok {
+		pollSource.ExecuteNow()
 		return c.JSON(fiber.Map{
 			"status": "triggered",
 			"source": sourceName,
