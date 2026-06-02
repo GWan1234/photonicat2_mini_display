@@ -314,7 +314,7 @@ func monitorKeyboard(changePageTriggered *bool) {
 					keyPressDurationMs = durationToMs(now.Sub(buttonKeydownTime))
 				}
 				if showDetailedTiming {
-					log.Printf("⏱️  POWER released (key up) +%.1fms after keydown, triggering animation if ready, state = %s", 
+					log.Printf("⏱️  POWER released (key up) +%.1fms after keydown, triggering animation if ready, state = %s",
 						keyPressDurationMs, stateName(idleState))
 				}
 				if wasScreenIdle {
@@ -374,7 +374,7 @@ func monitorConsoleInput(changePageTriggered *bool) {
 		// Trigger on any input (including empty/just Enter key)
 		now := time.Now()
 		log.Printf("⌨️  KEYBOARD ENTER HIT (state: %s)", stateName(idleState))
-		
+
 		if idleState == STATE_IDLE || idleState == STATE_OFF || idleState == STATE_FADE_OUT {
 			log.Println("Screen waking up")
 			wasConsoleScreenIdle = true
@@ -558,6 +558,15 @@ func stateName(s int) string {
 // For arrays: append src arrays to dst arrays
 // For primitives: src overrides dst (unless src is zero value for numeric fields)
 func deepMergeJSON(dst, src map[string]interface{}) map[string]interface{} {
+	return deepMergeJSONOpt(dst, src, false)
+}
+
+// deepMergeJSONOpt is the merge implementation. When replaceArrays is true, src
+// arrays REPLACE dst arrays instead of appending. This is required under the
+// display_template subtree, where the visual editor / user_config carries the
+// complete page element layout (page0..page3) and must override the defaults
+// rather than be appended to them (which would duplicate every element).
+func deepMergeJSONOpt(dst, src map[string]interface{}, replaceArrays bool) map[string]interface{} {
 	for key, srcVal := range src {
 		// Skip zero/empty values from src for certain fields to preserve dst defaults
 		if srcVal == nil {
@@ -565,12 +574,16 @@ func deepMergeJSON(dst, src map[string]interface{}) map[string]interface{} {
 		}
 
 		// Skip zero numeric values for brightness/dimmer fields - they should be explicit
-		if (key == "screen_max_brightness" || key == "screen_min_brightness" ||
-			key == "screen_dimmer_time_on_battery_seconds" || key == "screen_dimmer_time_on_dc_seconds") {
+		if key == "screen_max_brightness" || key == "screen_min_brightness" ||
+			key == "screen_dimmer_time_on_battery_seconds" || key == "screen_dimmer_time_on_dc_seconds" {
 			if numVal, ok := srcVal.(float64); ok && numVal == 0 {
 				continue // Don't override with zero value
 			}
 		}
+
+		// Within (and below) the display_template subtree, element arrays must
+		// replace the defaults rather than append to them.
+		childReplaceArrays := replaceArrays || key == "display_template"
 
 		if dstVal, exists := dst[key]; exists {
 			// Key exists in both - need to merge
@@ -579,13 +592,19 @@ func deepMergeJSON(dst, src map[string]interface{}) map[string]interface{} {
 
 			if srcIsMap && dstIsMap {
 				// Both are objects - recursively merge
-				dst[key] = deepMergeJSON(dstMap, srcMap)
+				dst[key] = deepMergeJSONOpt(dstMap, srcMap, childReplaceArrays)
 			} else if srcSlice, srcIsSlice := srcVal.([]interface{}); srcIsSlice {
 				if dstSlice, dstIsSlice := dstVal.([]interface{}); dstIsSlice {
-					// Both are arrays - APPEND src to dst
-					dst[key] = append(dstSlice, srcSlice...)
-					log.Printf("JSON merge: Appended %d elements to array '%s' (total: %d)",
-						len(srcSlice), key, len(dstSlice)+len(srcSlice))
+					if replaceArrays {
+						// Inside display_template - REPLACE the layout array.
+						dst[key] = srcSlice
+						log.Printf("JSON merge: Replaced array '%s' with %d elements", key, len(srcSlice))
+					} else {
+						// Both are arrays - APPEND src to dst
+						dst[key] = append(dstSlice, srcSlice...)
+						log.Printf("JSON merge: Appended %d elements to array '%s' (total: %d)",
+							len(srcSlice), key, len(dstSlice)+len(srcSlice))
+					}
 				} else {
 					// Type mismatch - src overrides
 					dst[key] = srcVal

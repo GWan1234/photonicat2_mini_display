@@ -30,13 +30,13 @@ func validateJSON(data []byte) error {
 	if len(data) > 10*1024*1024 { // 10MB limit
 		return fmt.Errorf("JSON data too large")
 	}
-	
+
 	// Basic JSON validation
 	var temp interface{}
 	if err := json.Unmarshal(data, &temp); err != nil {
 		return fmt.Errorf("invalid JSON: %w", err)
 	}
-	
+
 	// Check for potentially malicious patterns
 	dataStr := string(data)
 	suspiciousPatterns := []string{
@@ -47,7 +47,7 @@ func validateJSON(data []byte) error {
 			return fmt.Errorf("suspicious content detected")
 		}
 	}
-	
+
 	return nil
 }
 
@@ -60,16 +60,16 @@ func secureUnmarshal(data []byte, v interface{}) error {
 }
 
 var (
-	drawMu               sync.Mutex
-	webFrame             *image.RGBA
-	configMutex          sync.RWMutex
-	defaultConfig        Config                 // loaded from default_config.json
-	userOverrides        map[string]interface{} // raw overrides from user_config.json
-	userJsonConfig       = ""
+	drawMu         sync.Mutex
+	webFrame       *image.RGBA
+	configMutex    sync.RWMutex
+	defaultConfig  Config                 // loaded from default_config.json
+	userOverrides  map[string]interface{} // raw overrides from user_config.json
+	userJsonConfig = ""
 
 	// Runtime brightness override system
-	runtimeBrightnessMu   sync.RWMutex
-	runtimeMaxBrightness  *int   // nil = use config.json, non-nil = override value
+	runtimeBrightnessMu  sync.RWMutex
+	runtimeMaxBrightness *int // nil = use config.json, non-nil = override value
 )
 
 func serveFrame(c *fiber.Ctx) error {
@@ -86,7 +86,7 @@ func serveFrame(c *fiber.Ctx) error {
 	var topBuffer, middleBuffer, footerBuffer *image.RGBA
 	topBuffer = getTopBarFramebuffer(0)
 	middleBuffer = getMiddleFramebuffer(0)
-	footerBuffer = getFooterFramebuffer(frames%2)
+	footerBuffer = getFooterFramebuffer(frames % 2)
 
 	// Safety checks for nil buffers
 	if topBuffer == nil {
@@ -113,7 +113,7 @@ func serveFrame(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).SendString("Failed to copy top bar frame: " + err.Error())
 	}
 
-	// Middle: 172×266 at y=32  
+	// Middle: 172×266 at y=32
 	err = copyImageToImageAt(webFrame, middleBuffer, 0, PCAT2_TOP_BAR_HEIGHT)
 	if err != nil {
 		log.Printf("❌ HTTP serveFrame: Failed to copy middle frame (172×266 at y=%d): %v", PCAT2_TOP_BAR_HEIGHT, err)
@@ -153,16 +153,16 @@ func changePage(c *fiber.Ctx) error {
 	httpChangePageTriggered = true
 	lastActivity = time.Now() // Set to current time to avoid triggering fade-in
 	lastActivityMu.Unlock()
-	
+
 	// Signal the main loop to interrupt FPS sleep
 	signalPageChange()
-	
+
 	// Set swippingScreen to prevent backlight fade-in during HTTP page changes
 	swippingScreen = true
-	
+
 	// Invalidate pre-calculated data since page is changing via HTTP
 	// invalidatePreCalculatedData() // Function temporarily disabled
-	
+
 	return c.JSON(fiber.Map{"status": "page change triggered"})
 }
 
@@ -283,6 +283,17 @@ func saveUserConfigFromStr(str string) bool {
 		log.Printf("could not rename temp config into place: %v", err)
 		return false
 	}
+
+	// Reflect the change in the running display immediately (e.g. layout edits
+	// from the web visual editor) without requiring a service restart. We
+	// re-read BOTH default and user configs from disk and re-merge via the same
+	// path used at startup. Re-reading the default each time is what keeps the
+	// merge idempotent: a deep merge mutates its destination map, so reusing an
+	// in-memory default would let a previous layout leak into the next merge
+	// (e.g. resetting user config to "{}" would not revert to defaults).
+	userJsonConfig = "" // invalidate cached raw string
+	loadAllConfigsToVariables()
+	log.Println("user config saved and re-merged into running config")
 
 	return true
 }
@@ -631,9 +642,9 @@ func getMaxBacklight(c *fiber.Ctx) error {
 		brightness := *runtimeMaxBrightness
 		runtimeBrightnessMu.RUnlock()
 		return c.JSON(fiber.Map{
-			"status": "ok",
+			"status":         "ok",
 			"max_brightness": brightness,
-			"source": "runtime_override",
+			"source":         "runtime_override",
 		})
 	}
 	runtimeBrightnessMu.RUnlock()
@@ -644,9 +655,9 @@ func getMaxBacklight(c *fiber.Ctx) error {
 	configMutex.RUnlock()
 
 	return c.JSON(fiber.Map{
-		"status": "ok",
+		"status":         "ok",
 		"max_brightness": maxBrightness,
-		"source": "config",
+		"source":         "config",
 	})
 }
 
@@ -680,10 +691,10 @@ func setMaxBacklight(c *fiber.Ctx) error {
 	runtimeBrightnessMu.Unlock()
 
 	return c.JSON(fiber.Map{
-		"status": "ok",
+		"status":         "ok",
 		"max_brightness": maxBrightness,
-		"source": "runtime_override",
-		"message": "Runtime brightness override set (does not modify config.json)",
+		"source":         "runtime_override",
+		"message":        "Runtime brightness override set (does not modify config.json)",
 	})
 }
 
@@ -699,10 +710,10 @@ func resetMaxBacklight(c *fiber.Ctx) error {
 	configMutex.RUnlock()
 
 	return c.JSON(fiber.Map{
-		"status": "ok",
+		"status":         "ok",
 		"max_brightness": maxBrightness,
-		"source": "config",
-		"message": "Runtime brightness override cleared, now following config.json",
+		"source":         "config",
+		"message":        "Runtime brightness override cleared, now following config.json",
 	})
 }
 
