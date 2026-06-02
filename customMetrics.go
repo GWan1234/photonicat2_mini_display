@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1225,6 +1226,16 @@ func extractJSONPath(jsonStr, path string) (string, error) {
 			if !ok {
 				return "", fmt.Errorf("key '%s' not found in JSON", key)
 			}
+		case []interface{}:
+			// numeric index into an array, e.g. "current_condition.0.temp_C"
+			idx, err := strconv.Atoi(key)
+			if err != nil {
+				return "", fmt.Errorf("expected array index at '%s', got non-numeric key", key)
+			}
+			if idx < 0 || idx >= len(v) {
+				return "", fmt.Errorf("array index %d out of range (len %d)", idx, len(v))
+			}
+			current = v[idx]
 		default:
 			return "", fmt.Errorf("cannot traverse path at key '%s'", key)
 		}

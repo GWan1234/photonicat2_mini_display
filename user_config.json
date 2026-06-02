@@ -56,7 +56,7 @@
         }
       },
       {
-        "type": "http",
+        "type": "http_poll",
         "name": "RemoteDiskMetrics",
         "enabled": 0,
         "config": {
@@ -64,13 +64,82 @@
           "method": "GET",
           "interval": 30,
           "timeout": 5,
-          "parser": "json",
-          "data_mappings": [
-            {
-              "source_path": "disk.free_mb",
-              "data_key": "RemoteDiskFreeMB"
-            }
-          ]
+          "parser": "json:disk.free_mb",
+          "data_key": "RemoteDiskFreeMB"
+        }
+      },
+      {
+        "type": "http_poll",
+        "name": "PublicIP",
+        "enabled": 0,
+        "config": {
+          "url": "https://api.ipify.org",
+          "method": "GET",
+          "interval": 300,
+          "timeout": 10,
+          "parser": "stdout",
+          "data_key": "MyPublicIP"
+        }
+      },
+      {
+        "type": "http_poll",
+        "name": "WeatherTemp",
+        "enabled": 0,
+        "config": {
+          "url": "https://wttr.in/Shanghai?format=j1",
+          "method": "GET",
+          "interval": 1800,
+          "timeout": 10,
+          "parser": "json:current_condition.0.temp_C",
+          "data_key": "WeatherTempC"
+        }
+      },
+      {
+        "type": "command",
+        "name": "LanIP",
+        "enabled": 0,
+        "config": {
+          "command": "uci get network.lan.ipaddr",
+          "interval": 60,
+          "timeout": 2,
+          "parser": "stdout",
+          "data_key": "LanIP"
+        }
+      },
+      {
+        "type": "command",
+        "name": "WifiSSID",
+        "enabled": 0,
+        "config": {
+          "command": "uci get wireless.@wifi-iface[0].ssid",
+          "interval": 60,
+          "timeout": 2,
+          "parser": "stdout",
+          "data_key": "WifiSSID"
+        }
+      },
+      {
+        "type": "command",
+        "name": "CpuLoad1m",
+        "enabled": 0,
+        "config": {
+          "command": "cat /proc/loadavg",
+          "interval": 5,
+          "timeout": 2,
+          "parser": "regex:^([0-9.]+)",
+          "data_key": "CpuLoad1m"
+        }
+      },
+      {
+        "type": "command",
+        "name": "Uptime",
+        "enabled": 0,
+        "config": {
+          "command": "uptime -p",
+          "interval": 60,
+          "timeout": 2,
+          "parser": "stdout",
+          "data_key": "Uptime"
         }
       },
       {
@@ -80,8 +149,9 @@
         "config": {
           "variables": [
             {
-              "env_name": "CUSTOM_DISK_FREE",
-              "data_key": "EnvDiskFreeMB"
+              "env_var": "CUSTOM_DISK_FREE",
+              "data_key": "EnvDiskFreeMB",
+              "default": "N/A"
             }
           ]
         }
@@ -91,11 +161,11 @@
         "name": "JSONFileMetrics",
         "enabled": 0,
         "config": {
-          "file_path": "/tmp/metrics.json",
-          "watch_interval": 5,
-          "data_mappings": [
+          "path": "/tmp/metrics.json",
+          "interval": 5,
+          "mappings": [
             {
-              "source_path": "disk.free_mb",
+              "json_path": "disk.free_mb",
               "data_key": "JSONDiskFreeMB"
             }
           ]
