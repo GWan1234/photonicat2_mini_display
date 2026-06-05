@@ -10,7 +10,7 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-echo -e "${BLUE}PhotoniCat2 Display Build Script${NC}"
+echo -e "${BLUE}Photonicat2 Display Build Script${NC}"
 echo "======================================"
 
 # Function to check if command exists

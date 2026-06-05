@@ -22,66 +22,40 @@ import (
 	"github.com/go-ping/ping"
 )
 
+// uaTransport wraps an http.RoundTripper to inject our User-Agent header.
+type uaTransport struct {
+	base http.RoundTripper
+}
+
+func (t *uaTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	req.Header.Set("User-Agent", getUserAgent())
+	base := t.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	return base.RoundTrip(req)
+}
+
 // Secure HTTP client with timeouts and proper TLS configuration
 var secureHTTPClient = &http.Client{
 	Timeout: 10 * time.Second,
-	Transport: &http.Transport{
+	Transport: &uaTransport{base: &http.Transport{
 		TLSClientConfig: &tls.Config{
 			InsecureSkipVerify: false, // Always verify certificates
 			MinVersion:         tls.VersionTLS12,
 		},
 		TLSHandshakeTimeout: 5 * time.Second,
-	},
+	}},
 }
 
 // Local HTTP client for internal APIs (localhost)
 var localHTTPClient = &http.Client{
-	Timeout: 15 * time.Second,
+	Timeout:   15 * time.Second,
+	Transport: &uaTransport{},
 }
 
-// cachedUserAgent holds the computed User-Agent string for photonicat.com requests.
-var cachedUserAgent string
-
-// getPhotoniCatUserAgent returns a User-Agent like "photonicat2/R25.02.0 R7700"
-// using the OpenWrt revision, falling back to the Linux kernel version or Debian release.
-func getPhotoniCatUserAgent() string {
-	if cachedUserAgent != "" {
-		return cachedUserAgent
-	}
-
-	version := ""
-
-	// 1) Try OpenWrt release revision (e.g. "R25.02.0")
-	if data, err := os.ReadFile("/etc/openwrt_release"); err == nil {
-		for _, line := range strings.Split(string(data), "\n") {
-			if strings.HasPrefix(line, "DISTRIB_REVISION='") {
-				version = strings.TrimPrefix(line, "DISTRIB_REVISION='")
-				version = strings.TrimSuffix(version, "'")
-				break
-			}
-		}
-	}
-
-	// 2) Fallback: Debian version
-	if version == "" {
-		if data, err := os.ReadFile("/etc/debian_version"); err == nil {
-			version = strings.TrimSpace(string(data))
-		}
-	}
-
-	// 3) Fallback: Linux kernel version via uname
-	if version == "" {
-		if out, err := secureExecCommand("uname", "-r"); err == nil {
-			version = strings.TrimSpace(string(out))
-		}
-	}
-
-	if version == "" {
-		version = "unknown"
-	}
-
-	cachedUserAgent = fmt.Sprintf("photonicat2/%s R7700", version)
-	return cachedUserAgent
+func getUserAgent() string {
+	return "photonicat2_display/r7700"
 }
 
 // sanitizeCommandArg validates and sanitizes command arguments
@@ -1442,13 +1416,7 @@ func getWanIPv4() (string, error) {
 
 // getPublicIPv4 makes an HTTP request to a public API to fetch the external IPv4 address.
 func getPublicIPv4() (string, error) {
-	req, err := http.NewRequest("GET", "https://4.photonicat.com/ip.php", nil)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("User-Agent", getPhotoniCatUserAgent())
-
-	resp, err := secureHTTPClient.Do(req)
+	resp, err := secureHTTPClient.Get("https://4.photonicat.com/ip.php")
 	if err != nil {
 		return "", err
 	}
@@ -1472,13 +1440,7 @@ func getPublicIPv4() (string, error) {
 
 // getIPv6Public fetches the public IPv6 address.
 func getIPv6Public() (string, error) {
-	req, err := http.NewRequest("GET", "https://6.photonicat.com/ip.php", nil)
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("User-Agent", getPhotoniCatUserAgent())
-
-	resp, err := secureHTTPClient.Do(req)
+	resp, err := secureHTTPClient.Get("https://6.photonicat.com/ip.php")
 	if err != nil {
 		return "", err
 	}
