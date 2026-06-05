@@ -125,7 +125,14 @@ func fetchRemoteImage(url string) (string, error) {
 	}
 
 	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get(url)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return "", err
+	}
+	if strings.Contains(url, "photonicat.com") {
+		req.Header.Set("User-Agent", getPhotoniCatUserAgent())
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}

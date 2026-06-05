@@ -698,6 +698,9 @@ func (s *HTTPPollSource) fetch() {
 	for k, v := range s.headers {
 		req.Header.Set(k, v)
 	}
+	if strings.Contains(s.url, "photonicat.com") {
+		req.Header.Set("User-Agent", getPhotoniCatUserAgent())
+	}
 
 	client := &http.Client{Timeout: time.Duration(s.timeout) * time.Second}
 	resp, err := client.Do(req)

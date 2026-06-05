@@ -39,6 +39,51 @@ var localHTTPClient = &http.Client{
 	Timeout: 15 * time.Second,
 }
 
+// cachedUserAgent holds the computed User-Agent string for photonicat.com requests.
+var cachedUserAgent string
+
+// getPhotoniCatUserAgent returns a User-Agent like "photonicat2/R25.02.0 R7700"
+// using the OpenWrt revision, falling back to the Linux kernel version or Debian release.
+func getPhotoniCatUserAgent() string {
+	if cachedUserAgent != "" {
+		return cachedUserAgent
+	}
+
+	version := ""
+
+	// 1) Try OpenWrt release revision (e.g. "R25.02.0")
+	if data, err := os.ReadFile("/etc/openwrt_release"); err == nil {
+		for _, line := range strings.Split(string(data), "\n") {
+			if strings.HasPrefix(line, "DISTRIB_REVISION='") {
+				version = strings.TrimPrefix(line, "DISTRIB_REVISION='")
+				version = strings.TrimSuffix(version, "'")
+				break
+			}
+		}
+	}
+
+	// 2) Fallback: Debian version
+	if version == "" {
+		if data, err := os.ReadFile("/etc/debian_version"); err == nil {
+			version = strings.TrimSpace(string(data))
+		}
+	}
+
+	// 3) Fallback: Linux kernel version via uname
+	if version == "" {
+		if out, err := secureExecCommand("uname", "-r"); err == nil {
+			version = strings.TrimSpace(string(out))
+		}
+	}
+
+	if version == "" {
+		version = "unknown"
+	}
+
+	cachedUserAgent = fmt.Sprintf("photonicat2/%s R7700", version)
+	return cachedUserAgent
+}
+
 // sanitizeCommandArg validates and sanitizes command arguments
 func sanitizeCommandArg(arg string) string {
 	// Remove any shell metacharacters and limit to alphanumeric, dash, underscore, dot, slash
@@ -1397,7 +1442,13 @@ func getWanIPv4() (string, error) {
 
 // getPublicIPv4 makes an HTTP request to a public API to fetch the external IPv4 address.
 func getPublicIPv4() (string, error) {
-	resp, err := secureHTTPClient.Get("https://4.photonicat.com/ip.php")
+	req, err := http.NewRequest("GET", "https://4.photonicat.com/ip.php", nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", getPhotoniCatUserAgent())
+
+	resp, err := secureHTTPClient.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -1421,7 +1472,13 @@ func getPublicIPv4() (string, error) {
 
 // getIPv6Public fetches the public IPv6 address.
 func getIPv6Public() (string, error) {
-	resp, err := secureHTTPClient.Get("https://6.photonicat.com/ip.php")
+	req, err := http.NewRequest("GET", "https://6.photonicat.com/ip.php", nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", getPhotoniCatUserAgent())
+
+	resp, err := secureHTTPClient.Do(req)
 	if err != nil {
 		return "", err
 	}
