@@ -1311,6 +1311,12 @@ func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
 						}
 					} else {
 						textToDisplay = fmt.Sprintf("%v", textValue)
+						// Failed custom-metric fetches store sentinels like
+						// "ERROR"/"TIMEOUT"; show the regular "-" placeholder
+						// instead of the raw sentinel (plus units).
+						if isErrorSentinel(textToDisplay) {
+							textToDisplay = "-"
+						}
 					}
 				}
 			} else {

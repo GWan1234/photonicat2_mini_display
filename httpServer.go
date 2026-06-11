@@ -502,7 +502,7 @@ func hsvToRgb(h, s, v float64) (r, g, b float64) {
 
 func httpDrawText(c *fiber.Ctx) error {
 	// Acquire lock (blocks if another request is drawing)
-	now := time.Now().Format("2025-01-01 15:04:05")
+	now := time.Now().Format("2006-01-02 15:04:05")
 	drawMu.Lock()
 	defer drawMu.Unlock()
 

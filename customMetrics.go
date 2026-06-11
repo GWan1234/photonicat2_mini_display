@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -103,6 +105,88 @@ func NewCustomMetricManager(config CustomMetricsConfig) (*CustomMetricManager, e
 	}
 
 	return manager, nil
+}
+
+// Defaults for GlobalMetricSettings retry fields when unset (0) in config.
+const (
+	defaultErrorRetryInterval = 15 * time.Second
+	defaultMaxRetries         = 5
+)
+
+// retryDelay returns how long a source should wait before its next attempt.
+// After a failure the source retries every ErrorRetryInterval (default 15s)
+// for up to MaxRetries consecutive attempts (default 5), then falls back to
+// the regular interval. This covers early-boot fetches that fail because the
+// daemon starts before network/DNS (init START=15 vs dnsmasq START=19).
+//
+// A source that has never succeeded (everSucceeded=false) does not give up
+// after MaxRetries: it keeps retrying with exponential backoff capped at the
+// interval, so a WAN that takes minutes to come up (e.g. LTE) still gets a
+// first value promptly instead of waiting a full 600-1800s cycle.
+func retryDelay(interval time.Duration, consecFailures int, everSucceeded bool, gs GlobalMetricSettings) time.Duration {
+	if consecFailures == 0 {
+		return interval
+	}
+	retry := time.Duration(gs.ErrorRetryInterval) * time.Second
+	if retry <= 0 {
+		retry = defaultErrorRetryInterval
+	}
+	if retry >= interval {
+		return interval
+	}
+	maxFast := gs.MaxRetries
+	if maxFast <= 0 {
+		maxFast = defaultMaxRetries
+	}
+	if consecFailures <= maxFast {
+		return retry
+	}
+	if everSucceeded {
+		return interval
+	}
+	for i := maxFast; i < consecFailures && retry < interval; i++ {
+		retry *= 2
+	}
+	if retry > interval {
+		return interval
+	}
+	return retry
+}
+
+// storeSentinel writes an error sentinel (e.g. "ERROR") under dataKey only if
+// no value exists yet, so a transient failure never wipes a previously
+// fetched good value from the screen.
+func storeSentinel(dataKey, sentinel string) {
+	if _, exists := globalData.Load(dataKey); !exists {
+		globalData.Store(dataKey, sentinel)
+	}
+}
+
+// errorSentinels are the machine-readable values sources store under a
+// data_key when fetching fails. The LCD renders them as the same "-"
+// placeholder used for missing data (see draw.go); the human-readable error
+// stays in the source's last_error for the web editor / status API.
+var errorSentinels = map[string]bool{
+	"ERROR":         true,
+	"TIMEOUT":       true,
+	"PARSE_ERROR":   true,
+	"FILE_ERROR":    true,
+	"EXTRACT_ERROR": true,
+}
+
+func isErrorSentinel(value string) bool {
+	return errorSentinels[value]
+}
+
+// isTimeoutErr reports whether err is a deadline/timeout error from either
+// the request context or the HTTP client's own timeout (which surfaces as a
+// net.Error with Timeout()==true, not as context.DeadlineExceeded).
+func isTimeoutErr(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
 }
 
 // createSource creates a metric source based on the configuration
@@ -431,23 +515,35 @@ func (s *CommandSource) Stop() error {
 }
 
 func (s *CommandSource) run() {
-	// Execute immediately on start
-	s.executeCommand()
+	interval := time.Duration(s.interval) * time.Second
+	consecFailures := 0
+	everSucceeded := false
 
-	ticker := time.NewTicker(time.Duration(s.interval) * time.Second)
-	defer ticker.Stop()
+	// Execute immediately on start
+	if s.executeCommand() {
+		everSucceeded = true
+	} else {
+		consecFailures++
+	}
 
 	for {
+		timer := time.NewTimer(retryDelay(interval, consecFailures, everSucceeded, s.globalSettings))
 		select {
 		case <-s.stopChan:
+			timer.Stop()
 			return
-		case <-ticker.C:
-			s.executeCommand()
+		case <-timer.C:
+			if s.executeCommand() {
+				everSucceeded = true
+				consecFailures = 0
+			} else {
+				consecFailures++
+			}
 		}
 	}
 }
 
-func (s *CommandSource) executeCommand() {
+func (s *CommandSource) executeCommand() bool {
 	startTime := time.Now()
 
 	// Log execution start
@@ -473,21 +569,26 @@ func (s *CommandSource) executeCommand() {
 	s.mu.Unlock()
 
 	if err != nil {
+		var errMsg, sentinel string
+		if ctx.Err() == context.DeadlineExceeded {
+			errMsg = fmt.Sprintf("timeout after %ds", s.timeout)
+			sentinel = "TIMEOUT"
+		} else {
+			errMsg = fmt.Sprintf("%v: %s", err, stderr.String())
+			sentinel = "ERROR"
+		}
+
 		s.mu.Lock()
 		s.status.Stats.ErrorCount++
-		if ctx.Err() == context.DeadlineExceeded {
-			s.status.LastError = fmt.Sprintf("timeout after %ds", s.timeout)
-			globalData.Store(s.dataKey, "TIMEOUT")
-		} else {
-			s.status.LastError = fmt.Sprintf("%v: %s", err, stderr.String())
-			globalData.Store(s.dataKey, "ERROR")
-		}
+		s.status.LastError = errMsg
 		s.mu.Unlock()
 
+		storeSentinel(s.dataKey, sentinel)
+
 		if s.globalSettings.EnableLogging != 0 {
-			log.Printf("CustomMetrics: CommandSource '%s' failed: %s", s.name, s.status.LastError)
+			log.Printf("CustomMetrics: CommandSource '%s' failed: %s", s.name, errMsg)
 		}
-		return
+		return false
 	}
 
 	// Parse output
@@ -498,12 +599,12 @@ func (s *CommandSource) executeCommand() {
 		s.status.LastError = fmt.Sprintf("parse error: %v", err)
 		s.mu.Unlock()
 
-		globalData.Store(s.dataKey, "PARSE_ERROR")
+		storeSentinel(s.dataKey, "PARSE_ERROR")
 
 		if s.globalSettings.EnableLogging != 0 {
 			log.Printf("CustomMetrics: CommandSource '%s' parse error: %v", s.name, err)
 		}
-		return
+		return false
 	}
 
 	// Store result
@@ -519,6 +620,7 @@ func (s *CommandSource) executeCommand() {
 		log.Printf("CustomMetrics: CommandSource '%s' result: %s = %s (took %dms)",
 			s.name, s.dataKey, result, duration)
 	}
+	return true
 }
 
 func (s *CommandSource) GetStatus() SourceStatus {
@@ -664,23 +766,35 @@ func (s *HTTPPollSource) Stop() error {
 }
 
 func (s *HTTPPollSource) run() {
-	// Fetch immediately on start
-	s.fetch()
+	interval := time.Duration(s.interval) * time.Second
+	consecFailures := 0
+	everSucceeded := false
 
-	ticker := time.NewTicker(time.Duration(s.interval) * time.Second)
-	defer ticker.Stop()
+	// Fetch immediately on start
+	if s.fetch() {
+		everSucceeded = true
+	} else {
+		consecFailures++
+	}
 
 	for {
+		timer := time.NewTimer(retryDelay(interval, consecFailures, everSucceeded, s.globalSettings))
 		select {
 		case <-s.stopChan:
+			timer.Stop()
 			return
-		case <-ticker.C:
-			s.fetch()
+		case <-timer.C:
+			if s.fetch() {
+				everSucceeded = true
+				consecFailures = 0
+			} else {
+				consecFailures++
+			}
 		}
 	}
 }
 
-func (s *HTTPPollSource) fetch() {
+func (s *HTTPPollSource) fetch() bool {
 	startTime := time.Now()
 
 	if s.globalSettings.EnableLogging != 0 {
@@ -693,7 +807,7 @@ func (s *HTTPPollSource) fetch() {
 	req, err := http.NewRequestWithContext(ctx, s.method, s.url, nil)
 	if err != nil {
 		s.recordError(fmt.Sprintf("bad request: %v", err), "ERROR")
-		return
+		return false
 	}
 	req.Header.Set("User-Agent", getUserAgent())
 	for k, v := range s.headers {
@@ -709,30 +823,34 @@ func (s *HTTPPollSource) fetch() {
 	s.mu.Unlock()
 
 	if err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
+		if isTimeoutErr(err) {
 			s.recordError(fmt.Sprintf("timeout after %ds", s.timeout), "TIMEOUT")
 		} else {
 			s.recordError(fmt.Sprintf("request failed: %v", err), "ERROR")
 		}
-		return
+		return false
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // cap at 1 MiB
 	if err != nil {
-		s.recordError(fmt.Sprintf("read failed: %v", err), "ERROR")
-		return
+		if isTimeoutErr(err) {
+			s.recordError(fmt.Sprintf("timeout after %ds", s.timeout), "TIMEOUT")
+		} else {
+			s.recordError(fmt.Sprintf("read failed: %v", err), "ERROR")
+		}
+		return false
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		s.recordError(fmt.Sprintf("HTTP %d", resp.StatusCode), "ERROR")
-		return
+		return false
 	}
 
 	result, err := parseCommandOutput(string(body), s.parser)
 	if err != nil {
 		s.recordError(fmt.Sprintf("parse error: %v", err), "PARSE_ERROR")
-		return
+		return false
 	}
 
 	globalData.Store(s.dataKey, result)
@@ -747,16 +865,18 @@ func (s *HTTPPollSource) fetch() {
 		log.Printf("CustomMetrics: HTTPPollSource '%s' result: %s = %s (took %dms)",
 			s.name, s.dataKey, result, duration)
 	}
+	return true
 }
 
-// recordError stores a sentinel value under data_key and bumps error stats.
+// recordError stores a sentinel value under data_key (only if no good value
+// exists yet) and bumps error stats.
 func (s *HTTPPollSource) recordError(msg, sentinel string) {
 	s.mu.Lock()
 	s.status.Stats.ErrorCount++
 	s.status.LastError = msg
 	s.mu.Unlock()
 
-	globalData.Store(s.dataKey, sentinel)
+	storeSentinel(s.dataKey, sentinel)
 
 	if s.globalSettings.EnableLogging != 0 {
 		log.Printf("CustomMetrics: HTTPPollSource '%s' error: %s", s.name, msg)
@@ -1059,23 +1179,35 @@ func (s *JSONFileSource) Stop() error {
 }
 
 func (s *JSONFileSource) run() {
-	// Read immediately on start
-	s.readJSONFile()
+	interval := time.Duration(s.interval) * time.Second
+	consecFailures := 0
+	everSucceeded := false
 
-	ticker := time.NewTicker(time.Duration(s.interval) * time.Second)
-	defer ticker.Stop()
+	// Read immediately on start
+	if s.readJSONFile() {
+		everSucceeded = true
+	} else {
+		consecFailures++
+	}
 
 	for {
+		timer := time.NewTimer(retryDelay(interval, consecFailures, everSucceeded, s.globalSettings))
 		select {
 		case <-s.stopChan:
+			timer.Stop()
 			return
-		case <-ticker.C:
-			s.readJSONFile()
+		case <-timer.C:
+			if s.readJSONFile() {
+				everSucceeded = true
+				consecFailures = 0
+			} else {
+				consecFailures++
+			}
 		}
 	}
 }
 
-func (s *JSONFileSource) readJSONFile() {
+func (s *JSONFileSource) readJSONFile() bool {
 	startTime := time.Now()
 
 	// Read file
@@ -1087,13 +1219,13 @@ func (s *JSONFileSource) readJSONFile() {
 		s.mu.Unlock()
 
 		for _, mapping := range s.mappings {
-			globalData.Store(mapping.DataKey, "FILE_ERROR")
+			storeSentinel(mapping.DataKey, "FILE_ERROR")
 		}
 
 		if s.globalSettings.EnableLogging != 0 {
 			log.Printf("CustomMetrics: JSONFileSource '%s' read error: %v", s.name, err)
 		}
-		return
+		return false
 	}
 
 	// Parse JSON
@@ -1105,21 +1237,25 @@ func (s *JSONFileSource) readJSONFile() {
 		s.mu.Unlock()
 
 		for _, mapping := range s.mappings {
-			globalData.Store(mapping.DataKey, "PARSE_ERROR")
+			storeSentinel(mapping.DataKey, "PARSE_ERROR")
 		}
 
 		if s.globalSettings.EnableLogging != 0 {
 			log.Printf("CustomMetrics: JSONFileSource '%s' parse error: %v", s.name, err)
 		}
-		return
+		return false
 	}
 
 	// Extract values for each mapping
 	successCount := 0
+	firstExtractErr := ""
 	for _, mapping := range s.mappings {
 		value, err := extractJSONPath(string(data), mapping.JSONPath)
 		if err != nil {
-			globalData.Store(mapping.DataKey, "EXTRACT_ERROR")
+			if firstExtractErr == "" {
+				firstExtractErr = fmt.Sprintf("extract error for %s: %v", mapping.JSONPath, err)
+			}
+			storeSentinel(mapping.DataKey, "EXTRACT_ERROR")
 			if s.globalSettings.EnableLogging != 0 {
 				log.Printf("CustomMetrics: JSONFileSource '%s' extract error for %s: %v",
 					s.name, mapping.JSONPath, err)
@@ -1131,18 +1267,27 @@ func (s *JSONFileSource) readJSONFile() {
 	}
 
 	duration := time.Since(startTime).Milliseconds()
+	allOk := successCount == len(s.mappings)
 
 	s.mu.Lock()
-	s.status.LastUpdate = time.Now()
-	s.status.Stats.SuccessCount++
+	if successCount > 0 {
+		s.status.LastUpdate = time.Now()
+	}
 	s.status.Stats.LastDuration = duration
-	s.status.LastError = ""
+	if allOk {
+		s.status.Stats.SuccessCount++
+		s.status.LastError = ""
+	} else {
+		s.status.Stats.ErrorCount++
+		s.status.LastError = firstExtractErr
+	}
 	s.mu.Unlock()
 
 	if s.globalSettings.EnableLogging != 0 {
 		log.Printf("CustomMetrics: JSONFileSource '%s' updated %d/%d mappings (took %dms)",
 			s.name, successCount, len(s.mappings), duration)
 	}
+	return allOk
 }
 
 func (s *JSONFileSource) GetStatus() SourceStatus {

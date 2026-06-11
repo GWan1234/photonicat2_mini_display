@@ -581,9 +581,11 @@ func deepMergeJSONOpt(dst, src map[string]interface{}, replaceArrays bool) map[s
 			}
 		}
 
-		// Within (and below) the display_template subtree, element arrays must
-		// replace the defaults rather than append to them.
-		childReplaceArrays := replaceArrays || key == "display_template"
+		// Within (and below) the display_template and custom_metrics subtrees,
+		// arrays must replace the defaults rather than append to them: both
+		// carry complete user-authored lists (page elements / metric sources)
+		// that would otherwise be duplicated against shipped defaults.
+		childReplaceArrays := replaceArrays || key == "display_template" || key == "custom_metrics"
 
 		if dstVal, exists := dst[key]; exists {
 			// Key exists in both - need to merge
