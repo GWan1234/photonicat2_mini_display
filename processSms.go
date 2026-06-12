@@ -48,7 +48,30 @@ var (
 			return image.NewRGBA(image.Rect(0, 0, 172, 270))
 		},
 	}
+
+	smsFontOnce sync.Once
+	smsFont     *truetype.Font
 )
+
+// getSmsFont parses the SMS font once and reuses it for every SMS redraw.
+func getSmsFont() *truetype.Font {
+	smsFontOnce.Do(func() {
+		fontPath := assetsPrefix + "/assets/fonts/NotoSansMonoCJK-VF.ttf.ttc"
+		log.Println("sms using font:", fontPath)
+		fontBytes, err := os.ReadFile(fontPath)
+		if err != nil {
+			log.Printf("Error loading SMS font: %v", err)
+			return
+		}
+		fnt, err := truetype.Parse(fontBytes)
+		if err != nil {
+			log.Printf("Error parsing SMS font: %v", err)
+			return
+		}
+		smsFont = fnt
+	})
+	return smsFont
+}
 
 func collectAndDrawSms(cfg *Config) int {
 	jsonContent := getJsonContent(cfg)
@@ -164,18 +187,10 @@ func drawSmsFrJson(jsonContent string, savePng bool, drawPageNum bool) (imgs []i
 		return nil, err
 	}
 
-	// Load font
-	fontPath := assetsPrefix + "/assets/fonts/NotoSansMonoCJK-VF.ttf.ttc"
-	log.Println("sms using font:", fontPath)
-	fontBytes, err := os.ReadFile(fontPath)
-	if err != nil {
-		fmt.Printf("Error loading font: %v\n", err)
-		return
-	}
-	fnt, err := truetype.Parse(fontBytes)
-	if err != nil {
-		fmt.Printf("Error parsing font: %v\n", err)
-		return
+	// Load font (parsed once per process; the CJK collection is ~37MB)
+	fnt := getSmsFont()
+	if fnt == nil {
+		return nil, fmt.Errorf("SMS font unavailable")
 	}
 
 	// Setup constants
@@ -230,6 +245,12 @@ func drawSmsFrJson(jsonContent string, savePng bool, drawPageNum bool) (imgs []i
 	currentPage := Page{}
 	currentHeight := topPadding
 
+	faceMeasure := truetype.NewFace(fnt, &truetype.Options{
+		Size:    fontSize,
+		DPI:     72,
+		Hinting: font.HintingFull,
+	})
+
 	for _, msg := range smsData.Msg {
 		timestamp, _ := time.Parse(layout, msg.Timestamp)
 		formattedTime := timestamp.Format("2006-01-02 15:04")
@@ -248,11 +269,6 @@ func drawSmsFrJson(jsonContent string, savePng bool, drawPageNum bool) (imgs []i
 		// Check if this is a sent message from "me" with status "SENT"
 		isSentByMe := msg.Sender == "me" && msg.Status == "SENT"
 
-		faceMeasure := truetype.NewFace(fnt, &truetype.Options{
-			Size:    fontSize,
-			DPI:     72,
-			Hinting: font.HintingFull,
-		})
 		lines := wrapText(message, maxWidth, faceMeasure)
 
 		// Add title

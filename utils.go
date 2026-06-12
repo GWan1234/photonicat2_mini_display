@@ -44,7 +44,65 @@ var (
 		fontHeight int
 	})
 	fontCacheMu sync.Mutex
+
+	// Parsed font files keyed by path, so the multiple size variants of one
+	// file (and especially the ~37MB CJK collection) are read and parsed once.
+	parsedFontCache   = make(map[string]*opentype.Font)
+	parsedFontCacheMu sync.Mutex
 )
+
+// parseFontFile reads and parses a TTF/OTF/TTC file, caching the result by path.
+func parseFontFile(fontPath string) (*opentype.Font, error) {
+	parsedFontCacheMu.Lock()
+	if f, ok := parsedFontCache[fontPath]; ok {
+		parsedFontCacheMu.Unlock()
+		return f, nil
+	}
+	parsedFontCacheMu.Unlock()
+
+	fontBytes, err := os.ReadFile(fontPath)
+	if err != nil {
+		return nil, fmt.Errorf("error reading font file: %v", err)
+	}
+
+	var ttfFont *opentype.Font
+	// Handle TrueType Collections (.ttc files)
+	if strings.HasSuffix(fontPath, ".ttc") {
+		collection, err := opentype.ParseCollection(fontBytes)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing font collection: %v", err)
+		}
+		// Get the first font from the collection
+		ttfFont, err = collection.Font(0)
+		if err != nil {
+			return nil, fmt.Errorf("error getting font from collection: %v", err)
+		}
+	} else {
+		// Handle single font files (.ttf, .otf)
+		ttfFont, err = opentype.Parse(fontBytes)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing font: %v", err)
+		}
+	}
+
+	parsedFontCacheMu.Lock()
+	parsedFontCache[fontPath] = ttfFont
+	parsedFontCacheMu.Unlock()
+	return ttfFont, nil
+}
+
+// preloadFonts warms every configured font face so the first render that
+// needs one (e.g. CJK text arriving from the modem or an SMS) never pays the
+// file read + parse cost inside the frame loop. Run it in a goroutine.
+func preloadFonts() {
+	start := time.Now()
+	for name := range fonts {
+		if _, _, err := getFontFace(name); err != nil {
+			log.Printf("preloadFonts: %s: %v", name, err)
+		}
+	}
+	log.Printf("Fonts preloaded in %.0fms", durationToMs(time.Since(start)))
+}
 
 // getFontFace loads (or returns cached) font.Face + its height.
 func getFontFace(fontName string) (font.Face, int, error) {
@@ -62,30 +120,10 @@ func getFontFace(fontName string) (font.Face, int, error) {
 		return nil, 0, fmt.Errorf("font %s not found in mapping", fontName)
 	}
 
-	// 3) Read & parse the TTF/TTC
-	fontBytes, err := os.ReadFile(cfg.FontPath)
+	// 3) Read & parse the TTF/TTC (cached by path)
+	ttfFont, err := parseFontFile(cfg.FontPath)
 	if err != nil {
-		return nil, 0, fmt.Errorf("error reading font file: %v", err)
-	}
-
-	var ttfFont *opentype.Font
-	// Handle TrueType Collections (.ttc files)
-	if strings.HasSuffix(cfg.FontPath, ".ttc") {
-		collection, err := opentype.ParseCollection(fontBytes)
-		if err != nil {
-			return nil, 0, fmt.Errorf("error parsing font collection: %v", err)
-		}
-		// Get the first font from the collection
-		ttfFont, err = collection.Font(0)
-		if err != nil {
-			return nil, 0, fmt.Errorf("error getting font from collection: %v", err)
-		}
-	} else {
-		// Handle single font files (.ttf, .otf)
-		ttfFont, err = opentype.Parse(fontBytes)
-		if err != nil {
-			return nil, 0, fmt.Errorf("error parsing font: %v", err)
-		}
+		return nil, 0, err
 	}
 
 	// 4) Create the face

@@ -158,10 +158,16 @@ func fetchRemoteImage(url string) (string, error) {
 	return dest, nil
 }
 
+// placeholderRe matches [key] tokens in fixed_text labels.
+var placeholderRe = regexp.MustCompile(`\[(\w+)\]`)
+
 func loadImage(filePath string) (*image.RGBA, int, int, error) {
 	// Check if image is in cache (keyed by the original path/URL, so a remote
 	// icon is only downloaded and rendered once per process).
-	if cachedImg, ok := imageCache[filePath]; ok {
+	imageCacheMu.RLock()
+	cachedImg, inCache := imageCache[filePath]
+	imageCacheMu.RUnlock()
+	if inCache {
 		bounds := cachedImg.Bounds()
 		return cachedImg, bounds.Dx(), bounds.Dy(), nil
 	}
@@ -208,9 +214,12 @@ func loadImage(filePath string) (*image.RGBA, int, int, error) {
 	case ".svg":
 		// Check if SVG is already cached as rendered image
 		cacheKey := filePath + "_rendered"
-		if cachedImg, ok := imageCache[cacheKey]; ok {
-			bounds := cachedImg.Bounds()
-			return cachedImg, bounds.Dx(), bounds.Dy(), nil
+		imageCacheMu.RLock()
+		cachedSvg, svgCached := imageCache[cacheKey]
+		imageCacheMu.RUnlock()
+		if svgCached {
+			bounds := cachedSvg.Bounds()
+			return cachedSvg, bounds.Dx(), bounds.Dy(), nil
 		}
 		
 		// Read the entire SVG file.
@@ -238,8 +247,10 @@ func loadImage(filePath string) (*image.RGBA, int, int, error) {
 		// Render the SVG onto the RGBA image.
 		icon.Draw(dasher, 1.0)
 		// Cache and return the rendered image.
+		imageCacheMu.Lock()
 		imageCache[cacheKey] = rgba
 		imageCache[filePath] = rgba // Also cache with original path for fast lookup
+		imageCacheMu.Unlock()
 		return rgba, w, h, nil
 	default:
 		return nil, 0, 0, fmt.Errorf("unsupported image format: %s", ext)
@@ -250,7 +261,9 @@ func loadImage(filePath string) (*image.RGBA, int, int, error) {
 	rgba := image.NewRGBA(bounds)
 	draw.Draw(rgba, bounds, img, bounds.Min, draw.Src)
 	// Cache the image.
+	imageCacheMu.Lock()
 	imageCache[filePath] = rgba
+	imageCacheMu.Unlock()
 	return rgba, bounds.Dx(), bounds.Dy(), nil
 }
 
@@ -1263,8 +1276,6 @@ func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
 		log.Printf("renderMiddle: invalid frame bounds %+v", frame)
 		return
 	}
-	
-	var placeholderRe = regexp.MustCompile(`\[(\w+)\]`)
 
 	if isSMS {
 		// Bounds check for SMS pages
