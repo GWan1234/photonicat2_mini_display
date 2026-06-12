@@ -90,6 +90,7 @@ var (
 	dataMutex       sync.RWMutex
 	dynamicData     map[string]string
 	imageCache      map[string]*image.RGBA
+	imageCacheMu    sync.RWMutex
 	cfg             Config
 	dftCfg          Config
 	userCfg         Config
@@ -105,7 +106,7 @@ var (
 	lastActivity   = time.Now()
 	lastActivityMu sync.Mutex
 
-	numIntermediatePages = 10
+	numIntermediatePages = 15
 
 	// configuration for idle fade
 	fadeDuration = 2 * time.Second // how long the fade takes
@@ -540,6 +541,10 @@ func main() {
 	}
 
 	imageCache = make(map[string]*image.RGBA)
+
+	// Warm all font faces off the critical path so the first CJK render
+	// doesn't stall a page transition parsing the 37MB CJK collection.
+	go preloadFonts()
 
 	// Setup display.
 	display = gc9307.New(conn, gpioreg.ByName(RST_PIN), gpioreg.ByName(DC_PIN), gpioreg.ByName(CS_PIN), gpioreg.ByName(BL_PIN))
