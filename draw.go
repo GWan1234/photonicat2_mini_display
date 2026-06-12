@@ -1134,8 +1134,16 @@ func drawTopBar(display gc9307.Device, frame *image.RGBA) {
 
 	gatewayDevice, _ := globalData.Load("GatewayDevice")
 	carrier, _ := globalData.Load("Carrier")
-	
-	if gatewayDevice == "mobile"{
+	activeEgress, _ := globalData.Load("ActiveEgress")
+
+	// Prefer the precise active egress (which can also be "wifi" in Smart WAN
+	// mode) over the coarse wired/mobile gateway hint.
+	// networkStr: "5"/"4"/"3" cellular, "w" ethernet, "i" WiFi (Smart WAN).
+	if activeEgress == "wifi" {
+		networkStr = "i"
+	} else if activeEgress == "wan" || activeEgress == "lan" {
+		networkStr = "w"
+	} else if activeEgress == "mobile" || gatewayDevice == "mobile" {
 		if carrier == "5G"{
 			networkStr = "5"
 		}else if carrier == "4G"{
@@ -1147,6 +1155,15 @@ func drawTopBar(display gc9307.Device, frame *image.RGBA) {
 		networkStr = "w"  // Default to ethernet when network status is unknown
 	}
 	signalStrength := 0.43
+	// Resolve the cellular signal level for the cache key so the bar refreshes
+	// when it changes. (WiFi-as-WAN draws a static icon, so it needs no level.)
+	if networkStr == "4" || networkStr == "5" || networkStr == "3" {
+		if v, ok := globalData.Load("ModemSignalStrength"); ok {
+			if vi, ok := v.(int); ok {
+				signalStrength = float64(vi) / 100.0
+			}
+		}
+	}
 	magicStr := timeStr + " " + strconv.Itoa(int(signalStrength*100)) + " " + networkStr + " " + strconv.Itoa(int(battSOC)) + " " + strconv.FormatBool(battChargingStatus)
 
 	if cacheTopBarStr == magicStr {
@@ -1182,16 +1199,16 @@ func drawTopBar(display gc9307.Device, frame *image.RGBA) {
 		}
 		copyImageToImageAt(frame, eth, x0+80, y0+2)
 
-	}else if networkStr == "4" || networkStr == "5" || networkStr == "3" {
-		signalStrengthInt, ok := globalData.Load("ModemSignalStrength")
-		if !ok {
-			fmt.Println("ModemSignalStrength not found, use default 0")
-			signalStrength = 0.0
+	}else if networkStr == "i"{
+		// WiFi as WAN (Smart WAN): draw the WiFi icon, same as wired draws eth.svg.
+		wifi, _, _, err := loadImage(assetsPrefix+"/assets/svg/wifi.svg")
+		if err != nil {
+			fmt.Println("Error loading wifi:", err)
+			return
 		}
-
-		fmt.Println("ModemSignalStrength:", signalStrengthInt)
-
-		signalStrength = float64(signalStrengthInt.(int)) / 100.0
+		copyImageToImageAt(frame, wifi, x0+80, y0+2)
+	}else if networkStr == "4" || networkStr == "5" || networkStr == "3" {
+		// signalStrength was already resolved above from ModemSignalStrength.
 		//draw signal strength
 		if fiveGonTop {
 			drawSignalStrength(frame, x0+80, y0, signalStrength)

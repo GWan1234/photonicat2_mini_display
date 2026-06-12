@@ -120,6 +120,15 @@ type DashboardInfo struct {
 	ChargePercent       int             `json:"charge_percent"`
 	ChargeVoltage       int             `json:"charge_voltage"`
 	Connection          string          `json:"connection"`
+	// ActiveEgress is the interface that actually carries the default route:
+	// "wan" (eth0), "lan" (eth1), "wifi" (Smart WAN STA uplink) or "mobile".
+	// It is more precise than Connection for choosing the top-bar icon.
+	ActiveEgress        string          `json:"active_egress"`
+	// NetworkMode is the user's "Internet via" selection: "auto", "eth_only",
+	// "cell_only", "smart_wan" or "all_off".
+	NetworkMode         string          `json:"network_mode"`
+	// WifiSignalPercent is the Smart WAN upstream RSSI as 0-100% (or null).
+	WifiSignalPercent   *int            `json:"wifi_signal_percent"`
 	DHCPClientsCount    int             `json:"dhcp_clients_count"`
 	UpSpeedBps          float64         `json:"up_speed"`
 	DownSpeedBps        float64         `json:"down_speed"`
@@ -246,6 +255,13 @@ func getInfoFromPcatWeb() {
 				globalData.Store("BoardTemperature", info.BoardTemperature)
 				globalData.Store("Carrier", info.Carrier)
 				globalData.Store("GatewayDevice", info.Connection)
+				globalData.Store("ActiveEgress", info.ActiveEgress)
+				globalData.Store("NetworkMode", info.NetworkMode)
+				if info.WifiSignalPercent != nil {
+					globalData.Store("WifiSignalPercent", *info.WifiSignalPercent)
+				} else {
+					globalData.Store("WifiSignalPercent", -1)
+				}
 				globalData.Store("DHCPClientsCount", info.DHCPClientsCount)
 				globalData.Store("FirmwareVersion", info.FirmwareVersion)
 				globalData.Store("ISPName", info.ISPName)
