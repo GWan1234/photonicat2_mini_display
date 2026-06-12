@@ -915,10 +915,46 @@ func isOpenWRT() bool {
 	return false
 }
 
+// getOpenWrtStaSSID returns the SSID of the first wifi-iface in station (sta)
+// mode — i.e. the upstream hotspot we are connected to in Smart WAN mode. Empty
+// string when no STA iface is configured. Matches lines like:
+//	wireless.cfg0a2b63.mode='sta'
+//	wireless.cfg0a2b63.ssid='Shanghai Novotech WiFi7_5G'
+func getOpenWrtStaSSID() string {
+	out, err := secureExecCommand("uci", "-q", "show", "wireless")
+	if err != nil {
+		return ""
+	}
+	staSection := ""
+	reMode := regexp.MustCompile(`^wireless\.([^.]+)\.mode='?sta'?$`)
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if m := reMode.FindStringSubmatch(line); m != nil {
+			staSection = m[1]
+			break
+		}
+	}
+	if staSection == "" {
+		return ""
+	}
+	ssidOut, err := secureExecCommand("uci", "-q", "get",
+		"wireless."+staSection+".ssid")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(ssidOut))
+}
+
 // getSSID returns connected SSID on Debian or broadcasting SSID on OpenWrt.
 func getSSID() (string, error) {
 	// OpenWrt detection
 	if isOpenWRT() {
+		// Smart WAN: when the onboard radio relays an upstream hotspot it runs
+		// a station (sta) iface. Show the SSID we are actually connected to
+		// rather than the parked AP's (often stale "OpenWrt") SSID.
+		if sta := getOpenWrtStaSSID(); sta != "" {
+			return sta, nil
+		}
 		out, err := secureExecCommand("uci", "get", "wireless.@wifi-iface[0].ssid")
 		if err != nil {
 			return "", fmt.Errorf("failed to get OpenWrt SSID: %v", err)
