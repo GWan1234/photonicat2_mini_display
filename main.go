@@ -463,6 +463,16 @@ func main() {
 	port := flag.Int("port", 8081, "TCP port to listen on")
 	forceColdBoot := flag.Bool("force-cold-boot", false, "force showing welcome screen even on warm boot")
 	useDMA := flag.Bool("dma", true, "enable DMA mode for SPI transfers (default: true)")
+	// SPI bus clock in kHz. The 2ad00000.spi controller is fed by a 198 MHz
+	// parent and can only divide it by an even integer, so a request is rounded
+	// down to {99, 49.5, 33, ...} MHz. The RK35xx SPI block is rated for 50 MHz
+	// and the GC9307/ST7789 panel for ~62.5 MHz, so the previous 120 MHz request
+	// (which the controller clamped to ~99 MHz) ran ~2x over spec. That only
+	// "worked" because the old display driver inserted idle gaps between tiny
+	// bursts; the optimized driver streams continuously and pushed marginal
+	// units over the edge (blank screen on some machines). 50 MHz rounds to a
+	// safe in-spec 49.5 MHz. Override with -spi-mhz for tuning.
+	spiMHz := flag.Int("spi-mhz", 50, "SPI bus clock in MHz (rounded down to an achievable divider; keep <=62 for panel spec)")
 	flag.Parse()
 
 	// Build the listen address:
@@ -510,7 +520,9 @@ func main() {
 	}
 	defer spiPort.Close()
 
-	conn, err := spiPort.Connect(120000*physic.KiloHertz, spi.Mode0, 8)
+	spiHz := physic.Frequency(*spiMHz) * physic.MegaHertz
+	log.Printf("SPI bus clock requested: %s (controller rounds down to an achievable divider)", spiHz)
+	conn, err := spiPort.Connect(spiHz, spi.Mode0, 8)
 	if err != nil {
 		log.Fatal(err)
 	}
