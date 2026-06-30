@@ -623,7 +623,7 @@ func deepMergeJSONOpt(dst, src map[string]interface{}, replaceArrays bool) map[s
 		// arrays must replace the defaults rather than append to them: both
 		// carry complete user-authored lists (page elements / metric sources)
 		// that would otherwise be duplicated against shipped defaults.
-		childReplaceArrays := replaceArrays || key == "display_template" || key == "custom_metrics"
+		childReplaceArrays := replaceArrays || key == "display_template" || key == "custom_metrics" || key == "public_ip_lookup"
 
 		if dstVal, exists := dst[key]; exists {
 			// Key exists in both - need to merge

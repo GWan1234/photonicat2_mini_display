@@ -306,6 +306,28 @@ type Config struct {
 	ShowSms                          bool                `json:"show_sms"`
 	SmsLimitForScreen                int                 `json:"sms_limit_for_screen"`
 	CustomMetrics                    CustomMetricsConfig `json:"custom_metrics,omitempty"`
+	PublicIPLookup                   PublicIPLookup      `json:"public_ip_lookup,omitempty"`
+}
+
+// PublicIPSource is one configurable endpoint used to resolve the public IP.
+// Parser reuses the custom-metrics parser syntax: "stdout" (default, the whole
+// trimmed body), "json:path.to.key", "regex:pattern", or "line:N". This lets
+// users point at services that return plain text (icanhazip.com, ident.me) or
+// JSON (ip-api.com) when the default photonicat.com endpoints are blocked.
+type PublicIPSource struct {
+	URL    string `json:"url"`
+	Parser string `json:"parser,omitempty"`
+}
+
+// PublicIPLookup configures how the LCD's PUBLIC IP field is resolved. Sources
+// are tried in order and the first one that returns a valid IP of the right
+// family wins, so listing several gives automatic fallback. UserAgent, when
+// non-empty, overrides the default request User-Agent (some services vary their
+// output by client).
+type PublicIPLookup struct {
+	UserAgent string           `json:"user_agent,omitempty"`
+	IPv4      []PublicIPSource `json:"ipv4,omitempty"`
+	IPv6      []PublicIPSource `json:"ipv6,omitempty"`
 }
 
 // FontConfig holds parameters for a font.

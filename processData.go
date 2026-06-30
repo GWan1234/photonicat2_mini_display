@@ -1466,52 +1466,114 @@ func getWanIPv4() (string, error) {
 	return "N/A", fmt.Errorf("WAN IP not found")
 }
 
-// getPublicIPv4 makes an HTTP request to a public API to fetch the external IPv4 address.
-func getPublicIPv4() (string, error) {
-	resp, err := secureHTTPClient.Get("https://4.photonicat.com/ip.php")
+// ipLookupClient mirrors secureHTTPClient but WITHOUT the global User-Agent
+// transport, so each public-IP request can carry a per-config User-Agent.
+var ipLookupClient = &http.Client{
+	Timeout: 10 * time.Second,
+	Transport: &http.Transport{
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: false,
+			MinVersion:         tls.VersionTLS12,
+		},
+		TLSHandshakeTimeout: 5 * time.Second,
+	},
+}
+
+// Built-in defaults, used when public_ip_lookup carries no sources. These keep
+// the historical photonicat.com behaviour for devices with no override.
+var defaultPublicIPv4Sources = []PublicIPSource{{URL: "https://4.photonicat.com/ip.php", Parser: "stdout"}}
+var defaultPublicIPv6Sources = []PublicIPSource{{URL: "https://6.photonicat.com/ip.php", Parser: "stdout"}}
+
+// fetchOnePublicIP fetches a single source, applies its parser, and validates
+// the result as an IP of the requested family.
+func fetchOnePublicIP(src PublicIPSource, userAgent string, wantV6 bool) (string, error) {
+	req, err := http.NewRequest("GET", src.URL, nil)
+	if err != nil {
+		return "", err
+	}
+	ua := strings.TrimSpace(userAgent)
+	if ua == "" {
+		ua = getUserAgent()
+	}
+	req.Header.Set("User-Agent", ua)
+
+	resp, err := ipLookupClient.Do(req)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
 
-	ip, err := io.ReadAll(resp.Body)
+	// Cap the body: IP responses are tiny, JSON ones still small.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 	if err != nil {
 		return "", err
 	}
 
-	// Trim any whitespace or newlines.
-	ipStr := strings.TrimSpace(string(ip))
-
-	// Optional: Basic validation that it looks like an IPv4 address.
-	if net.ParseIP(ipStr) == nil || net.ParseIP(ipStr).To4() == nil {
-		return "", fmt.Errorf("invalid IPv4 address received: %s", ipStr)
+	parser := strings.TrimSpace(src.Parser)
+	if parser == "" {
+		parser = "stdout"
+	}
+	value, err := parseCommandOutput(string(body), parser)
+	if err != nil {
+		return "", fmt.Errorf("parser %q: %v", parser, err)
 	}
 
+	ipStr := strings.TrimSpace(value)
+	parsed := net.ParseIP(ipStr)
+	if parsed == nil {
+		return "", fmt.Errorf("invalid IP received: %q", ipStr)
+	}
+	if wantV6 {
+		if parsed.To4() != nil {
+			return "", fmt.Errorf("expected IPv6, got IPv4: %s", ipStr)
+		}
+	} else if parsed.To4() == nil {
+		return "", fmt.Errorf("expected IPv4, got %s", ipStr)
+	}
 	return ipStr, nil
 }
 
-// getIPv6Public fetches the public IPv6 address.
+// fetchPublicIP tries each source in order and returns the first valid IP.
+func fetchPublicIP(sources []PublicIPSource, userAgent string, wantV6 bool) (string, error) {
+	var lastErr error
+	for _, src := range sources {
+		if strings.TrimSpace(src.URL) == "" {
+			continue
+		}
+		ipStr, err := fetchOnePublicIP(src, userAgent, wantV6)
+		if err != nil {
+			lastErr = err
+			log.Printf("public IP lookup via %s failed: %v", src.URL, err)
+			continue
+		}
+		return ipStr, nil
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no public IP sources configured")
+	}
+	return "", lastErr
+}
+
+// getPublicIPv4 resolves the external IPv4 address from the configured sources
+// (falling back to the photonicat.com default when none are configured).
+func getPublicIPv4() (string, error) {
+	sources := cfg.PublicIPLookup.IPv4
+	if len(sources) == 0 {
+		sources = defaultPublicIPv4Sources
+	}
+	return fetchPublicIP(sources, cfg.PublicIPLookup.UserAgent, false)
+}
+
+// getIPv6Public resolves the external IPv6 address from the configured sources.
 func getIPv6Public() (string, error) {
-	resp, err := secureHTTPClient.Get("https://6.photonicat.com/ip.php")
-	if err != nil {
-		return "", err
+	sources := cfg.PublicIPLookup.IPv6
+	if len(sources) == 0 {
+		sources = defaultPublicIPv6Sources
 	}
-	defer resp.Body.Close()
-
-	ip, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-
-	// Trim any whitespace or newlines.
-	ipStr := strings.TrimSpace(string(ip))
-
-	// Optional: Basic validation that it looks like an IPv6 address.
-	if net.ParseIP(ipStr) == nil || net.ParseIP(ipStr).To4() != nil {
-		return "", fmt.Errorf("invalid IPv6 address received: %s", ipStr)
-	}
-
-	return ipStr, nil
+	return fetchPublicIP(sources, cfg.PublicIPLookup.UserAgent, true)
 }
 
 // getCpuTemp returns CPU temperature from /sys/class/thermal/thermal_zone0/temp.
