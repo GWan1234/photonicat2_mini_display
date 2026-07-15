@@ -1430,7 +1430,25 @@ func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
 			}
 
 			// Define the destination rectangle for the icon.
-			pt := image.Pt(element.Position.X, element.Position.Y)
+			iconX := element.Position.X
+			// When anchored to a text data_key, stick the icon to the right of
+			// that value's rendered width so it tracks variable-width text
+			// (e.g. "0:10" vs "12:30") instead of sitting at a fixed x.
+			if element.AnchorAfterDataKey != "" {
+				anchorText := "-"
+				if v, ok := globalData.Load(element.AnchorAfterDataKey); ok && v != nil {
+					anchorText = fmt.Sprintf("%v", v)
+				}
+				anchorFontName := element.AnchorFont
+				if anchorFontName == "" {
+					anchorFontName = "reg"
+				}
+				if anchorFace, _, ferr := getFontFaceForText(anchorFontName, anchorText); ferr == nil {
+					textW := font.MeasureString(anchorFace, anchorText).Round()
+					iconX = element.Position.X + textW + element.AnchorGap
+				}
+			}
+			pt := image.Pt(iconX, element.Position.Y)
 			rect := image.Rect(pt.X, pt.Y, pt.X+sz.Width, pt.Y+sz.Height)
 			draw.Draw(frame, rect, iconImg, image.Point{}, draw.Over)
 		case "fixed_text":

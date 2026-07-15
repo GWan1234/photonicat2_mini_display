@@ -115,6 +115,11 @@ type WiFiInterface struct {
 type DashboardInfo struct {
 	BatteryCurrent      float64         `json:"battery_current"`
 	BatteryWattage      float64         `json:"battery_wattage"`
+	// BatteryRemainingTime is pcat-manager-web's own "H:MM" estimate of the time
+	// left to charge (to 90%) or discharge (to 0%). We mirror it verbatim so the
+	// LCD never disagrees with the web home page; empty when the web side can't
+	// compute it, in which case collectBatteryData() falls back to its own math.
+	BatteryRemainingTime string         `json:"battery_remaining_time"`
 	BoardTemperature    int             `json:"board_temperature"`
 	Carrier             string          `json:"carrier"`
 	ChargePercent       int             `json:"charge_percent"`
@@ -233,6 +238,27 @@ func collectBatteryData() {
 	} else {
 		idleTimeout = time.Duration(cfg.ScreenDimmerTimeOnBatterySeconds) * time.Second
 	}
+
+	// Remaining time estimate for page0's 4th slot (clock icon + "H:MM").
+	// pcat-manager-web is the source of truth: when getInfoFromPcatWeb() has
+	// stored a value from dashboard.json, keep it so the LCD never disagrees
+	// with the web home page. Only compute our own estimate as a fallback.
+	if fromWeb, _ := globalData.Load("RemainingTimeFromWeb"); fromWeb == true {
+		applyRemainingTimeUnit() // web already stored the value; just keep unit clear
+	} else if hours, ok := computeRemainingTimeHours(battChargingStatus); ok {
+		globalData.Store("RemainingTime", formatRemainingTime(hours))
+		applyRemainingTimeUnit()
+	} else {
+		globalData.Store("RemainingTime", "-")
+		globalData.Store("RemainingTime_Unit", "")
+	}
+}
+
+// applyRemainingTimeUnit keeps the remaining-time slot to just the clock icon +
+// "H:MM": the target-percent suffix (">90%"/">0%") made the row too wide for the
+// 172px screen, so no unit is drawn. The clock icon already conveys "time left".
+func applyRemainingTimeUnit() {
+	globalData.Store("RemainingTime_Unit", "")
 }
 
 func getInfoFromPcatWeb() {
@@ -257,6 +283,18 @@ func getInfoFromPcatWeb() {
 			} else {
 				// Store each field into globalData under a sensible key.
 				globalData.Store("BoardTemperature", info.BoardTemperature)
+				// Mirror pcat-manager-web's remaining-time so the LCD matches the
+				// web home page. Drop the leading "<" the web uses for "less than"
+				// (e.g. "< 0:10") — the LCD just shows the bare "H:MM". Record
+				// whether it was usable so collectBatteryData() only computes its
+				// own value as a fallback.
+				if rt := normalizeRemainingTime(info.BatteryRemainingTime); rt != "" {
+					globalData.Store("RemainingTime", rt)
+					globalData.Store("RemainingTimeFromWeb", true)
+					applyRemainingTimeUnit()
+				} else {
+					globalData.Store("RemainingTimeFromWeb", false)
+				}
 				globalData.Store("Carrier", info.Carrier)
 				globalData.Store("GatewayDevice", info.Connection)
 				globalData.Store("ActiveEgress", info.ActiveEgress)
@@ -1369,6 +1407,124 @@ func getBatteryCurrentUA() (float64, error) {
 		return 0, err
 	}
 	return strconv.ParseFloat(strings.TrimSpace(string(content)), 64)
+}
+
+// readBatterySysfsFloat reads a single numeric value from a
+// /sys/class/power_supply/battery/<name> node. Returns an error when the node
+// is missing or unparsable so callers can fall back to alternate counters.
+func readBatterySysfsFloat(name string) (float64, error) {
+	content, err := os.ReadFile("/sys/class/power_supply/battery/" + name)
+	if err != nil {
+		return 0, err
+	}
+	return strconv.ParseFloat(strings.TrimSpace(string(content)), 64)
+}
+
+// chargeTargetSoc is the SoC (%) we count up to when reporting "time to charge".
+// The pack is deliberately not driven to 100% on the display estimate, matching
+// the home page which reports time-to-90%.
+const chargeTargetSoc = 90.0
+
+// batteryEnergyState returns the battery's full capacity, its current level,
+// and the instantaneous draw/charge rate — all in a single consistent unit so
+// that level/rate yields hours. It probes, in order of accuracy:
+//
+//  1. energy_now/energy_full (µWh) + power_now (µW)
+//  2. charge_now/charge_full (µAh) + current_now (µA)
+//  3. capacity(%) × energy_full (µWh) + power_now (µW)   ← photonicat2 layout,
+//     which exposes energy_full and power_now but no *_now counter
+//  4. capacity(%) × charge_full (µAh) + current_now (µA)
+//
+// ok is false when no usable pair is found.
+func batteryEnergyState() (level, full, rate float64, ok bool) {
+	soc, socErr := readBatterySysfsFloat("capacity") // %
+
+	// 1) energy counter with a live energy level.
+	if now, err1 := readBatterySysfsFloat("energy_now"); err1 == nil {
+		if full, err2 := readBatterySysfsFloat("energy_full"); err2 == nil && full > 0 {
+			if rate, err3 := readBatterySysfsFloat("power_now"); err3 == nil {
+				return now, full, rate, true
+			}
+		}
+	}
+	// 2) charge counter with a live charge level.
+	if now, err1 := readBatterySysfsFloat("charge_now"); err1 == nil {
+		if full, err2 := readBatterySysfsFloat("charge_full"); err2 == nil && full > 0 {
+			if rate, err3 := getBatteryCurrentUA(); err3 == nil {
+				return now, full, rate, true
+			}
+		}
+	}
+	// 3) derive the energy level from capacity × energy_full (no energy_now node).
+	if socErr == nil {
+		if full, err2 := readBatterySysfsFloat("energy_full"); err2 == nil && full > 0 {
+			if rate, err3 := readBatterySysfsFloat("power_now"); err3 == nil {
+				return full * soc / 100.0, full, rate, true
+			}
+		}
+		// 4) derive the charge level from capacity × charge_full.
+		if full, err2 := readBatterySysfsFloat("charge_full"); err2 == nil && full > 0 {
+			if rate, err3 := getBatteryCurrentUA(); err3 == nil {
+				return full * soc / 100.0, full, rate, true
+			}
+		}
+	}
+	return 0, 0, 0, false
+}
+
+// computeRemainingTimeHours estimates the hours left until the battery reaches
+// its target level:
+//
+//   - charging:    hours until SoC reaches chargeTargetSoc (90%)
+//   - discharging: hours until SoC reaches 0%
+//
+// ok is false when no usable counter/rate is available or the battery is
+// effectively idle (so the caller shows a placeholder).
+func computeRemainingTimeHours(charging bool) (hours float64, ok bool) {
+	level, full, rate, ok := batteryEnergyState()
+	if !ok || full <= 0 {
+		return 0, false
+	}
+	// current_now/power_now can be signed; we only need the magnitude and use
+	// the charging flag (derived from /status) for direction.
+	rate = math.Abs(rate)
+	if rate < 1 { // essentially idle: no meaningful estimate
+		return 0, false
+	}
+
+	var delta float64
+	if charging {
+		target := full * (chargeTargetSoc / 100.0)
+		delta = target - level
+		if delta <= 0 { // already at/above target
+			return 0, false
+		}
+	} else {
+		delta = level // down to empty
+		if delta <= 0 {
+			return 0, false
+		}
+	}
+
+	// delta and rate share units (µWh/µW or µAh/µA) → result in hours.
+	return delta / rate, true
+}
+
+// normalizeRemainingTime cleans pcat-manager-web's battery_remaining_time for
+// the LCD: it trims whitespace and strips a leading "<" (the web prefixes small
+// estimates like "< 0:10"), leaving a bare "H:MM". Returns "" for empty input.
+func normalizeRemainingTime(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.TrimPrefix(s, "<")
+	return strings.TrimSpace(s)
+}
+
+// formatRemainingTime renders an hours value as "H:MM" (e.g. 2.67h → "2:40").
+func formatRemainingTime(hours float64) string {
+	totalMinutes := int(math.Round(hours * 60))
+	h := totalMinutes / 60
+	m := totalMinutes % 60
+	return fmt.Sprintf("%d:%02d", h, m)
 }
 
 // getLocalIPv4 returns eth0 IP on OpenWrt or WAN IP (default route) on Debian.

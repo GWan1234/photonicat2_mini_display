@@ -142,14 +142,25 @@
                     "enable": 1
                 },
                 {
-                    "type": "graph",
+                    "type": "text",
+                    "label": "Remaining",
                     "position": {"x": 100, "y": 228},
-                    "size": {"width": 60, "height": 25},
-                    "enable": 0,
-                    "graph_config": {
-                        "graph_type": "power",
-                        "time_frame_mins": 15
-                    }
+                    "font": "reg",
+                    "color": [255, 229, 0],
+                    "units": "",
+                    "data_key": "RemainingTime",
+                    "units_font": "unit",
+                    "enable": 1
+                },
+                {
+                    "type": "icon",
+                    "icon_path": "assets/svg/clock.svg",
+                    "position": {"x": 100, "y": 233},
+                    "size": {"width": 13, "height": 13},
+                    "anchor_after_data_key": "RemainingTime",
+                    "anchor_font": "reg",
+                    "anchor_gap": 2,
+                    "enable": 1
                 }
             ],
             "page1": [

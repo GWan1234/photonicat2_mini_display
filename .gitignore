@@ -15,3 +15,5 @@ pcat2_mini_display_debian
 .gitlab_token
 *.log
 photonicat2_mini_display
+test_runner
+test_runner_*

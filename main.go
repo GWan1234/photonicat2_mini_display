@@ -281,6 +281,14 @@ type DisplayElement struct {
 	Size        *Size        `json:"size,omitempty"`         // for icons, if provided
 	Size2       *Size        `json:"_size,omitempty"`        // sometimes provided as _size
 	GraphConfig *GraphConfig `json:"graph_config,omitempty"` // for graph elements
+	// AnchorAfterDataKey, when set on an icon, positions the icon immediately to
+	// the right of the named text data_key's rendered value (Position.X is then
+	// the text's start x, and the icon is offset by the measured text width plus
+	// AnchorGap). This lets a trailing icon "stick" to variable-width text like
+	// the battery remaining-time ("0:10" vs "12:30") instead of a fixed x.
+	AnchorAfterDataKey string `json:"anchor_after_data_key,omitempty"`
+	AnchorFont         string `json:"anchor_font,omitempty"` // font of the anchored text (defaults to "reg")
+	AnchorGap          int    `json:"anchor_gap,omitempty"`  // extra px between text and icon
 }
 
 // GraphConfig holds configuration for graph elements
