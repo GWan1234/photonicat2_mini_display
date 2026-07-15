@@ -323,21 +323,33 @@ type FontConfig struct {
 	FontSize float64 // in points
 }
 
-// checkDMAAvailability checks if SPI DMA channels are available
+// checkDMAAvailability checks if SPI DMA is usable for display output.
+//
+// This is a *display* driver: it only ever writes pixels out to the panel, so
+// only the TX DMA channel matters. RX is never used, and on this platform the
+// SPI node is often given a TX-only DMA channel by the device tree. We
+// therefore require only dma:tx and treat dma:rx as optional (logged if
+// present, ignored if absent).
 func checkDMAAvailability() error {
-	// Check for DMA channel files
-	dmaRxPath := "/sys/devices/platform/soc/2ad00000.spi/dma:rx"
-	dmaTxPath := "/sys/devices/platform/soc/2ad00000.spi/dma:tx"
+	return checkDMAAvailabilityAt("/sys/devices/platform/soc/2ad00000.spi")
+}
 
-	if _, err := os.Stat(dmaRxPath); os.IsNotExist(err) {
-		return fmt.Errorf("DMA RX channel not found at %s", dmaRxPath)
-	}
+// checkDMAAvailabilityAt is the testable core of checkDMAAvailability. It
+// inspects the given SPI sysfs directory for DMA channel symlinks. Only the TX
+// channel is required (see checkDMAAvailability for why).
+func checkDMAAvailabilityAt(spiDir string) error {
+	dmaRxPath := spiDir + "/dma:rx"
+	dmaTxPath := spiDir + "/dma:tx"
 
 	if _, err := os.Stat(dmaTxPath); os.IsNotExist(err) {
 		return fmt.Errorf("DMA TX channel not found at %s", dmaTxPath)
 	}
 
-	log.Printf("DMA channels found: RX=%s, TX=%s", dmaRxPath, dmaTxPath)
+	if _, err := os.Stat(dmaRxPath); os.IsNotExist(err) {
+		log.Printf("DMA TX channel found (RX absent, not needed for display output): TX=%s", dmaTxPath)
+	} else {
+		log.Printf("DMA channels found: RX=%s, TX=%s", dmaRxPath, dmaTxPath)
+	}
 	return nil
 }
 
