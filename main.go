@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"syscall"
@@ -516,6 +517,16 @@ func main() {
 
 	//rm pcat_display_initialized
 	os.Remove("/tmp/pcat_display_initialized")
+
+	// Older builds wrote generated SVG/PNG frames to /tmp; they are rendered
+	// in memory now, so sweep any leftovers from a previous version.
+	for _, pattern := range []string{"/tmp/strength-*.svg", "/tmp/barBackground.svg", "/tmp/barProgress_*.svg", "/tmp/welcome.png"} {
+		if matches, err := filepath.Glob(pattern); err == nil {
+			for _, m := range matches {
+				os.Remove(m)
+			}
+		}
+	}
 	// Initialize board.
 	if _, err := host.Init(); err != nil {
 		log.Fatal(err)

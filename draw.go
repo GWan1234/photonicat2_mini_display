@@ -640,6 +640,30 @@ func drawSVG(frame *image.RGBA, svgPath string, x0, y0, targetWidth, targetHeigh
 	return nil
 }
 
+// renderSvgBytes rasterizes in-memory SVG data at its intrinsic size, so
+// generated graphics (signal bars, boot progress bar) never touch the
+// filesystem. If cacheKey is non-empty the rendered image is stored in
+// imageCache under that key for reuse.
+func renderSvgBytes(svgData []byte, cacheKey string) (*image.RGBA, error) {
+	icon, err := oksvg.ReadIconStream(bytes.NewReader(svgData))
+	if err != nil {
+		return nil, err
+	}
+	w := int(icon.ViewBox.W)
+	h := int(icon.ViewBox.H)
+	rgba := image.NewRGBA(image.Rect(0, 0, w, h))
+	icon.SetTarget(0, 0, float64(w), float64(h))
+	scanner := rasterx.NewScannerGV(w, h, rgba, rgba.Bounds())
+	dasher := rasterx.NewDasher(w, h, scanner)
+	icon.Draw(dasher, 1.0)
+	if cacheKey != "" {
+		imageCacheMu.Lock()
+		imageCache[cacheKey] = rgba
+		imageCacheMu.Unlock()
+	}
+	return rgba, nil
+}
+
 // cropImageAt crops the given src image starting at (x0, y0) with the specified width and height.
 // It returns a new *image.RGBA whose bounds begin at (0,0).
 func cropImageAt(src *image.RGBA, x0, y0, width, height int) *image.RGBA {
@@ -1003,11 +1027,12 @@ func drawSignalStrength(frame *image.RGBA, x0, y0 int, strength float64) {
 	numBars := 4
 	yMinHeight := 6
 	strengthInt := int(math.Ceil(strength * 4))
-	fn := "/tmp/strength-"+strconv.Itoa(strengthInt)+".svg"
+	cacheKey := "gen:strength-" + strconv.Itoa(strengthInt)
 
-	if _, err := os.Stat(fn); err == nil {	//if file exists, serve the file from disk
-		//do nothing
-	}else{
+	imageCacheMu.RLock()
+	img, cached := imageCache[cacheKey]
+	imageCacheMu.RUnlock()
+	if !cached {
 		var buf bytes.Buffer
 		canvas := svg.New(&buf)
 		canvas.Start(xBarSize*numBars+barSpace*(numBars-1), yBarSize+yMinHeight)
@@ -1021,21 +1046,12 @@ func drawSignalStrength(frame *image.RGBA, x0, y0 int, strength float64) {
 			}
 		}
 		canvas.End()
-		
-		svgFile, err := os.Create(fn)
-		if err != nil {
-			panic(err)
-		}
-		_, err = svgFile.Write(buf.Bytes())
-		if err != nil {
-			panic(err)
-		}
-		svgFile.Close()
-	}
 
-	img, _, _, err := loadImage(fn)
-	if err != nil {
-		panic(err)
+		var err error
+		img, err = renderSvgBytes(buf.Bytes(), cacheKey)
+		if err != nil {
+			panic(err)
+		}
 	}
 	copyImageToImageAt(frame, img, x0, y0)
 }
@@ -1580,8 +1596,6 @@ func showWelcome(display gc9307.Device, width, height int, duration time.Duratio
 	barWidth := 82
     barX := width/2 - barWidth/2
 	barHeight := 8
-	fnBase:="/tmp/barBackground.svg"
-	fnProgressPart:="/tmp/barProgress_"
 
 	frame := image.NewRGBA(image.Rect(0, 0, width, height))
 	clearFrame(frame, width, height)
@@ -1594,28 +1608,16 @@ func showWelcome(display gc9307.Device, width, height int, duration time.Duratio
 	x0 := width/2 - w/2
 	y0 := logoY
 	log.Printf("Welcome logo at: x0: %d, y0: %d, w: %d, h: %d", x0, y0, w, h)
-	copyImageToImageAt(frame, welcomeLogo, x0, y0 ) 
-	//save this frame to png
-	saveFrameToPng(frame, "/tmp/welcome.png")
-	copyImageToImageAt(frame, welcomeLogo, x0, y0 ) 
+	copyImageToImageAt(frame, welcomeLogo, x0, y0 )
 
 	var bufBack bytes.Buffer
 	canvas := svg.New(&bufBack)
 	canvas.Start(barWidth, barHeight)
 	canvas.Roundrect(0, 0, barWidth, barHeight, radiusBarCorner, radiusBarCorner, "fill:#627482")
 	canvas.End()
-	svgFile, err := os.Create(fnBase)
+	barBackground, err := renderSvgBytes(bufBack.Bytes(), "")
 	if err != nil {
-		panic(err)
-	}
-	_, err = svgFile.Write(bufBack.Bytes())
-	if err != nil {
-		panic(err)
-	}
-	svgFile.Close()
-	barBackground, _, _, err := loadImage(fnBase)
-	if err != nil {
-		log.Printf("Error loading bar background from %s: %v", fnBase, err)
+		log.Printf("Error rendering bar background: %v", err)
 		return
 	}
 	barY := logoY + spaceBetweenLogoAndBar + h
@@ -1623,33 +1625,21 @@ func showWelcome(display gc9307.Device, width, height int, duration time.Duratio
 	sendFull(display, frame)
 
 	var bufProgress bytes.Buffer
-	var progressBar *image.RGBA
 
     for i := 1; i <= barWidth; i++ {
-		fnProgress := fnProgressPart+strconv.Itoa(i)+".svg"
 		bufProgress.Reset()
 		canvasProgress := svg.New(&bufProgress)
 		canvasProgress.Start(barWidth, barHeight)
 		canvasProgress.Roundrect(0, 0, i, barHeight, radiusBarCorner, radiusBarCorner, "fill:#FDE021")
 		canvasProgress.End()
-		svgFile, err := os.Create(fnProgress)
+		progressBar, err := renderSvgBytes(bufProgress.Bytes(), "")
 		if err != nil {
-			panic(err)
-		}
-		_, err = svgFile.Write(bufProgress.Bytes())
-		if err != nil {
-			panic(err)
-		}
-		svgFile.Close()
-		progressBar, _, _, err = loadImage(fnProgress)
-		
-		if err != nil {
-			log.Printf("Error loading bar background from %s: %v", fnBase, err)
+			log.Printf("Error rendering progress bar: %v", err)
 			return
 		}
 		copyImageToImageAt(frame, progressBar, barX, barY)
 		sendFull(display, frame)
-      
+
 		//time.Sleep(sleepPerPixel)
     }
 }
