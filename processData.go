@@ -127,6 +127,10 @@ type DashboardInfo struct {
 	// NetworkMode is the user's "Internet via" selection: "auto", "eth_only",
 	// "cell_only", "smart_wan" or "all_off".
 	NetworkMode         string          `json:"network_mode"`
+	// NetworkModeLabel is the human-readable form of NetworkMode as computed by
+	// pcat-manager-web: "Eth/5G"/"Eth/4G", "Eth Only", "Cell Only",
+	// "Smart WAN" or "All Off".
+	NetworkModeLabel    string          `json:"network_mode_label"`
 	// WifiSignalPercent is the Smart WAN upstream RSSI as 0-100% (or null).
 	WifiSignalPercent   *int            `json:"wifi_signal_percent"`
 	DHCPClientsCount    int             `json:"dhcp_clients_count"`
@@ -257,6 +261,7 @@ func getInfoFromPcatWeb() {
 				globalData.Store("GatewayDevice", info.Connection)
 				globalData.Store("ActiveEgress", info.ActiveEgress)
 				globalData.Store("NetworkMode", info.NetworkMode)
+				globalData.Store("NetworkModeLabel", info.NetworkModeLabel)
 				if info.WifiSignalPercent != nil {
 					globalData.Store("WifiSignalPercent", *info.WifiSignalPercent)
 				} else {

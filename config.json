@@ -456,7 +456,7 @@
                 },
                 {
                     "type": "fixed_text",
-                    "label": "SIM:",
+                    "label": "WAN:",
                     "position": {"x": 10, "y": 98},
                     "font": "unit",
                     "color": [255, 229, 0],
@@ -464,8 +464,26 @@
                 },
                 {
                     "type": "text",
+                    "label": "WAN Mode",
+                    "position": {"x": 52, "y": 98},
+                    "font": "unit",
+                    "color": [255, 229, 255],
+                    "data_key": "NetworkModeLabel",
+                    "units_font": "unit",
+                    "enable": 1
+                },
+                {
+                    "type": "fixed_text",
                     "label": "SIM:",
-                    "position": {"x": 110, "y": 98},
+                    "position": {"x": 10, "y": 121},
+                    "font": "unit",
+                    "color": [255, 229, 0],
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "SIM:",
+                    "position": {"x": 110, "y": 121},
                     "font": "unit",
                     "color": [255, 229, 255],
                     "data_key": "SimState",
@@ -475,7 +493,7 @@
                 {
                     "type": "fixed_text",
                     "label": "WiFi C/s:",
-                    "position": {"x": 10, "y": 121},
+                    "position": {"x": 10, "y": 144},
                     "font": "unit",
                     "color": [255, 229, 0],
                     "enable": 1
@@ -483,7 +501,7 @@
                 {
                     "type": "text",
                     "label": "WiFi C/s:",
-                    "position": {"x": 110, "y": 121},
+                    "position": {"x": 110, "y": 144},
                     "font": "unit",
                     "color": [255, 229, 255],
                     "data_key": "WiFiClientsCount",
@@ -493,7 +511,7 @@
                 {
                     "type": "fixed_text",
                     "label": "DHCP C/s:",
-                    "position": {"x": 10, "y": 144},
+                    "position": {"x": 10, "y": 167},
                     "font": "unit",
                     "color": [255, 229, 0],
                     "enable": 1
@@ -501,7 +519,7 @@
                 {
                     "type": "text",
                     "label": "DHCP C/s:",
-                    "position": {"x": 110, "y": 144},
+                    "position": {"x": 110, "y": 167},
                     "font": "unit",
                     "color": [255, 229, 255],
                     "data_key": "DHCPClientsCount",
@@ -512,7 +530,7 @@
                 {
                     "type": "fixed_text",
                     "label": "SD Card:",
-                    "position": {"x": 10, "y": 167},
+                    "position": {"x": 10, "y": 190},
                     "font": "unit",
                     "color": [255, 229, 0],
                     "enable": 1
@@ -520,7 +538,7 @@
                 {
                     "type": "text",
                     "label": "SD State",
-                    "position": {"x": 110, "y": 167},
+                    "position": {"x": 110, "y": 190},
                     "font": "unit",
                     "color": [255, 229, 255],
                     "data_key": "SdState",
@@ -530,7 +548,7 @@
                 {
                     "type": "fixed_text",
                     "label": "Fan RPM:",
-                    "position": {"x": 10, "y": 190},
+                    "position": {"x": 10, "y": 213},
                     "font": "unit",
                     "color": [255, 229, 0],
                     "enable": 1
@@ -538,7 +556,7 @@
                 {
                     "type": "text",
                     "label": "Fan",
-                    "position": {"x": 110, "y": 190},
+                    "position": {"x": 110, "y": 213},
                     "font": "unit",
                     "color": [255, 229, 255],
                     "data_key": "FanRPM",
@@ -548,7 +566,7 @@
                 {
                     "type": "fixed_text",
                     "label": "PCAT C°:",
-                    "position": {"x": 10, "y": 213},
+                    "position": {"x": 10, "y": 236},
                     "font": "unit",
                     "color": [255, 229, 0],
                     "enable": 1
@@ -556,7 +574,7 @@
                 {
                     "type": "text",
                     "label": "Temp",
-                    "position": {"x": 110, "y": 213},
+                    "position": {"x": 110, "y": 236},
                     "font": "unit",
                     "color": [255, 229, 255],
                     "data_key": "BoardTemperature",
