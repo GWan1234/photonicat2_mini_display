@@ -427,15 +427,36 @@ func (dw *DisplayWrapper) fillRectangleChunked(x, y, width, height int16, img *i
 		chunkHeight = height
 	}
 
+	// The display driver expects a zero-based, tightly-packed image whose
+	// Bounds() exactly match the (width, chunkHeight) it is told to draw. A
+	// SubImage does NOT satisfy that: it keeps the parent's Stride and a
+	// non-zero Rect.Min, and the driver's linear pixel walk then indexes past
+	// the end of the shared Pix slice (index-out-of-range panic). So copy each
+	// strip into a fresh zero-based buffer, row by row, honoring the source
+	// stride and origin.
+	src := img.Pix
+	srcStride := img.Stride
+	srcBounds := img.Bounds()
+	rowBytes := int(width) * 4 // RGBA
+
 	for currentY := y; currentY < y+height; currentY += chunkHeight {
 		remainingHeight := y + height - currentY
 		if remainingHeight < chunkHeight {
 			chunkHeight = remainingHeight
 		}
 
-		// Create a sub-image for this chunk
-		chunkBounds := image.Rect(0, int(currentY-y), int(width), int(currentY-y+chunkHeight))
-		chunkImg := img.SubImage(chunkBounds).(*image.RGBA)
+		// Fresh zero-based strip the driver can walk safely.
+		chunkImg := image.NewRGBA(image.Rect(0, 0, int(width), int(chunkHeight)))
+		for row := 0; row < int(chunkHeight); row++ {
+			// Source row within the original image, offset by this strip's start.
+			srcY := srcBounds.Min.Y + int(currentY-y) + row
+			srcOff := srcY*srcStride + srcBounds.Min.X*4
+			dstOff := row * chunkImg.Stride
+			if srcOff < 0 || srcOff+rowBytes > len(src) {
+				continue // stay in bounds even if the caller passed a short buffer
+			}
+			copy(chunkImg.Pix[dstOff:dstOff+rowBytes], src[srcOff:srcOff+rowBytes])
+		}
 
 		// Send this chunk
 		dw.device.FillRectangleWithImage(x, currentY, width, chunkHeight, chunkImg)
