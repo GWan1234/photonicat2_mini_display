@@ -247,11 +247,9 @@ func setBacklight(brightness int) {
 		offTimer = nil
 	}
 
-	// choose what to write right now:
+	// PWM backlight now supports a true physical 0, so logical brightness maps
+	// directly to the physical value (no more forcing 0 → 1).
 	phys := brightness
-	if brightness == 0 {
-		phys = 1
-	}
 
 	// perform the write
 	if err := os.WriteFile("/sys/class/backlight/backlight/brightness", []byte(strconv.Itoa(phys)), 0644); err != nil {
@@ -260,14 +258,15 @@ func setBacklight(brightness int) {
 		//log.Printf("→ physical backlight %d", phys)
 	}
 
-	// if we just handled a logical “0”, schedule the real off in ZERO_BACKLIGHT_DELAY s
+	// if we just handled a logical “0”, confirm the real off after
+	// ZERO_BACKLIGHT_DELAY s (guards against a transient 0 during transitions)
 	if brightness == 0 {
 		offTimer = time.AfterFunc(ZERO_BACKLIGHT_DELAY, func() {
 			mu.Lock()
 			defer mu.Unlock()
 			if lastLogical == 0 {
 				// still supposed to be off, so write 0 now
-				if err := os.WriteFile("/sys/class/backlight/backlight/brightness", []byte("1"), 0644); err != nil {
+				if err := os.WriteFile("/sys/class/backlight/backlight/brightness", []byte("0"), 0644); err != nil {
 					log.Printf("backlight final-off error: %v", err)
 				} else {
 					log.Println("→ physical backlight OFF")
@@ -611,8 +610,11 @@ func deepMergeJSONOpt(dst, src map[string]interface{}, replaceArrays bool) map[s
 			continue
 		}
 
-		// Skip zero numeric values for brightness/dimmer fields - they should be explicit
-		if key == "screen_max_brightness" || key == "screen_min_brightness" ||
+		// Skip zero numeric values for these fields - a zero here is almost
+		// always an unset/malformed value, so preserve the dst default instead.
+		// Note: screen_min_brightness is intentionally NOT in this list — 0 is a
+		// valid, user-selectable value (backlight fully off when idle).
+		if key == "screen_max_brightness" ||
 			key == "screen_dimmer_time_on_battery_seconds" || key == "screen_dimmer_time_on_dc_seconds" {
 			if numVal, ok := srcVal.(float64); ok && numVal == 0 {
 				continue // Don't override with zero value
