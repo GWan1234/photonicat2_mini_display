@@ -1151,7 +1151,8 @@ func drawTopBar(display gc9307.Device, frame *image.RGBA) {
 
 	// Prefer the precise active egress (which can also be "wifi" in Smart WAN
 	// mode) over the coarse wired/mobile gateway hint.
-	// networkStr: "5"/"4"/"3" cellular, "w" ethernet, "i" WiFi (Smart WAN).
+	// networkStr: "5"/"4"/"3" cellular, "w" ethernet, "i" WiFi (Smart WAN),
+	// "" (empty) when no WAN is secured yet.
 	if activeEgress == "wifi" {
 		networkStr = "i"
 	} else if activeEgress == "wan" || activeEgress == "lan" {
@@ -1165,7 +1166,10 @@ func drawTopBar(display gc9307.Device, frame *image.RGBA) {
 	}else if gatewayDevice == "wired"{
 		networkStr = "w"
 	}else{
-		networkStr = "w"  // Default to ethernet when network status is unknown
+		// No WAN secured yet (e.g. at startup before pcat-manager-web reports
+		// a real egress, or when it reports none). Show no network icon rather
+		// than falsely claiming ethernet.
+		networkStr = ""
 	}
 	signalStrength := 0.43
 	// Resolve the cellular signal level for the cache key so the bar refreshes
