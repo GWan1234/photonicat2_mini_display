@@ -1621,12 +1621,17 @@ func showWelcome(display gc9307.Device, width, height int, duration time.Duratio
 	// Animate the yellow fill by pushing only the bar strip (barWidth x
 	// barHeight pixels) per step instead of a full frame, so the animation
 	// speed is set by sleepPerPixel rather than the SPI clock.
+	animStart := time.Now()
 	for i := 1; i <= barWidth; i++ {
 		drawRoundedBar(bar, i, barHeight, radiusBarCorner, barFillColor)
 		copyImageToImageAt(frame, bar, barX, barY)
 		display.FillRectangleWithImage(int16(barX), int16(barY), int16(barWidth), int16(barHeight), bar)
 		time.Sleep(sleepPerPixel)
 	}
+	// Keep the completed frame on disk so the boot animation can be verified
+	// over SSH (the display itself cannot be read back).
+	saveFrameToPng(frame, "/tmp/welcome_last_frame.png")
+	log.Printf("Welcome animation completed in %.0fms", durationToMs(time.Since(animStart)))
 }
 
 func showWelcomeForced(display gc9307.Device, width, height int, duration time.Duration) {
