@@ -4,33 +4,44 @@ stages:
   - build
   - package
 
+# NOTE: this project's CI runs on a *shell* executor (runner "cicd-shell"), not
+# Docker. Docker `image:` directives are therefore ignored, and the toolchain is
+# pre-installed on the runner host instead of pulled per-job:
+#   - Go 1.25.x          -> /usr/local/go (symlinked into /usr/local/bin)
+#   - aarch64 glibc gcc  -> aarch64-linux-gnu-gcc  (apt: gcc-aarch64-linux-gnu)
+#   - aarch64 musl gcc   -> aarch64-linux-musl-gcc (musl.cc, /usr/local/...)
+# Keep that host in sync if GO_VERSION changes here.
 variables:
-  GO_VERSION: "1.21"
+  GO_VERSION: "1.25.11"   # informational; Go is provided by the runner host
   GOPROXY: "https://proxy.golang.org,direct"
   GOSUMDB: "sum.golang.org"
   CGO_ENABLED: "1"
 
-# Template for Go jobs
+# Shared setup for Go jobs. No apt-get / image pulls: the shell runner already
+# has the toolchain. `go.work`-free module download only.
 .go-template: &go_template
-  image: golang:${GO_VERSION}
   before_script:
-    - apt-get update -qq && apt-get install -y -qq git ca-certificates
     - go version
     - go mod download
+
+# The tests/ directory is a separate `package main` that references unexported
+# symbols from the root package, so it cannot compile as its own package and is
+# excluded from vet/test. The real unit tests live in the root package
+# (*_test.go alongside the sources). Remove this filter once tests/ is fixed or
+# dropped.
+# (defined per-job as: PKGS=$(go list ./... | grep -v '/tests$'))
 
 # Lint stage
 lint:
   <<: *go_template
   stage: lint
   script:
-    - go fmt ./...
-    - go vet ./...
-    - |
-      if command -v golint &> /dev/null; then
-        golint ./...
-      else
-        echo "golint not available, skipping"
-      fi
+    - PKGS=$(go list ./... | grep -v '/tests$')
+    # gofmt drift is reported but non-fatal (matches the previous `go fmt`
+    # behavior, which rewrote in place and never failed the build). go vet is
+    # the real gate.
+    - 'echo "gofmt drift (informational):"; gofmt -l $(git ls-files "*.go" | grep -v "^tests/") || true'
+    - go vet $PKGS
   only:
     - merge_requests
     - main
@@ -41,16 +52,9 @@ test:
   <<: *go_template
   stage: test
   script:
-    - go test -v ./...
-    - go test -race -short ./...
-  coverage: '/coverage: \d+\.\d+% of statements/'
-  artifacts:
-    reports:
-      junit: report.xml
-    paths:
-      - coverage.html
-      - coverage.out
-    expire_in: 1 week
+    - PKGS=$(go list ./... | grep -v '/tests$')
+    - go test -v $PKGS
+    - go test -race -short $PKGS
   only:
     - merge_requests
     - main
@@ -71,31 +75,17 @@ build:host:
     - main
     - tags
 
-# Cross-compilation build job
+# Cross-compilation build job. Uses the cross toolchains pre-installed on the
+# runner host (see top-of-file note) — no per-job downloads.
 build:cross-compile:
-  image: ubuntu:22.04
   stage: build
   before_script:
-    # Install Go
-    - apt-get update -qq
-    - apt-get install -y -qq wget git gcc pkg-config
-    - wget -q https://go.dev/dl/go${GO_VERSION}.0.linux-amd64.tar.gz
-    - tar -C /usr/local -xzf go${GO_VERSION}.0.linux-amd64.tar.gz
-    - export PATH=$PATH:/usr/local/go/bin
     - go version
-    # Install cross-compilation tools
-    - apt-get install -y -qq gcc-aarch64-linux-gnu
-    - wget -q https://musl.cc/aarch64-linux-musl-cross.tgz
-    - tar -C /usr/local -xzf aarch64-linux-musl-cross.tgz
-    - export PATH=/usr/local/aarch64-linux-musl-cross/bin:$PATH
-    - cd $CI_PROJECT_DIR
     - go mod download
   script:
-    # Build for OpenWRT (aarch64 with musl)
-    - echo "Building for OpenWRT (aarch64)..."
+    - echo "Building for OpenWRT (aarch64, musl static)..."
     - GOOS=linux GOARCH=arm64 CGO_ENABLED=1 CC=aarch64-linux-musl-gcc go build -o pcat2_mini_display_openwrt .
-    # Build for Debian (aarch64 with glibc)
-    - echo "Building for Debian (aarch64)..."
+    - echo "Building for Debian (aarch64, glibc)..."
     - GOOS=linux GOARCH=arm64 CGO_ENABLED=1 CC=aarch64-linux-gnu-gcc go build -o pcat2_mini_display_debian .
   artifacts:
     paths:
@@ -108,23 +98,20 @@ build:cross-compile:
 
 # Package stage - create release package
 package:
-  image: ubuntu:22.04
   stage: package
   dependencies:
     - build:cross-compile
-  before_script:
-    - apt-get update -qq && apt-get install -y -qq git tar xz-utils
   script:
     - |
       # Get version information
       GIT_VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "unknown")
       echo "Packaging version: $GIT_VERSION"
-      
+
       # Create package directory
       PACKAGE_DIR="pcat2_mini_display_package"
       rm -rf "$PACKAGE_DIR"
       mkdir -p "$PACKAGE_DIR"
-      
+
       # Copy files to package
       echo "Git version: $GIT_VERSION" > "$PACKAGE_DIR/VERSION.txt"
       cp pcat2_mini_display_openwrt "$PACKAGE_DIR/" || echo "OpenWRT binary not found"
@@ -134,12 +121,12 @@ package:
       cp -r service-files "$PACKAGE_DIR/" 2>/dev/null || echo "service-files directory not found"
       cp install_service.sh "$PACKAGE_DIR/" 2>/dev/null || echo "install_service.sh not found"
       cp README.md "$PACKAGE_DIR/" 2>/dev/null || echo "README.md not found"
-      
+
       # Create tarball
       TAR_NAME="pcat2_mini_display_package_${CI_COMMIT_SHORT_SHA}_${GIT_VERSION}.tar.xz"
       tar -cJf "$TAR_NAME" "$PACKAGE_DIR"
       echo "Created package: $TAR_NAME"
-      
+
       # List contents
       echo "Package contents:"
       tar -tJf "$TAR_NAME"

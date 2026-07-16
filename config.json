@@ -1,6 +1,17 @@
 {
     "ping_site0": "1.1.1.1",
     "ping_site1": "photonicat.com",
+    "public_ip_lookup": {
+        "user_agent": "",
+        "ipv4": [
+            { "url": "https://4.photonicat.com/ip.php", "parser": "stdout" },
+            { "url": "https://api.ipify.org", "parser": "stdout" },
+            { "url": "https://ifconfig.me/ip", "parser": "stdout" }
+        ],
+        "ipv6": [
+            { "url": "https://6.photonicat.com/ip.php", "parser": "stdout" }
+        ]
+    },
     "show_sms": true,
     "sms_limit_for_screen": 5,
     "screen_dimmer_time_on_battery_seconds": 60,
