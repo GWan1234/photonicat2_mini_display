@@ -28,14 +28,6 @@ jobs:
       - name: Run tests
         run: go test -count=1 .
 
-      - name: Install cross-compilation toolchains
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
-          wget -q https://musl.cc/aarch64-linux-musl-cross.tgz
-          sudo tar -C /usr/local -xzf aarch64-linux-musl-cross.tgz
-          rm aarch64-linux-musl-cross.tgz
-
       - name: Get version info
         id: version
         run: |
@@ -48,22 +40,14 @@ jobs:
           echo "BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> "$GITHUB_OUTPUT"
           echo "Building version: ${VERSION}"
 
-      - name: Build OpenWRT binary (aarch64 musl static)
+      - name: Build static aarch64 binary (pure Go, runs on both musl and glibc)
         run: |
-          export PATH=/usr/local/aarch64-linux-musl-cross/bin:$PATH
-          env GOOS=linux GOARCH=arm64 CGO_ENABLED=1 CC=aarch64-linux-musl-gcc \
-            go build \
-              -ldflags="-X main.version=${{ steps.version.outputs.VERSION }} -X 'main.buildTime=${{ steps.version.outputs.BUILD_TIME }}' -extldflags -static -s -w" \
-              -trimpath \
-              -o pcat2_mini_display_openwrt .
-
-      - name: Build Debian binary (aarch64 gnu)
-        run: |
-          env GOOS=linux GOARCH=arm64 CGO_ENABLED=1 CC=aarch64-linux-gnu-gcc \
+          env GOOS=linux GOARCH=arm64 CGO_ENABLED=0 \
             go build \
               -ldflags="-X main.version=${{ steps.version.outputs.VERSION }} -X 'main.buildTime=${{ steps.version.outputs.BUILD_TIME }}' -s -w" \
               -trimpath \
-              -o pcat2_mini_display_debian .
+              -o pcat2_mini_display_openwrt .
+          cp pcat2_mini_display_openwrt pcat2_mini_display_debian
 
       - name: Package OpenWRT release
         run: |
