@@ -136,7 +136,12 @@ func getJsonContent(cfg *Config) string {
 	resp, err := localHTTPClient.Get(url)
 	if err != nil {
 		log.Printf("GET /sms/list.json failed: %v", err)
-		// Return last successful result if we have one, otherwise return empty
+		// pcat-manager-web is down: try reading the messages straight from
+		// ModemManager before falling back to cached data.
+		if fallback := getSmsJsonFromModemManager(smsLimit); fallback != "" {
+			lastSuccessfulSmsJsonContent = fallback
+			return fallback
+		}
 		if lastSuccessfulSmsJsonContent != "" {
 			log.Printf("Using cached SMS data due to request failure")
 			return lastSuccessfulSmsJsonContent
@@ -148,6 +153,10 @@ func getJsonContent(cfg *Config) string {
 	// 2. Check HTTP status
 	if resp.StatusCode != http.StatusOK {
 		log.Printf("unexpected HTTP status: %s", resp.Status)
+		if fallback := getSmsJsonFromModemManager(smsLimit); fallback != "" {
+			lastSuccessfulSmsJsonContent = fallback
+			return fallback
+		}
 		// Return last successful result if we have one, otherwise return empty
 		if lastSuccessfulSmsJsonContent != "" {
 			log.Printf("Using cached SMS data due to HTTP error")

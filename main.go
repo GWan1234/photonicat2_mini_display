@@ -771,6 +771,7 @@ func main() {
 
 	go collectFixedData()
 	go getSmsPages()
+	startPmuManager() //board temp + G-sensor from the PMU (sysfs or direct UART)
 
 	// Initialize and start custom metrics manager
 	if len(cfg.CustomMetrics.Sources) > 0 {

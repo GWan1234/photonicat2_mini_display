@@ -267,11 +267,17 @@ func getInfoFromPcatWeb() {
 	basicURL := "http://localhost:80/api/v1/modem/basic.json"
 
 	var info DashboardInfo
+	webOK := false
 
 	// === 1) Fetch dashboard.json ===
 	resp, err := localHTTPClient.Get(dashbarodURL)
 	if err != nil {
 		fmt.Println("Could not get dashboard info:", err)
+	} else if resp.StatusCode != http.StatusOK {
+		// Port 80 answered but it is not pcat-manager-web (e.g. another web
+		// server on a Debian install) — treat as unavailable.
+		resp.Body.Close()
+		fmt.Println("Dashboard endpoint returned:", resp.Status)
 	} else {
 		defer resp.Body.Close()
 		body, err := io.ReadAll(resp.Body)
@@ -281,6 +287,7 @@ func getInfoFromPcatWeb() {
 			if err2 := secureUnmarshal(body, &info); err2 != nil {
 				fmt.Println("Could not unmarshal dashboard info:", err2)
 			} else {
+				webOK = true
 				// Store each field into globalData under a sensible key.
 				globalData.Store("BoardTemperature", info.BoardTemperature)
 				// Mirror pcat-manager-web's remaining-time so the LCD matches the
@@ -358,6 +365,24 @@ func getInfoFromPcatWeb() {
 			}
 		}
 	}
+
+	// pcat-manager-web unreachable (not installed or stopped — the normal
+	// case on plain Debian): fall back to reading everything we can straight
+	// from Linux, and skip the remaining web endpoints this round.
+	if !webOK {
+		if !pcatWebStateKnown || pcatWebUp.Load() {
+			log.Println("pcat-manager-web unavailable, using direct Linux data sources")
+		}
+		pcatWebStateKnown = true
+		pcatWebUp.Store(false)
+		collectLinuxFallbackData()
+		return
+	}
+	if pcatWebStateKnown && !pcatWebUp.Load() {
+		log.Println("pcat-manager-web is back, resuming web data sources")
+	}
+	pcatWebStateKnown = true
+	pcatWebUp.Store(true)
 
 	// === 2) Fetch data_stats.json ===
 	resp2, err := localHTTPClient.Get(networkStatsURL)
@@ -468,7 +493,9 @@ func getWANInterface() (string, error) {
 
 func collectWANNetworkSpeed() {
 	var err error
-	if isOpenWRT() {
+	// On OpenWrt the speeds come from pcat-manager-web; when it is down fall
+	// through to the direct /sys/class/net measurement used on Debian.
+	if isOpenWRT() && pcatWebUp.Load() {
 		upSpeed, ok1 := globalData.Load("UpSpeedBps")
 		downSpeed, ok2 := globalData.Load("DownSpeedBps")
 		if !ok1 || !ok2 {
@@ -605,8 +632,14 @@ func collectLinuxData(cfg Config) {
 	//Fan speed
 	fanSpeed, err := getFanSpeed()
 	if err != nil {
-		fmt.Printf("Could not get fan speed: %v\n", err)
-		globalData.Store("FanRPM", "N/A")
+		// No hwmon fan node (e.g. no photonicat-pm kernel driver): use the
+		// value from the direct PMU UART status report when available.
+		if rpm, ok := pmuUartFanRPM(); ok {
+			globalData.Store("FanRPM", rpm)
+		} else {
+			fmt.Printf("Could not get fan speed: %v\n", err)
+			globalData.Store("FanRPM", "N/A")
+		}
 	} else {
 		globalData.Store("FanRPM", fanSpeed)
 	}

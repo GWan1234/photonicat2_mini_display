@@ -469,6 +469,24 @@ func getStatus(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
+// POST /api/v1/go_poweroff?confirm=yes — shut the device down via the PMU.
+// The confirm parameter is required so a stray POST can't power the box off.
+func requestPowerOff(c *fiber.Ctx) error {
+	if c.Query("confirm") != "yes" && c.FormValue("confirm") != "yes" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"status":  "error",
+			"message": "add confirm=yes to actually power off",
+		})
+	}
+	log.Println("Power off requested via HTTP")
+	go func() {
+		if err := pmuPowerOff(); err != nil {
+			log.Printf("Power off failed: %v", err)
+		}
+	}()
+	return c.JSON(fiber.Map{"status": "ok", "message": "powering off"})
+}
+
 func resetConfig(c *fiber.Ctx) error {
 	cfg = dftCfg
 	userCfg = Config{}
@@ -753,6 +771,7 @@ func httpServer(port string) {
 	app.Post("/api/v1/go_set_user_config.json", setUserConfig)
 	app.Get("/api/v1/go_get_status.json", getStatus)
 	app.Get("/api/v1/go_reset_config", resetConfig)
+	app.Post("/api/v1/go_poweroff", requestPowerOff)
 
 	//get/set individual configs
 	app.Post("/api/v1/go_set_ping_sites", setPingSites)
