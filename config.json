@@ -476,7 +476,7 @@
                 {
                     "type": "text",
                     "label": "WAN Mode",
-                    "position": {"x": 52, "y": 98},
+                    "position": {"x": 59, "y": 98},
                     "font": "unit",
                     "color": [255, 229, 255],
                     "data_key": "NetworkModeLabel",

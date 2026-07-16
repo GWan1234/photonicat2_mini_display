@@ -249,7 +249,9 @@ func collectBatteryData() {
 		globalData.Store("RemainingTime", formatRemainingTime(hours))
 		applyRemainingTimeUnit()
 	} else {
-		globalData.Store("RemainingTime", "-")
+		// Nothing to estimate (idle battery, missing counters): leave the slot
+		// blank — no "-" placeholder, and the clock icon is skipped too.
+		globalData.Store("RemainingTime", "")
 		globalData.Store("RemainingTime_Unit", "")
 	}
 }
@@ -1545,16 +1547,29 @@ func computeRemainingTimeHours(charging bool) (hours float64, ok bool) {
 
 // normalizeRemainingTime cleans pcat-manager-web's battery_remaining_time for
 // the LCD: it trims whitespace and strips a leading "<" (the web prefixes small
-// estimates like "< 0:10"), leaving a bare "H:MM". Returns "" for empty input.
+// estimates like "< 0:10"), leaving a bare "H:MM". Returns "" for empty input
+// and for zero values ("0:00") — a zero estimate means there is nothing to
+// show, so the slot stays blank.
 func normalizeRemainingTime(s string) string {
 	s = strings.TrimSpace(s)
 	s = strings.TrimPrefix(s, "<")
-	return strings.TrimSpace(s)
+	s = strings.TrimSpace(s)
+	if zeroTimeRe.MatchString(s) {
+		return ""
+	}
+	return s
 }
 
+// zeroTimeRe matches all-zero "H:MM" strings ("0:00", "00:0", ...).
+var zeroTimeRe = regexp.MustCompile(`^0+:0+$`)
+
 // formatRemainingTime renders an hours value as "H:MM" (e.g. 2.67h → "2:40").
+// A value that rounds to zero minutes returns "" so the slot shows nothing.
 func formatRemainingTime(hours float64) string {
 	totalMinutes := int(math.Round(hours * 60))
+	if totalMinutes == 0 {
+		return ""
+	}
 	h := totalMinutes / 60
 	m := totalMinutes % 60
 	return fmt.Sprintf("%d:%02d", h, m)

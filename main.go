@@ -689,6 +689,12 @@ func main() {
 
 	loadAllConfigsToVariables() //load user, default configs
 
+	// Page0's remaining-time slot starts blank: until a real estimate arrives
+	// there is nothing to show, so neither the "-" placeholder nor the clock
+	// icon should be drawn.
+	globalData.Store("RemainingTime", "")
+	globalData.Store("RemainingTime_Unit", "")
+
 	//collect data for middle and footer, non-blocking
 	go func() {
 		ticker := time.NewTicker(dataGatherInterval)

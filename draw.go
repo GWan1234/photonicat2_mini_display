@@ -1451,9 +1451,14 @@ func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
 			// that value's rendered width so it tracks variable-width text
 			// (e.g. "0:10" vs "12:30") instead of sitting at a fixed x.
 			if element.AnchorAfterDataKey != "" {
-				anchorText := "-"
+				anchorText := ""
 				if v, ok := globalData.Load(element.AnchorAfterDataKey); ok && v != nil {
 					anchorText = fmt.Sprintf("%v", v)
+				}
+				// The icon labels the anchored value; when there is no value
+				// yet (startup) or nothing to show ("" / "-"), draw neither.
+				if anchorText == "" || anchorText == "-" {
+					continue
 				}
 				anchorFontName := element.AnchorFont
 				if anchorFontName == "" {
