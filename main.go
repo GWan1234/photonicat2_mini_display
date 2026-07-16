@@ -55,8 +55,9 @@ const (
 	INTERVAL_SMS_COLLECT      = 60 * time.Second
 	INTERVAL_PCAT_WEB_COLLECT = 10 * time.Second // Increased from 5 to 10 seconds to reduce CPU usage
 
-	ETC_USER_CONFIG_PATH = "/etc/pcat2_mini_display-user_config.json"
-	ETC_CONFIG_PATH      = "/etc/pcat2_mini_display-config.json"
+	ETC_USER_CONFIG_PATH   = "/etc/pcat2_mini_display-user_config.json"
+	ETC_CONFIG_PATH        = "/etc/pcat2_mini_display-config.json"
+	ETC_DEBIAN_CONFIG_PATH = "/etc/pcat2_mini_display-config_debian.json"
 )
 
 var (

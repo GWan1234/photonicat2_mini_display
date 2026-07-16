@@ -789,21 +789,33 @@ func hasShowSmsInUserConfig() bool {
 func loadAllConfigsToVariables() {
 	var err error
 	localConfig := "config.json"
+	etcConfig := ETC_CONFIG_PATH
 	userConfig := "user_config.json"
+
+	// Debian has no pcat-manager-web, so it ships its own display template
+	// without the cellular/SMS pages. Prefer it when present.
+	if !isOpenWRT() {
+		if _, err := os.Stat("config_debian.json"); err == nil {
+			localConfig = "config_debian.json"
+		}
+		if _, err := os.Stat(ETC_DEBIAN_CONFIG_PATH); err == nil {
+			etcConfig = ETC_DEBIAN_CONFIG_PATH
+		}
+	}
 
 	if _, err = os.Stat(localConfig); err == nil {
 		localConfigExists = true
 		log.Println("Local config found at", localConfig)
 	} else {
-		log.Println("use", ETC_CONFIG_PATH)
+		log.Println("use", etcConfig)
 	}
 
 	if localConfigExists {
 		cfg, err = loadConfig(localConfig)
 		dftCfg, err = loadConfig(localConfig)
 	} else {
-		cfg, err = loadConfig(ETC_CONFIG_PATH)
-		dftCfg, err = loadConfig(ETC_CONFIG_PATH)
+		cfg, err = loadConfig(etcConfig)
+		dftCfg, err = loadConfig(etcConfig)
 	}
 
 	if err != nil {

@@ -631,6 +631,9 @@ func collectLinuxData(cfg Config) {
 		globalData.Store("DiskData", diskData)
 	}
 
+	// Per-disk "used/total" GB strings (root / NVMe / SD card) for the display.
+	collectDiskUsage()
+
 	//Fan speed
 	fanSpeed, err := getFanSpeed()
 	if err != nil {
@@ -1799,6 +1802,91 @@ func getDiskUsage() (map[string]interface{}, error) {
 	}
 
 	return data, nil
+}
+
+// reDiskBase extracts the physical disk name from a partition device path,
+// e.g. /dev/mmcblk0p7 -> mmcblk0, /dev/nvme0n1p1 -> nvme0n1, /dev/sda1 -> sda.
+var reDiskBase = regexp.MustCompile(`^/dev/(mmcblk[0-9]+|nvme[0-9]+n[0-9]+|sd[a-z]+)`)
+
+// parseBlockMounts returns (device, mountpoint) pairs for real block devices
+// from /proc/mounts-formatted content.
+func parseBlockMounts(content string) [][2]string {
+	var mounts [][2]string
+	for _, line := range strings.Split(content, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || !strings.HasPrefix(fields[0], "/dev/") {
+			continue
+		}
+		mounts = append(mounts, [2]string{fields[0], fields[1]})
+	}
+	return mounts
+}
+
+// pickExtraDiskMounts classifies non-root physical disks and returns the first
+// mountpoint of the NVMe drive and of the SD card ("" when absent). Any mmcblk
+// disk other than the root disk counts as the SD card (root is on eMMC).
+func pickExtraDiskMounts(mounts [][2]string) (nvmeMp, sdMp string) {
+	rootBase := ""
+	for _, m := range mounts {
+		if m[1] == "/" {
+			rootBase = reDiskBase.FindString(m[0])
+			break
+		}
+	}
+	for _, m := range mounts {
+		base := reDiskBase.FindString(m[0])
+		if base == "" || base == rootBase {
+			continue
+		}
+		if nvmeMp == "" && strings.HasPrefix(base, "/dev/nvme") {
+			nvmeMp = m[1]
+		} else if sdMp == "" && strings.HasPrefix(base, "/dev/mmcblk") {
+			sdMp = m[1]
+		}
+	}
+	return nvmeMp, sdMp
+}
+
+// formatDiskUsageGB returns "used/total" in GB (e.g. "3.1/29") for the
+// filesystem at mountpoint, or "-" if it cannot be read. Used space drops the
+// decimal at >=100 GB so large NVMe values still fit the display column.
+func formatDiskUsageGB(mountpoint string) string {
+	var stat syscall.Statfs_t
+	if err := syscall.Statfs(mountpoint, &stat); err != nil {
+		return "-"
+	}
+	totalGB := float64(stat.Blocks) * float64(stat.Bsize) / (1 << 30)
+	usedGB := float64(stat.Blocks-stat.Bfree) * float64(stat.Bsize) / (1 << 30)
+	if totalGB <= 0 {
+		return "-"
+	}
+	used := fmt.Sprintf("%0.1f", usedGB)
+	if usedGB >= 99.95 {
+		used = fmt.Sprintf("%0.0f", usedGB)
+	}
+	return fmt.Sprintf("%s/%d", used, int(math.Ceil(totalGB)))
+}
+
+// collectDiskUsage stores per-disk "used/total" GB strings for the display:
+// DiskUsage for the root filesystem, DiskNvme for the first mounted NVMe
+// partition, and DiskSD for the first mounted partition of an mmcblk disk
+// other than the root disk (i.e. the SD card when root is on eMMC). Absent
+// disks store "-" so the display keeps its placeholder after hot-unplug.
+func collectDiskUsage() {
+	globalData.Store("DiskUsage", formatDiskUsageGB("/"))
+
+	nvme, sd := "-", "-"
+	if data, err := os.ReadFile("/proc/mounts"); err == nil {
+		nvmeMp, sdMp := pickExtraDiskMounts(parseBlockMounts(string(data)))
+		if nvmeMp != "" {
+			nvme = formatDiskUsageGB(nvmeMp)
+		}
+		if sdMp != "" {
+			sd = formatDiskUsageGB(sdMp)
+		}
+	}
+	globalData.Store("DiskNvme", nvme)
+	globalData.Store("DiskSD", sd)
 }
 
 // getCurrNetworkSpeedMbps returns current network speed in Mbps for all interfaces.
