@@ -1,0 +1,109 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # need tags for git describe
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install cross-compilation toolchains
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          wget -q https://musl.cc/aarch64-linux-musl-cross.tgz
+          sudo tar -C /usr/local -xzf aarch64-linux-musl-cross.tgz
+          rm aarch64-linux-musl-cross.tgz
+
+      - name: Get version info
+        id: version
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME}"
+          else
+            VERSION="$(git describe --tags --always --dirty 2>/dev/null || git rev-parse --short HEAD)"
+          fi
+          echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> "$GITHUB_OUTPUT"
+          echo "Building version: ${VERSION}"
+
+      - name: Build OpenWRT binary (aarch64 musl static)
+        run: |
+          export PATH=/usr/local/aarch64-linux-musl-cross/bin:$PATH
+          env GOOS=linux GOARCH=arm64 CGO_ENABLED=1 CC=aarch64-linux-musl-gcc \
+            go build \
+              -ldflags="-X main.version=${{ steps.version.outputs.VERSION }} -X 'main.buildTime=${{ steps.version.outputs.BUILD_TIME }}' -extldflags -static -s -w" \
+              -trimpath \
+              -o pcat2_mini_display_openwrt .
+
+      - name: Build Debian binary (aarch64 gnu)
+        run: |
+          env GOOS=linux GOARCH=arm64 CGO_ENABLED=1 CC=aarch64-linux-gnu-gcc \
+            go build \
+              -ldflags="-X main.version=${{ steps.version.outputs.VERSION }} -X 'main.buildTime=${{ steps.version.outputs.BUILD_TIME }}' -s -w" \
+              -trimpath \
+              -o pcat2_mini_display_debian .
+
+      - name: Package OpenWRT release
+        run: |
+          PKG="pcat2_mini_display_openwrt_${{ steps.version.outputs.VERSION }}"
+          mkdir -p "$PKG"
+          cp pcat2_mini_display_openwrt "$PKG/"
+          cp config.json "$PKG/"
+          cp user_config.json "$PKG/"
+          cp install_service.sh "$PKG/"
+          cp stop_system_pcat2_service.sh "$PKG/"
+          cp -r assets "$PKG/"
+          cp -r service-files "$PKG/"
+          echo "${{ steps.version.outputs.VERSION }}" > "$PKG/VERSION.txt"
+          tar czf "${PKG}.tar.gz" "$PKG"
+
+      - name: Package Debian release
+        run: |
+          PKG="pcat2_mini_display_debian_${{ steps.version.outputs.VERSION }}"
+          mkdir -p "$PKG"
+          cp pcat2_mini_display_debian "$PKG/"
+          cp config.json "$PKG/"
+          cp user_config.json "$PKG/"
+          cp install_service.sh "$PKG/"
+          cp stop_system_pcat2_service.sh "$PKG/"
+          cp -r assets "$PKG/"
+          cp -r service-files "$PKG/"
+          echo "${{ steps.version.outputs.VERSION }}" > "$PKG/VERSION.txt"
+          tar czf "${PKG}.tar.gz" "$PKG"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pcat2_mini_display_${{ steps.version.outputs.VERSION }}
+          retention-days: 14
+          path: |
+            pcat2_mini_display_openwrt_${{ steps.version.outputs.VERSION }}.tar.gz
+            pcat2_mini_display_debian_${{ steps.version.outputs.VERSION }}.tar.gz
+
+      - name: Create GitHub Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            pcat2_mini_display_openwrt_${{ steps.version.outputs.VERSION }}.tar.gz
+            pcat2_mini_display_debian_${{ steps.version.outputs.VERSION }}.tar.gz

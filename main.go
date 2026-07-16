@@ -60,6 +60,10 @@ const (
 )
 
 var (
+	// Build info, injected via -ldflags "-X main.version=... -X main.buildTime=..."
+	version   = "dev"
+	buildTime = "unknown"
+
 	weAreRunning = true
 	runMainLoop  = true
 	offTime      = time.Now()
@@ -515,7 +519,14 @@ func main() {
 	// units over the edge (blank screen on some machines). 50 MHz rounds to a
 	// safe in-spec 49.5 MHz. Override with -spi-mhz for tuning.
 	spiMHz := flag.Int("spi-mhz", 50, "SPI bus clock in MHz (rounded down to an achievable divider; keep <=62 for panel spec)")
+	showVersion := flag.Bool("version", false, "print version and build time, then exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("photonicat2_mini_display %s (built %s)\n", version, buildTime)
+		return
+	}
+	log.Printf("photonicat2_mini_display %s (built %s)", version, buildTime)
 
 	// Build the listen address:
 	var addr string
