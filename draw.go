@@ -1552,14 +1552,49 @@ func drawFooter(display gc9307.Device, frame *image.RGBA, currPage int, numOfPag
 	sendFooter(display, frame)
 }
 
+// drawRoundedBar fills a w x h rounded rectangle of the given color into dst
+// starting at (0,0). The corner radius is clamped to min(r, w/2, h/2), which
+// matches how SVG clamps rx/ry on narrow rects.
+func drawRoundedBar(dst *image.RGBA, w, h, r int, clr color.RGBA) {
+	if r > w/2 {
+		r = w / 2
+	}
+	if r > h/2 {
+		r = h / 2
+	}
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			// Inside a corner box, keep the pixel only if it is within the
+			// corner circle; everywhere else the rect is solid.
+			cx, cy := x, y
+			if x < r {
+				cx = r
+			} else if x >= w-r {
+				cx = w - r - 1
+			}
+			if y < r {
+				cy = r
+			} else if y >= h-r {
+				cy = h - r - 1
+			}
+			dx, dy := x-cx, y-cy
+			if dx*dx+dy*dy > r*r {
+				continue
+			}
+			dst.SetRGBA(x, y, clr)
+		}
+	}
+}
+
 func showWelcome(display gc9307.Device, width, height int, duration time.Duration) {
 	radiusBarCorner := 5
 	spaceBetweenLogoAndBar := 28
 	barWidth := 82
-    barX := width/2 - barWidth/2
+	barX := width/2 - barWidth/2
 	barHeight := 8
-	fnBase:="/tmp/barBackground.svg"
-	fnProgressPart:="/tmp/barProgress_"
+	barTrackColor := color.RGBA{0x62, 0x74, 0x82, 255}   // #627482
+	barFillColor := color.RGBA{0xFD, 0xE0, 0x21, 255}    // #FDE021
+	sleepPerPixel := 15 * time.Millisecond               // ~1.2s total animation
 
 	frame := image.NewRGBA(image.Rect(0, 0, width, height))
 	clearFrame(frame, width, height)
@@ -1572,64 +1607,26 @@ func showWelcome(display gc9307.Device, width, height int, duration time.Duratio
 	x0 := width/2 - w/2
 	y0 := logoY
 	log.Printf("Welcome logo at: x0: %d, y0: %d, w: %d, h: %d", x0, y0, w, h)
-	copyImageToImageAt(frame, welcomeLogo, x0, y0 ) 
-	//save this frame to png
-	saveFrameToPng(frame, "/tmp/welcome.png")
-	copyImageToImageAt(frame, welcomeLogo, x0, y0 ) 
+	copyImageToImageAt(frame, welcomeLogo, x0, y0)
 
-	var bufBack bytes.Buffer
-	canvas := svg.New(&bufBack)
-	canvas.Start(barWidth, barHeight)
-	canvas.Roundrect(0, 0, barWidth, barHeight, radiusBarCorner, radiusBarCorner, "fill:#627482")
-	canvas.End()
-	svgFile, err := os.Create(fnBase)
-	if err != nil {
-		panic(err)
-	}
-	_, err = svgFile.Write(bufBack.Bytes())
-	if err != nil {
-		panic(err)
-	}
-	svgFile.Close()
-	barBackground, _, _, err := loadImage(fnBase)
-	if err != nil {
-		log.Printf("Error loading bar background from %s: %v", fnBase, err)
-		return
-	}
+	// The bar is drawn directly in Go: no /tmp SVG files, no rasterizer, and
+	// no error path that can abort the animation once the logo is on screen.
+	bar := image.NewRGBA(image.Rect(0, 0, barWidth, barHeight))
+	drawRect(bar, 0, 0, barWidth, barHeight, color.RGBA{0, 0, 0, 255}) // opaque black corners
+	drawRoundedBar(bar, barWidth, barHeight, radiusBarCorner, barTrackColor)
 	barY := logoY + spaceBetweenLogoAndBar + h
-	copyImageToImageAt(frame, barBackground, barX, barY)
+	copyImageToImageAt(frame, bar, barX, barY)
 	sendFull(display, frame)
 
-	var bufProgress bytes.Buffer
-	var progressBar *image.RGBA
-
-    for i := 1; i <= barWidth; i++ {
-		fnProgress := fnProgressPart+strconv.Itoa(i)+".svg"
-		bufProgress.Reset()
-		canvasProgress := svg.New(&bufProgress)
-		canvasProgress.Start(barWidth, barHeight)
-		canvasProgress.Roundrect(0, 0, i, barHeight, radiusBarCorner, radiusBarCorner, "fill:#FDE021")
-		canvasProgress.End()
-		svgFile, err := os.Create(fnProgress)
-		if err != nil {
-			panic(err)
-		}
-		_, err = svgFile.Write(bufProgress.Bytes())
-		if err != nil {
-			panic(err)
-		}
-		svgFile.Close()
-		progressBar, _, _, err = loadImage(fnProgress)
-		
-		if err != nil {
-			log.Printf("Error loading bar background from %s: %v", fnBase, err)
-			return
-		}
-		copyImageToImageAt(frame, progressBar, barX, barY)
-		sendFull(display, frame)
-      
-		//time.Sleep(sleepPerPixel)
-    }
+	// Animate the yellow fill by pushing only the bar strip (barWidth x
+	// barHeight pixels) per step instead of a full frame, so the animation
+	// speed is set by sleepPerPixel rather than the SPI clock.
+	for i := 1; i <= barWidth; i++ {
+		drawRoundedBar(bar, i, barHeight, radiusBarCorner, barFillColor)
+		copyImageToImageAt(frame, bar, barX, barY)
+		display.FillRectangleWithImage(int16(barX), int16(barY), int16(barWidth), int16(barHeight), bar)
+		time.Sleep(sleepPerPixel)
+	}
 }
 
 func showWelcomeForced(display gc9307.Device, width, height int, duration time.Duration) {
