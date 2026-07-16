@@ -22,6 +22,9 @@ echo "Installing binary to $BINARY_PATH..."
 systemctl stop $SERVICE_NAME
 cp pcat2_mini_display_debian $BINARY_PATH
 cp config.json /etc/pcat2_mini_display-config.json
+if [ -f config_debian.json ]; then
+  cp config_debian.json /etc/pcat2_mini_display-config_debian.json
+fi
 mkdir -p /usr/local/share/pcat2_mini_display
 cp -ar assets /usr/local/share/pcat2_mini_display
 chmod +x $BINARY_PATH

@@ -25,6 +25,9 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Run tests
+        run: go test -count=1 .
+
       - name: Install cross-compilation toolchains
         run: |
           sudo apt-get update
@@ -82,6 +85,7 @@ jobs:
           mkdir -p "$PKG"
           cp pcat2_mini_display_debian "$PKG/"
           cp config.json "$PKG/"
+          cp config_debian.json "$PKG/"
           cp user_config.json "$PKG/"
           cp install_service.sh "$PKG/"
           cp stop_system_pcat2_service.sh "$PKG/"
