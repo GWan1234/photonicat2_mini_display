@@ -276,6 +276,28 @@ func setBacklight(brightness int) {
 	}
 }
 
+// displayAsleep reports whether the display is settled dark: idle state
+// reached AND the backlight physically at 0 (screen_min_brightness may keep
+// it visibly dim, in which case this stays false). While asleep the render
+// loop and the display-only collectors pause to save battery.
+func displayAsleep() bool {
+	if idleState != STATE_IDLE {
+		return false
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	return lastLogical == 0
+}
+
+// displayWake refreshes everything that was paused while the screen was dark,
+// so the data is current by the time the fade-in completes.
+func displayWake() {
+	go collectLinuxData(cfg)
+	go collectNetworkData(cfg)
+	go collectWANNetworkSpeed()
+	go getInfoFromPcatWeb()
+}
+
 func monitorKeyboard(changePageTriggered *bool) {
 	// 1) find the "rk805 pwrkey" device by name
 	paths, err := evdev.ListDevicePaths()
@@ -533,8 +555,17 @@ func idleDimmer() {
 
 		if prevState != newState {
 			log.Printf("STATE CHANGED: %s -> %s", stateName(prevState), stateName(newState))
+			wasAsleep := prevState == STATE_IDLE
 			idleState = newState
 			prevState = newState
+
+			// Leaving the dark-idle state: kick a refresh of the collectors
+			// that were paused so the screen wakes up with fresh data. Must
+			// run after idleState is updated or they would still see
+			// STATE_IDLE and skip themselves.
+			if wasAsleep && (newState == STATE_FADE_IN || newState == STATE_ACTIVE) {
+				displayWake()
+			}
 
 			// Update intervals immediately when state changes
 			updateIntervals()

@@ -1179,6 +1179,17 @@ func mainLoop() {
 				httpChangePageTriggered = false
 				changePageTriggered = false
 			} else { //normal page rendering
+				// Backlight is physically off: nothing is visible, so skip
+				// the render + SPI push entirely and just poll for wake-up.
+				if displayAsleep() {
+					select {
+					case <-pageChangeSignal:
+						// fall through; next iteration handles the change
+					case <-time.After(200 * time.Millisecond):
+					}
+					continue
+				}
+
 				// Only update top bar and footer when needed (every few frames) to save CPU
 				// Top bar contains mostly static information (time, battery, signal)
 				// Update it less frequently to improve performance

@@ -16,6 +16,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -264,6 +265,11 @@ func applyRemainingTimeUnit() {
 }
 
 func getInfoFromPcatWeb() {
+	// All of this feeds the display; skip the HTTP calls and fallback execs
+	// while the backlight is off. displayWake() reruns it on wake-up.
+	if displayAsleep() {
+		return
+	}
 	dashbarodURL := "http://localhost:80/api/v1/dashboard.json"
 	networkStatsURL := "http://localhost:80/api/v1/data_stats.json?network_type=mobile"
 	basicURL := "http://localhost:80/api/v1/modem/basic.json"
@@ -494,6 +500,9 @@ func getWANInterface() (string, error) {
 }
 
 func collectWANNetworkSpeed() {
+	if displayAsleep() { // speed is display-only; skip the 1s sampling while dark
+		return
+	}
 	var err error
 	// On OpenWrt the speeds come from pcat-manager-web; when it is down fall
 	// through to the direct /sys/class/net measurement used on Debian.
@@ -681,6 +690,12 @@ func getFanSpeed() (int, error) {
 }
 
 func collectNetworkData(cfg Config) {
+	// Nothing here is visible with the backlight off; skipping saves the
+	// pings, exec spawns and any public-IP fetch that would otherwise keep
+	// the modem radio awake. displayWake() refreshes everything on wake-up.
+	if displayAsleep() {
+		return
+	}
 	if isOpenWRT() {
 		//we have aonther func to get data from pcat-manager-web
 	} else {
@@ -710,20 +725,17 @@ func collectNetworkData(cfg Config) {
 	}
 
 	// WAN IP address (local WAN interface IP)
-	if wanIP, err := getWanIPv4(); err != nil {
+	wanIP, err := getWanIPv4()
+	if err != nil {
 		fmt.Printf("Could not get WAN IP: %v\n", err)
 		globalData.Store("WAN_IP", "N/A")
+		wanIP = "N/A"
 	} else {
 		globalData.Store("WAN_IP", wanIP)
 	}
 
-	// Public IP address.
-	if publicIP, err := getPublicIPv4(); err != nil {
-		fmt.Printf("Could not get public IP: %v\n", err)
-		globalData.Store("PUBLIC_IP", "N/A")
-	} else {
-		globalData.Store("PUBLIC_IP", publicIP)
-	}
+	// Public IPv4/IPv6 (cached; see updatePublicIPs).
+	updatePublicIPs(wanIP)
 
 	// SSID.
 	if ssid, err := getSSID(); err != nil {
@@ -827,13 +839,59 @@ func collectNetworkData(cfg Config) {
 		} else {
 			globalData.Store("Country", country)
 		}*/
+}
 
-	// IPv6 public IP.
+// Public IPs only change when the upstream connection does, so they are
+// cached: refreshed at startup, when the local WAN IP changes, or after
+// publicIPRefreshInterval — not on every collect cycle. Fetching them every
+// cycle kept the modem radio out of its low-power state around the clock and
+// was the single largest battery cost of the app.
+const publicIPRefreshInterval = 15 * time.Minute
+
+var (
+	publicIPMu        sync.Mutex
+	publicIPLastFetch time.Time
+	publicIPWanBasis  string
+)
+
+// updatePublicIPs stores PUBLIC_IP and PublicIPv6, hitting the network only
+// when the cache is stale or the WAN IP it was fetched behind has changed.
+// After a failed IPv4 fetch the next retry is allowed in 30s instead of a
+// full interval, so a WAN that just came up doesn't show N/A for 15 minutes.
+func updatePublicIPs(wanIP string) {
+	publicIPMu.Lock()
+	needFetch := publicIPLastFetch.IsZero() ||
+		time.Since(publicIPLastFetch) >= publicIPRefreshInterval ||
+		wanIP != publicIPWanBasis
+	if needFetch {
+		publicIPLastFetch = time.Now()
+		publicIPWanBasis = wanIP
+	}
+	publicIPMu.Unlock()
+	if !needFetch {
+		return
+	}
+
+	fetchedV4 := false
+	if publicIP, err := getPublicIPv4(); err != nil {
+		fmt.Printf("Could not get public IP: %v\n", err)
+		globalData.Store("PUBLIC_IP", "N/A")
+	} else {
+		globalData.Store("PUBLIC_IP", publicIP)
+		fetchedV4 = true
+	}
+
+	// IPv6 failure is normal on v4-only uplinks and doesn't shorten the retry.
 	if ipv6, err := getIPv6Public(); err != nil {
-		//fmt.Printf("Could not get IPv6 public IP: %v\n", err)
 		globalData.Store("PublicIPv6", "0.0.0.0")
 	} else {
 		globalData.Store("PublicIPv6", ipv6)
+	}
+
+	if !fetchedV4 {
+		publicIPMu.Lock()
+		publicIPLastFetch = time.Now().Add(30 * time.Second).Add(-publicIPRefreshInterval)
+		publicIPMu.Unlock()
 	}
 }
 
@@ -1298,18 +1356,34 @@ func getCPUUsage() (float64, error) {
 	return total / float64(len(cpus)), nil
 }
 
-func getCpuUsages() ([]float64, error) {
-	stats1, err := readCPUStats()
-	if err != nil {
-		return nil, err
-	}
+var (
+	prevCPUStatsMu sync.Mutex
+	prevCPUStats   []CPUStats
+)
 
-	time.Sleep(500 * time.Millisecond)
+// getCpuUsages returns per-core usage computed against the snapshot taken on
+// the previous call, so the collect interval is the measurement window and no
+// call blocks for 500ms sampling (fewer scheduled wakeups on battery). The
+// first call primes the snapshot with a short 200ms window.
+func getCpuUsages() ([]float64, error) {
+	prevCPUStatsMu.Lock()
+	defer prevCPUStatsMu.Unlock()
+
+	if prevCPUStats == nil {
+		stats, err := readCPUStats()
+		if err != nil {
+			return nil, err
+		}
+		prevCPUStats = stats
+		time.Sleep(200 * time.Millisecond)
+	}
 
 	stats2, err := readCPUStats()
 	if err != nil {
 		return nil, err
 	}
+	stats1 := prevCPUStats
+	prevCPUStats = stats2
 
 	var usages []float64
 	for i := 0; i < len(stats1) && i < len(stats2); i++ {
@@ -1328,6 +1402,12 @@ func getCpuUsages() ([]float64, error) {
 		totalDelta := float64(total2 - total1)
 		idleDelta := float64(idle2 - idle1)
 
+		// Back-to-back calls (e.g. a wake refresh right after a tick) can see
+		// a zero window; report 0 instead of NaN.
+		if totalDelta <= 0 {
+			usages = append(usages, 0)
+			continue
+		}
 		cpuPercentage := (totalDelta - idleDelta) / totalDelta * 100
 		usages = append(usages, cpuPercentage)
 	}
