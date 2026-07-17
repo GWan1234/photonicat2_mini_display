@@ -47,6 +47,11 @@ const (
 	STATE_OFF      = 4
 
 	DEFAULT_FPS               = 3
+	// SCROLL_FPS is the frame rate used only while a text value is actively
+	// scrolling as a ticker (long SSID/IP/etc.). It is high enough for smooth
+	// motion; the loop drops back to DEFAULT_FPS the moment nothing overflows,
+	// so idle power draw is unchanged.
+	SCROLL_FPS                = 20
 	DEFAULT_IDLE_TIMEOUT      = 60 * time.Second
 	ON_CHARGING_IDLE_TIMEOUT  = 365 * 86400 * time.Second
 	KEYBOARD_DEBOUNCE_TIME    = 40 * time.Millisecond
@@ -1230,6 +1235,9 @@ func mainLoop() {
 
 				//draw middle
 				clearFrame(middleFramebuffers[middleFrames%2], middleFrameWidth, middleFrameHeight)
+				// renderMiddle sets anyTextScrolling if any value overflowed and
+				// is animating; reset it first so the flag reflects this pass only.
+				anyTextScrolling = false
 				renderMiddle(middleFramebuffers[middleFrames%2], &cfg, isSMS, localIdx)
 
 				//draw fps - use cached text for better performance
@@ -1251,6 +1259,11 @@ func mainLoop() {
 				effectiveFPS := desiredFPS
 				if idleState == STATE_IDLE {
 					effectiveFPS = 1  // This gives us 1 FPS, but we'll multiply the sleep time by 10
+				} else if anyTextScrolling && SCROLL_FPS > effectiveFPS {
+					// A ticker is mid-scroll and the screen is awake: render fast
+					// enough for smooth motion. Reverts to desiredFPS automatically
+					// once the text stops overflowing.
+					effectiveFPS = SCROLL_FPS
 				}
 				baseSleep := time.Second / time.Duration(effectiveFPS)
 				if idleState == STATE_IDLE {

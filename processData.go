@@ -589,9 +589,16 @@ func collectLinuxData(cfg Config) {
 		globalData.Store("BatteryCurrent", current_2digit)
 	}
 
-	// Battery wattage.
+	// Battery wattage. Above 20 W there isn't room (and little value) in the
+	// decimal, so drop it; keep one decimal for the finer low-power range.
 	wattage := float64(voltageUV) * float64(currentUA) / 1000 / 1000 / 1000 / 1000
-	globalData.Store("BatteryWattage", fmt.Sprintf("%0.1f", wattage))
+	var wattageStr string
+	if wattage > 20 {
+		wattageStr = fmt.Sprintf("%0.0f", wattage)
+	} else {
+		wattageStr = fmt.Sprintf("%0.1f", wattage)
+	}
+	globalData.Store("BatteryWattage", wattageStr)
 
 	// DC voltage.
 	dcVoltageUV, err := getDCVoltageUV()
@@ -611,25 +618,44 @@ func collectLinuxData(cfg Config) {
 		globalData.Store("CpuTemp", cpuTemp_1digit)
 	}
 
-	// CPU usage.
-	cpuUsage, err := getCPUUsage()
-	if err != nil {
+	// CPU usage. Sample once via getCpuUsages() so we get the per-core slice
+	// (for the 8-bar chart) and the aggregate from the same measurement window
+	// — calling it twice would rotate the /proc/stat snapshot and halve each
+	// window.
+	if cpus, err := getCpuUsages(); err != nil {
 		fmt.Printf("Could not get CPU usage: %v\n", err)
 		globalData.Store("CpuUsage", 0)
+		globalData.Store("CpuUsages", nil)
 	} else {
-		cpuUsageInt := int(cpuUsage)
-		globalData.Store("CpuUsage", cpuUsageInt)
+		total := 0.0
+		for _, c := range cpus {
+			total += c
+		}
+		avg := 0.0
+		if len(cpus) > 0 {
+			avg = total / float64(len(cpus))
+		}
+		globalData.Store("CpuUsage", int(avg))
+		// Per-core usages (0-100) for the cpu_bars element.
+		globalData.Store("CpuUsages", cpus)
 	}
 
 	// Memory usage.
 	if memUsed, memTotal, err := getMemUsedAndTotalGB(); err != nil {
 		fmt.Printf("Could not get memory usage: %v\n", err)
 		globalData.Store("MemUsage", nil)
+		globalData.Store("MemUsagePercent", nil)
 	} else {
 		memUsed_1digit := fmt.Sprintf("%0.1f", memUsed)
 		memTotal_ceilInt := int(math.Ceil(memTotal))
 		memString := fmt.Sprintf("%s/%d", memUsed_1digit, memTotal_ceilInt)
 		globalData.Store("MemUsage", memString)
+		// Used fraction (0-100) for the memory hbar element.
+		memPct := 0.0
+		if memTotal > 0 {
+			memPct = memUsed / memTotal * 100
+		}
+		globalData.Store("MemUsagePercent", memPct)
 	}
 
 	// Disk usage.

@@ -334,41 +334,35 @@
             ],
             "page2": [
                 {
-                    "type": "fixed_text",
+                    "type": "vtext",
                     "label": "CPU",
-                    "position": {"x": 10, "y": 4},
+                    "position": {"x": 8, "y": 8},
                     "font": "unit",
                     "color": [255, 229, 0],
+                    "size": {"width": 12, "height": 15},
                     "enable": 1
                 },
                 {
-                    "type": "text",
-                    "label": "CPU",
-                    "position": {"x": 10, "y": 18},
-                    "font": "huge",
-                    "color": [255, 229, 0],
-                    "units": "%",
-                    "data_key": "CpuUsage",
-                    "units_font": "unit",
+                    "type": "cpu_bars",
+                    "position": {"x": 30, "y": 6},
+                    "data_key": "CpuUsages",
+                    "size": {"width": 134, "height": 50},
                     "enable": 1
                 },
                 {
-                    "type": "fixed_text",
-                    "label": "Memory - GB",
-                    "position": {"x": 10, "y": 62},
+                    "type": "vtext",
+                    "label": "MEM",
+                    "position": {"x": 8, "y": 70},
                     "font": "unit",
                     "color": [255, 229, 0],
+                    "size": {"width": 12, "height": 15},
                     "enable": 1
                 },
                 {
-                    "type": "text",
-                    "label": "MemUsage",
-                    "position": {"x": 10, "y": 76},
-                    "font": "huge",
-                    "color": [255, 229, 0],
-                    "units": "",
-                    "data_key": "MemUsage",
-                    "units_font": "unit",
+                    "type": "hbar",
+                    "position": {"x": 30, "y": 78},
+                    "data_key": "MemUsagePercent",
+                    "size": {"width": 134, "height": 18},
                     "enable": 1
                 },
                 {

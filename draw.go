@@ -101,6 +101,140 @@ func drawText(img *image.RGBA, text string, posX, posY int, face font.Face, clr 
     return
 }
 
+// drawVerticalText draws text with each rune stacked on its own line, reading
+// top-to-bottom (e.g. "CPU" as C / P / U). It is used for the compact axis-style
+// labels beside the CPU and memory bar meters. (x, y) is the top-left of the
+// column; letters are horizontally centered within charW. lineH is the vertical
+// step between letters.
+func drawVerticalText(frame *image.RGBA, text string, x, y, charW, lineH int, face font.Face, clr color.Color) {
+	if frame == nil || text == "" {
+		return
+	}
+	d := &font.Drawer{Face: face}
+	cy := y
+	for _, r := range text {
+		s := string(r)
+		w := d.MeasureString(s).Round()
+		// Center each glyph in the column width.
+		gx := x + (charW-w)/2
+		drawText(frame, s, gx, cy, face, clr, false)
+		cy += lineH
+	}
+}
+
+//---------------- Horizontal ticker (marquee) scrolling ----------------
+//
+// Long values (e.g. a Wi-Fi SSID that is wider than the 172px screen) would
+// otherwise be clipped at the right edge. drawScrollingText renders such a
+// value as a NASDAQ-style ticker: the text pauses briefly, then scrolls left
+// at a constant pixel-per-second rate and wraps around seamlessly, so every
+// character is eventually readable. Text that already fits is drawn in place,
+// unchanged.
+//
+// Scrolling is driven off wall-clock time (not the frame counter) so the
+// motion speed is identical regardless of the render FPS; the main loop only
+// controls how *smooth* it looks by choosing how often to re-render.
+
+const (
+	// scrollSpeedPxPerSec is how fast the ticker slides left. ~40 px/s reads
+	// like a stock ticker: fast enough to get through a long SSID quickly,
+	// slow enough to actually read.
+	scrollSpeedPxPerSec = 40.0
+	// scrollStartPauseMs holds the text still at the start of each loop so the
+	// beginning (the most important part) is readable before it moves.
+	scrollStartPauseMs = 1200.0
+	// scrollGapPx is the blank space between the end of the text and the start
+	// of its wrapped-around copy, so the loop seam is visually obvious.
+	scrollGapPx = 24
+)
+
+// scrollEpoch anchors the ticker time base. Set once on first use so all
+// tickers share a phase and elapsed time never depends on process start
+// details. time.Now() is fine here (this is the running app, not a workflow).
+var scrollEpoch time.Time
+
+// anyTextScrolling is set true by drawScrollingText whenever it renders a
+// value that is actually overflowing (and thus animating) during the current
+// render pass. The main loop reads and resets it to decide whether to bump the
+// frame rate for smoothness. It is written and read from the single render
+// goroutine, so no locking is required.
+var anyTextScrolling bool
+
+// drawScrollingText draws text at (x, y). availWidth is the horizontal space
+// the text may occupy (from x to the clip edge). If the text fits, it is drawn
+// normally and false is returned. If it overflows, it is drawn as a clipped,
+// wrapping ticker and true is returned. clr is the text color; face its font.
+func drawScrollingText(frame *image.RGBA, text string, x, y, availWidth int, face font.Face, clr color.Color) bool {
+	if frame == nil || text == "" || availWidth <= 0 {
+		drawText(frame, text, x, y, face, clr, false)
+		return false
+	}
+
+	d := &font.Drawer{Face: face}
+	textW := d.MeasureString(text).Round()
+
+	// Fits comfortably: draw in place, no scrolling.
+	if textW <= availWidth {
+		drawText(frame, text, x, y, face, clr, false)
+		return false
+	}
+
+	if scrollEpoch.IsZero() {
+		scrollEpoch = time.Now()
+	}
+
+	metrics := face.Metrics()
+	ascent := metrics.Ascent.Round()
+	regionH := ascent + metrics.Descent.Round()
+	if regionH <= 0 {
+		regionH = 1
+	}
+
+	// One full loop = the text plus a trailing gap; wrapping this distance
+	// brings the identical second copy exactly into the first's start.
+	loopW := textW + scrollGapPx
+
+	// Time within the current loop: a stationary start pause followed by the
+	// slide. Using milliseconds keeps the math integer-friendly.
+	scrollMs := (float64(loopW) / scrollSpeedPxPerSec) * 1000.0
+	cycleMs := scrollStartPauseMs + scrollMs
+	elapsed := math.Mod(float64(time.Since(scrollEpoch).Milliseconds()), cycleMs)
+
+	var offset int // how many px the text is shifted left
+	if elapsed > scrollStartPauseMs {
+		offset = int(((elapsed - scrollStartPauseMs) / 1000.0) * scrollSpeedPxPerSec)
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	if offset >= loopW {
+		offset = offset % loopW
+	}
+
+	// Render into a region-sized scratch image so the text is clipped to
+	// [x, x+availWidth) and never paints over neighbouring elements. Draw two
+	// copies (loopW apart) so the wrap is seamless.
+	region := image.NewRGBA(image.Rect(0, 0, availWidth, regionH))
+	src := image.NewUniform(clr)
+	rd := &font.Drawer{Dst: region, Src: src, Face: face}
+	baseline := ascent
+	rd.Dot = fixed.P(-offset, baseline)
+	rd.DrawString(text)
+	// Second copy trails the first by loopW; it scrolls in from the right as
+	// the first leaves on the left.
+	rd.Dot = fixed.P(-offset+loopW, baseline)
+	rd.DrawString(text)
+
+	// Blit the clipped region into the frame at the element position. Use Over
+	// so anti-aliased edges blend; the region's transparent pixels leave the
+	// background untouched.
+	dstRect := image.Rect(x, y, x+availWidth, y+regionH)
+	draw.Draw(frame, dstRect, region, image.Point{}, draw.Over)
+
+	anyTextScrolling = true
+	return true
+}
+
 // remoteImageCacheDir is where downloaded remote icons are stored on disk.
 const remoteImageCacheDir = "/tmp/pcat_remote_icons"
 
@@ -1056,6 +1190,172 @@ func drawSignalStrength(frame *image.RGBA, x0, y0 int, strength float64) {
 	copyImageToImageAt(frame, img, x0, y0)
 }
 
+// Bar-chart styling shared by the CPU and memory meters. Colors reuse the boot
+// progress bar's palette (yellow fill on a grey track); the corner radii echo
+// its rounded look, scaled down for the small in-page bars.
+var (
+	barFillHex  = fmt.Sprintf("#%02X%02X%02X", PCAT_YELLOW.R, PCAT_YELLOW.G, PCAT_YELLOW.B)
+	barTrackHex = fmt.Sprintf("#%02X%02X%02X", PCAT_GREY.R, PCAT_GREY.G, PCAT_GREY.B)
+)
+
+const (
+	barFrameRadius = 3 // outer frame corner radius for the CPU box
+	barBarRadius   = 2 // per-core vertical bar corner radius
+	hbarRadius     = 5 // horizontal bar corner radius (matches boot progress bar)
+)
+
+// drawCpuBars renders a framed box of vertical bars — one per CPU core — at
+// (x0, y0) with total size w×h. Each bar is a full-height grey track with a
+// yellow fill rising from the bottom in proportion to that core's usage
+// (0-100). The whole thing is cached keyed on the quantized usages so it only
+// re-rasterizes when the reading actually changes.
+func drawCpuBars(frame *image.RGBA, x0, y0, w, h int, usages []float64) {
+	numCores := len(usages)
+	if numCores == 0 || w <= 0 || h <= 0 {
+		return
+	}
+
+	// Build a cache key from usage buckets (5% granularity) so steady load
+	// reuses the rendered image instead of rasterizing every frame.
+	var keyBuf strings.Builder
+	keyBuf.WriteString("gen:cpubars:")
+	keyBuf.WriteString(strconv.Itoa(w))
+	keyBuf.WriteByte('x')
+	keyBuf.WriteString(strconv.Itoa(h))
+	for _, u := range usages {
+		bucket := int(u) / 5
+		keyBuf.WriteByte(':')
+		keyBuf.WriteString(strconv.Itoa(bucket))
+	}
+	cacheKey := keyBuf.String()
+
+	imageCacheMu.RLock()
+	img, cached := imageCache[cacheKey]
+	imageCacheMu.RUnlock()
+	if !cached {
+		var buf bytes.Buffer
+		canvas := svg.New(&buf)
+		canvas.Start(w, h)
+
+		// Outer frame: rounded rectangle outline in the track color.
+		canvas.Roundrect(0, 0, w-1, h-1, barFrameRadius, barFrameRadius,
+			"fill:none;stroke:"+barTrackHex+";stroke-width:1")
+
+		// Inner drawing area, inset from the frame so bars don't touch it.
+		padX := 3
+		padY := 3
+		innerX := padX
+		innerY := padY
+		innerW := w - 2*padX
+		innerH := h - 2*padY
+		if innerW <= 0 || innerH <= 0 {
+			canvas.End()
+			renderAndCache(&buf, cacheKey, frame, x0, y0)
+			return
+		}
+
+		// Evenly divide the inner width into numCores columns with a 1px gap
+		// between bars.
+		gap := 1
+		barW := (innerW - gap*(numCores-1)) / numCores
+		if barW < 1 {
+			barW = 1
+		}
+
+		for i := 0; i < numCores; i++ {
+			bx := innerX + i*(barW+gap)
+			// Track (full height) behind every bar.
+			canvas.Roundrect(bx, innerY, barW, innerH, barBarRadius, barBarRadius,
+				"fill:"+barTrackHex)
+			// Yellow fill rising from the bottom.
+			u := usages[i]
+			if u < 0 {
+				u = 0
+			} else if u > 100 {
+				u = 100
+			}
+			fillH := int(math.Round(float64(innerH) * u / 100.0))
+			if fillH > 0 {
+				fy := innerY + (innerH - fillH)
+				canvas.Roundrect(bx, fy, barW, fillH, barBarRadius, barBarRadius,
+					"fill:"+barFillHex)
+			}
+		}
+		canvas.End()
+
+		var err error
+		img, err = renderSvgBytes(buf.Bytes(), cacheKey)
+		if err != nil {
+			log.Printf("drawCpuBars: render error: %v", err)
+			return
+		}
+	}
+	copyImageToImageAt(frame, img, x0, y0)
+}
+
+// drawHBar renders a framed horizontal progress bar at (x0, y0) of size w×h:
+// a grey rounded track with a yellow rounded fill whose width is proportional
+// to pct (0-100). Corner radius matches the boot progress bar. Cached on the
+// quantized percentage.
+func drawHBar(frame *image.RGBA, x0, y0, w, h int, pct float64) {
+	if w <= 0 || h <= 0 {
+		return
+	}
+	if pct < 0 {
+		pct = 0
+	} else if pct > 100 {
+		pct = 100
+	}
+
+	bucket := int(pct) // 1% granularity is plenty and still caches well
+	cacheKey := "gen:hbar:" + strconv.Itoa(w) + "x" + strconv.Itoa(h) + ":" + strconv.Itoa(bucket)
+
+	imageCacheMu.RLock()
+	img, cached := imageCache[cacheKey]
+	imageCacheMu.RUnlock()
+	if !cached {
+		var buf bytes.Buffer
+		canvas := svg.New(&buf)
+		canvas.Start(w, h)
+
+		r := hbarRadius
+		if r > h/2 {
+			r = h / 2 // keep corners sane for short bars
+		}
+		// Track spans the full width.
+		canvas.Roundrect(0, 0, w, h, r, r, "fill:"+barTrackHex)
+		// Fill from the left.
+		fillW := int(math.Round(float64(w) * pct / 100.0))
+		if fillW > 0 {
+			fr := r
+			if fr > fillW/2 {
+				fr = fillW / 2
+			}
+			canvas.Roundrect(0, 0, fillW, h, fr, fr, "fill:"+barFillHex)
+		}
+		canvas.End()
+
+		var err error
+		img, err = renderSvgBytes(buf.Bytes(), cacheKey)
+		if err != nil {
+			log.Printf("drawHBar: render error: %v", err)
+			return
+		}
+	}
+	copyImageToImageAt(frame, img, x0, y0)
+}
+
+// renderAndCache rasterizes the SVG buffer under cacheKey and blits it. Small
+// helper used by the early-return path in drawCpuBars.
+func renderAndCache(buf *bytes.Buffer, cacheKey string, frame *image.RGBA, x0, y0 int) {
+	img, err := renderSvgBytes(buf.Bytes(), cacheKey)
+	if err != nil {
+		log.Printf("renderAndCache: render error: %v", err)
+		return
+	}
+	copyImageToImageAt(frame, img, x0, y0)
+}
+
 func drawBattery(w, h int, soc float64, isCharging bool, x0, y0 int) *image.RGBA {
 	terminalWidth := 3
 	face, _, err := getFontFace("clock")
@@ -1408,6 +1708,27 @@ func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
 			mainAscent := face.Metrics().Ascent.Round()
 			// element.Position.Y acts as the top of the text area.
 			mainBaseline := element.Position.Y + mainAscent
+
+			// Available horizontal space for this value: from its start x to the
+			// right screen edge (minus the standard right margin), unless the
+			// element pins an explicit width via "size".width. Values wider than
+			// this (long SSIDs, IPv6 addresses, ISP names, …) scroll as a ticker
+			// instead of being clipped; values that fit are drawn in place.
+			availWidth := PCAT2_LCD_WIDTH - element.Position.X - PCAT2_R_MARGIN
+			if element.Size != nil && element.Size.Width > 0 {
+				availWidth = element.Size.Width
+			} else if element.Size2 != nil && element.Size2.Width > 0 {
+				availWidth = element.Size2.Width
+			}
+
+			mainW := font.MeasureString(face, textToDisplay).Round()
+			// A ping timeout is a single "X"; never scroll it. Only overflowing
+			// values scroll, and a scrolling value carries no trailing units.
+			if !isPingTimeout && mainW > availWidth {
+				drawScrollingText(frame, textToDisplay, element.Position.X, element.Position.Y, availWidth, face, clr)
+				break
+			}
+
 			xMain, _ := drawText(frame, textToDisplay, element.Position.X, element.Position.Y, face, clr, false)
 
 			// Calculate the y position for the units text so that its baseline aligns with the main text.
@@ -1507,6 +1828,34 @@ func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
 
 			drawText(frame, label, element.Position.X, element.Position.Y, face, clr, false)
 
+		case "vtext":
+			// Vertical (stacked-letter) fixed label, e.g. "CPU"/"MEM" beside a
+			// bar meter. Font, color and position come from the element; the
+			// per-letter line height defaults to the font height but can be
+			// tuned via size.height, and the column width via size.width.
+			face, fh, err := getFontFace(element.Font)
+			if err != nil {
+				log.Printf("Error getting font face for %s: %v", element.Font, err)
+				continue
+			}
+			var clr color.RGBA
+			if len(element.Color) >= 3 {
+				clr = color.RGBA{uint8(element.Color[0]), uint8(element.Color[1]), uint8(element.Color[2]), 255}
+			} else {
+				clr = color.RGBA{255, 255, 255, 255}
+			}
+			charW := 10
+			lineH := fh
+			if element.Size != nil {
+				if element.Size.Width > 0 {
+					charW = element.Size.Width
+				}
+				if element.Size.Height > 0 {
+					lineH = element.Size.Height
+				}
+			}
+			drawVerticalText(frame, element.Label, element.Position.X, element.Position.Y, charW, lineH, face, clr)
+
 		case "graph":
 			// Handle graph elements
 			if element.GraphConfig == nil {
@@ -1537,7 +1886,49 @@ func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
 			default:
 				log.Printf("Unknown graph type: %s", element.GraphConfig.GraphType)
 			}
-			
+
+		case "cpu_bars":
+			// Framed 8-bar (per-core) CPU meter. Size comes from the element;
+			// the per-core usages come from the CpuUsages data key.
+			sz := Size{Width: 80, Height: 40}
+			if element.Size != nil {
+				sz = *element.Size
+			} else if element.Size2 != nil {
+				sz = *element.Size2
+			}
+			var usages []float64
+			if v, ok := globalData.Load(element.DataKey); ok && v != nil {
+				if u, ok := v.([]float64); ok {
+					usages = u
+				}
+			}
+			// Nothing sampled yet (startup): draw an empty framed box so the
+			// slot isn't blank, using a default 8 cores at 0%.
+			if len(usages) == 0 {
+				usages = make([]float64, 8)
+			}
+			drawCpuBars(frame, element.Position.X, element.Position.Y, sz.Width, sz.Height, usages)
+
+		case "hbar":
+			// Framed horizontal progress bar driven by a 0-100 data key
+			// (e.g. MemUsagePercent).
+			sz := Size{Width: 100, Height: 12}
+			if element.Size != nil {
+				sz = *element.Size
+			} else if element.Size2 != nil {
+				sz = *element.Size2
+			}
+			pct := 0.0
+			if v, ok := globalData.Load(element.DataKey); ok && v != nil {
+				switch n := v.(type) {
+				case float64:
+					pct = n
+				case int:
+					pct = float64(n)
+				}
+			}
+			drawHBar(frame, element.Position.X, element.Position.Y, sz.Width, sz.Height, pct)
+
 		default:
 			log.Printf("Unknown element type: %s", element.Type)
 		}

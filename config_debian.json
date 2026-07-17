@@ -317,14 +317,10 @@
                     "enable": 1
                 },
                 {
-                    "type": "text",
-                    "label": "CPU",
-                    "position": {"x": 110, "y": 5},
-                    "font": "unit",
-                    "color": [255, 229, 255],
-                    "units": "%",
-                    "data_key": "CpuUsage",
-                    "units_font": "unit",
+                    "type": "cpu_bars",
+                    "position": {"x": 95, "y": 3},
+                    "data_key": "CpuUsages",
+                    "size": {"width": 70, "height": 21},
                     "enable": 1
                 },
                 {
@@ -355,14 +351,10 @@
                     "enable": 1
                 },
                 {
-                    "type": "text",
-                    "label": "Memory",
-                    "position": {"x": 110, "y": 51},
-                    "font": "unit",
-                    "color": [255, 229, 255],
-                    "units": "",
-                    "data_key": "MemUsage",
-                    "units_font": "unit",
+                    "type": "hbar",
+                    "position": {"x": 95, "y": 54},
+                    "data_key": "MemUsagePercent",
+                    "size": {"width": 70, "height": 12},
                     "enable": 1
                 },
                 {
