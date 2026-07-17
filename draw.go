@@ -1196,6 +1196,9 @@ func drawSignalStrength(frame *image.RGBA, x0, y0 int, strength float64) {
 var (
 	barFillHex  = fmt.Sprintf("#%02X%02X%02X", PCAT_YELLOW.R, PCAT_YELLOW.G, PCAT_YELLOW.B)
 	barTrackHex = fmt.Sprintf("#%02X%02X%02X", PCAT_GREY.R, PCAT_GREY.G, PCAT_GREY.B)
+	// iStat-menu look: track sits on our black background with only a thin
+	// grey frame drawn to show the edge of each bar.
+	barBgHex = fmt.Sprintf("#%02X%02X%02X", PCAT_BLACK.R, PCAT_BLACK.G, PCAT_BLACK.B)
 )
 
 const (
@@ -1237,9 +1240,10 @@ func drawCpuBars(frame *image.RGBA, x0, y0, w, h int, usages []float64) {
 		canvas := svg.New(&buf)
 		canvas.Start(w, h)
 
-		// Outer frame: rounded rectangle outline in the track color.
+		// Background fill + outer frame: our black bg with a thin grey outline
+		// (iStat-menu style) so the box edge reads against the page.
 		canvas.Roundrect(0, 0, w-1, h-1, barFrameRadius, barFrameRadius,
-			"fill:none;stroke:"+barTrackHex+";stroke-width:1")
+			"fill:"+barBgHex+";stroke:"+barTrackHex+";stroke-width:1")
 
 		// Inner drawing area, inset from the frame so bars don't touch it.
 		padX := 3
@@ -1264,20 +1268,36 @@ func drawCpuBars(frame *image.RGBA, x0, y0, w, h int, usages []float64) {
 
 		for i := 0; i < numCores; i++ {
 			bx := innerX + i*(barW+gap)
-			// Track (full height) behind every bar.
+			// Track (full height) behind every bar: black background with a thin
+			// grey frame so the empty part of the bar still shows its edge.
 			canvas.Roundrect(bx, innerY, barW, innerH, barBarRadius, barBarRadius,
-				"fill:"+barTrackHex)
-			// Yellow fill rising from the bottom.
+				"fill:"+barBgHex+";stroke:"+barTrackHex+";stroke-width:0.5")
+			// Yellow fill rising from the bottom, inset 1px inside the bar's
+			// frame so the grey edge stays visible around it (iStat-menu look).
 			u := usages[i]
 			if u < 0 {
 				u = 0
 			} else if u > 100 {
 				u = 100
 			}
-			fillH := int(math.Round(float64(innerH) * u / 100.0))
+			fillX := bx + 1
+			fillW := barW - 2
+			if fillW < 1 {
+				fillX = bx
+				fillW = barW
+			}
+			fillTrackH := innerH - 2
+			if fillTrackH < 1 {
+				fillTrackH = innerH
+			}
+			fillH := int(math.Round(float64(fillTrackH) * u / 100.0))
 			if fillH > 0 {
-				fy := innerY + (innerH - fillH)
-				canvas.Roundrect(bx, fy, barW, fillH, barBarRadius, barBarRadius,
+				fr := barBarRadius - 1
+				if fr < 0 {
+					fr = 0
+				}
+				fy := innerY + 1 + (fillTrackH - fillH)
+				canvas.Roundrect(fillX, fy, fillW, fillH, fr, fr,
 					"fill:"+barFillHex)
 			}
 		}
@@ -1322,16 +1342,26 @@ func drawHBar(frame *image.RGBA, x0, y0, w, h int, pct float64) {
 		if r > h/2 {
 			r = h / 2 // keep corners sane for short bars
 		}
-		// Track spans the full width.
-		canvas.Roundrect(0, 0, w, h, r, r, "fill:"+barTrackHex)
-		// Fill from the left.
-		fillW := int(math.Round(float64(w) * pct / 100.0))
-		if fillW > 0 {
-			fr := r
+		// Track spans the full width: black bg with a thin grey frame outline
+		// (iStat-menu style) so the bar edge reads against the page. Inset by
+		// half a pixel so the 1px stroke isn't clipped by the canvas edge.
+		canvas.Roundrect(0, 0, w-1, h-1, r, r,
+			"fill:"+barBgHex+";stroke:"+barTrackHex+";stroke-width:1")
+		// Fill from the left, inset by 1px so the grey frame stays visible
+		// around the yellow (iStat-menu style).
+		inset := 1
+		innerW := w - 2*inset
+		innerH := h - 2*inset
+		fillW := int(math.Round(float64(innerW) * pct / 100.0))
+		if fillW > 0 && innerH > 0 {
+			fr := r - inset
+			if fr < 0 {
+				fr = 0
+			}
 			if fr > fillW/2 {
 				fr = fillW / 2
 			}
-			canvas.Roundrect(0, 0, fillW, h, fr, fr, "fill:"+barFillHex)
+			canvas.Roundrect(inset, inset, fillW, innerH, fr, fr, "fill:"+barFillHex)
 		}
 		canvas.End()
 
