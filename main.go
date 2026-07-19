@@ -716,13 +716,8 @@ func main() {
 		}
 
 		if shouldShowWelcome {
-			if *forceColdBoot {
-				// Force mode: show logo for 1 second only, no progress bar
-				showWelcomeForced(display, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT, 1*time.Second)
-			} else {
-				// Normal cold boot: full animation
-				showWelcome(display, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT, 5*time.Second)
-			}
+			// Cold boot or --force-cold-boot: play the wake-up animation.
+			showWelcome(display, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT, 5*time.Second)
 		}
 	}()
 

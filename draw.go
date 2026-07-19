@@ -2016,7 +2016,75 @@ func drawFooter(display gc9307.Device, frame *image.RGBA, currPage int, numOfPag
 	sendFooter(display, frame)
 }
 
+// showWelcome plays the "cat waking up" boot animation (welcomeAnim.go) for
+// the given duration. Rendering is pipelined: a goroutine rasterizes the next
+// frame into one of two buffers while the SPI push of the previous frame is
+// still in flight, so the effective rate is max(render, push) instead of
+// their sum. Everything is derived from wall-clock time, so a slow frame
+// never stretches the animation past its duration.
 func showWelcome(display gc9307.Device, width, height int, duration time.Duration) {
+	dur := duration.Seconds()
+	if dur <= 0 {
+		dur = welcomeAnimDur
+	}
+	timeScale := welcomeAnimDur / dur
+
+	// Prove the animation pipeline works before committing the boot screen
+	// to it; fall back to the static welcome otherwise.
+	first, err := welcomeAnimFrameInto(nil, 0, width, height)
+	if err != nil {
+		log.Printf("Welcome animation unavailable (%v); showing static welcome", err)
+		showWelcomeStatic(display, width, height)
+		return
+	}
+	sendFull(display, first)
+
+	const frameInterval = time.Second / 60 // pace renders; LCD tops out around 60 Hz anyway
+
+	frames := make(chan *image.RGBA) // unbuffered: hand-off keeps the two buffers race-free
+	go func() {
+		defer close(frames)
+		var bufs [2]*image.RGBA
+		start := time.Now()
+		for i := 0; ; i++ {
+			frameStart := time.Now()
+			t := frameStart.Sub(start).Seconds() * timeScale
+			if t >= welcomeAnimDur {
+				return
+			}
+			f, err := welcomeAnimFrameInto(bufs[i%2], t, width, height)
+			if err != nil {
+				log.Printf("Welcome animation frame failed: %v", err)
+				return
+			}
+			bufs[i%2] = f
+			frames <- f
+			if d := frameInterval - time.Since(frameStart); d > 0 {
+				time.Sleep(d)
+			}
+		}
+	}()
+
+	sent := 0
+	animStart := time.Now()
+	for f := range frames {
+		sendFull(display, f)
+		sent++
+	}
+	if el := time.Since(animStart); sent > 0 && el > 0 {
+		log.Printf("Welcome animation: %d frames in %.2fs (%.1f fps)", sent, el.Seconds(), float64(sent)/el.Seconds())
+	}
+
+	// Land exactly on the resting pose: the static logo plus the full bar.
+	if f, err := welcomeAnimFrameInto(nil, welcomeAnimDur, width, height); err == nil {
+		sendFull(display, f)
+	}
+}
+
+// showWelcomeStatic is the pre-animation welcome screen: static logo plus a
+// progress bar swept as fast as the SPI link allows. Kept as the fallback
+// path should the animation ever fail to render.
+func showWelcomeStatic(display gc9307.Device, width, height int) {
 	radiusBarCorner := 5
 	spaceBetweenLogoAndBar := 28
 	barWidth := 82
@@ -2069,29 +2137,6 @@ func showWelcome(display gc9307.Device, width, height int, duration time.Duratio
 		//time.Sleep(sleepPerPixel)
     }
 }
-
-func showWelcomeForced(display gc9307.Device, width, height int, duration time.Duration) {
-	frame := image.NewRGBA(image.Rect(0, 0, width, height))
-	clearFrame(frame, width, height)
-	
-	// Load and display welcome logo only
-	welcomeLogo, w, h, err := loadImage(assetsPrefix+"/assets/svg/welcome.svg")
-	if err != nil {
-		log.Printf("Error loading welcome logo from %s: %v", "assets/svg/welcome.svg", err)
-		return
-	}
-	
-	// Center the logo
-	x0 := width/2 - w/2
-	y0 := height/2 - h/2
-	copyImageToImageAt(frame, welcomeLogo, x0, y0)
-	
-	// Send to display and wait for specified duration
-	sendFull(display, frame)
-	time.Sleep(duration)
-}
-
-
 
 func showCiao(display gc9307.Device, width, height int, duration time.Duration) {
 	spaceBetweenLogoAndText := 28
