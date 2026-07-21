@@ -110,6 +110,13 @@ type WiFiInterface struct {
 	Password   string `json:"password,omitempty"`
 	SSID       string `json:"ssid"`
 	Frequency  string `json:"frequency,omitempty"`
+	// WiFiWan is set when this radio is relaying an upstream hotspot as the WAN
+	// priority "wifi" slot (its own AP is parked). WiFiWanSSID is the upstream
+	// hotspot's SSID, reported only while WiFiWanAssociated is true — a relaying
+	// radio that has not (re)joined yet is on standby, not connected to a name.
+	WiFiWan           bool   `json:"wifi_wan,omitempty"`
+	WiFiWanSSID       string `json:"wifi_wan_ssid,omitempty"`
+	WiFiWanAssociated bool   `json:"wifi_wan_associated,omitempty"`
 }
 
 // DashboardInfo matches the top‐level keys in your sample JSON.
@@ -370,6 +377,16 @@ func getInfoFromPcatWeb() {
 					ssids = append(ssids, iface.SSID)
 				}
 				globalData.Store("WiFiSSIDs", ssids)
+
+				// Page-3 SSID rows. pcat-manager-web classifies each radio by
+				// device path (Onboard/Builtin vs PCIE) and reports which one is
+				// relaying the upstream WiFi (its AP parked) — the WAN priority
+				// table lets either radio carry the STA, so we can't assume a
+				// fixed wifi-iface index here. Map by class and let the web be
+				// authoritative; collectNetworkData's uci fallback only runs when
+				// pcat-manager-web is unreachable.
+				globalData.Store("SSID", radioDisplaySSID(info.WiFiInterfaces, false))
+				globalData.Store("SSID2", radioDisplaySSID(info.WiFiInterfaces, true))
 			}
 		}
 	}
@@ -383,6 +400,7 @@ func getInfoFromPcatWeb() {
 		}
 		pcatWebStateKnown = true
 		pcatWebUp.Store(false)
+		pcatWebProbed.Store(true)
 		collectLinuxFallbackData()
 		return
 	}
@@ -391,6 +409,7 @@ func getInfoFromPcatWeb() {
 	}
 	pcatWebStateKnown = true
 	pcatWebUp.Store(true)
+	pcatWebProbed.Store(true)
 
 	// === 2) Fetch data_stats.json ===
 	resp2, err := localHTTPClient.Get(networkStatsURL)
@@ -763,20 +782,29 @@ func collectNetworkData(cfg Config) {
 	// Public IPv4/IPv6 (cached; see updatePublicIPs).
 	updatePublicIPs(wanIP)
 
-	// SSID.
-	if ssid, err := getSSID(); err != nil {
-		//fmt.Printf("Could not get SSID: %v\n", err)
-		globalData.Store("SSID", "N/A")
-	} else {
-		globalData.Store("SSID", ssid)
-	}
+	// SSID rows (page 3). When pcat-manager-web is up it already populated
+	// SSID/SSID2 from its per-radio wifi_interfaces (which knows onboard vs PCIe
+	// and which radio relays the upstream WiFi), so don't clobber that with the
+	// coarser uci reads below — those can't tell which radio carries the STA and
+	// would show a stale name for a disconnected upstream. Only fall back to uci
+	// when the web is unavailable (Debian, or pcat-manager-web stopped). On
+	// OpenWrt, wait for the first dashboard.json poll before using the fallback
+	// so we don't briefly flash a coarse uci SSID at boot before the authoritative
+	// per-radio value arrives; on Debian there is no web, so run it immediately.
+	if !pcatWebUp.Load() && (pcatWebProbed.Load() || !isOpenWRT()) {
+		if ssid, err := getSSID(); err != nil {
+			//fmt.Printf("Could not get SSID: %v\n", err)
+			globalData.Store("SSID", "N/A")
+		} else {
+			globalData.Store("SSID", ssid)
+		}
 
-	// SSID.
-	if ssid2, err := getSSID2(); err != nil {
-		//fmt.Printf("Could not get SSID: %v\n", err)
-		globalData.Store("SSID2", "N/A")
-	} else {
-		globalData.Store("SSID2", ssid2)
+		if ssid2, err := getSSID2(); err != nil {
+			//fmt.Printf("Could not get SSID: %v\n", err)
+			globalData.Store("SSID2", "N/A")
+		} else {
+			globalData.Store("SSID2", ssid2)
+		}
 	}
 
 	// DHCP clients (OpenWrt).
@@ -1080,15 +1108,46 @@ func isOpenWRT() bool {
 	return false
 }
 
-// getOpenWrtStaSSID returns the SSID of the first wifi-iface in station (sta)
-// mode — i.e. the upstream hotspot we are connected to in Smart WAN mode. Empty
-// string when no STA iface is configured. Matches lines like:
-//	wireless.cfg0a2b63.mode='sta'
-//	wireless.cfg0a2b63.ssid='Shanghai Novotech WiFi7_5G'
-func getOpenWrtStaSSID() string {
+// radioDisplaySSID picks the page-3 SSID string for one physical radio from the
+// pcat-manager-web wifi_interfaces list. wantPCIe selects the PCIe radio;
+// otherwise the onboard radio (device_type "Onboard"/"Builtin"). When the radio
+// is relaying the upstream WiFi (WAN priority "wifi" slot, AP parked) it shows
+// the upstream hotspot's SSID while associated, or "Standby" while it has not
+// (re)joined — never the stale configured name. A radio that isn't present
+// yields "N/A", matching the other page-3 rows.
+func radioDisplaySSID(ifaces []WiFiInterface, wantPCIe bool) string {
+	for _, iface := range ifaces {
+		isPCIe := iface.DeviceType == "PCIE"
+		if isPCIe != wantPCIe {
+			continue
+		}
+		if iface.WiFiWan {
+			// Relaying an upstream hotspot: show what we're actually joined to,
+			// or standby when the STA is enabled but not associated.
+			if iface.WiFiWanAssociated && iface.WiFiWanSSID != "" {
+				return iface.WiFiWanSSID
+			}
+			return "Standby"
+		}
+		return iface.SSID
+	}
+	return "N/A"
+}
+
+// getOpenWrtStaSSID reports the upstream STA (WiFi-as-WAN) link state read
+// directly from uci/iwinfo. This is the fallback used only when
+// pcat-manager-web is unreachable; when it is up, page-3 SSIDs come from its
+// per-radio wifi_interfaces instead (see radioDisplaySSID).
+//
+// Returns:
+//   - configured: a wifi-iface in mode=sta exists (the WAN priority wifi slot)
+//   - ssid:       the hotspot it is currently *associated* to, or "" when the
+//                 STA is enabled but not joined (standby). The stale configured
+//                 ssid is deliberately not returned in that case.
+func getOpenWrtStaSSID() (ssid string, configured bool) {
 	out, err := secureExecCommand("uci", "-q", "show", "wireless")
 	if err != nil {
-		return ""
+		return "", false
 	}
 	staSection := ""
 	reMode := regexp.MustCompile(`^wireless\.([^.]+)\.mode='?sta'?$`)
@@ -1100,25 +1159,62 @@ func getOpenWrtStaSSID() string {
 		}
 	}
 	if staSection == "" {
-		return ""
+		return "", false
 	}
-	ssidOut, err := secureExecCommand("uci", "-q", "get",
-		"wireless."+staSection+".ssid")
+	// The STA iface is configured. Its live SSID (only present while actually
+	// associated) comes from iwinfo on the sta netdev, not from the uci config
+	// value — which persists across disconnects and would be stale.
+	return liveStaSSID(), true
+}
+
+// liveStaSSID returns the SSID the station iface is currently associated to,
+// or "" when not associated. Resolves the sta netdev from `iwinfo`, then reads
+// its live ESSID. Empty on any error (treated as not-associated / standby).
+func liveStaSSID() string {
+	out, err := secureExecCommand("iwinfo")
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(string(ssidOut))
+	// `iwinfo` lists each iface then its fields; the sta netdev shows
+	// `Mode: Client` and `ESSID: "<hotspot>"` (or `ESSID: unknown` when idle).
+	reESSID := regexp.MustCompile(`ESSID:\s*"(.*?)"`)
+	reMode := regexp.MustCompile(`Mode:\s*(\S+)`)
+	var curMode, curESSID string
+	for _, line := range strings.Split(string(out), "\n") {
+		// A new iface block starts at a non-indented "phyX-staY  ESSID: ..." line.
+		if len(line) > 0 && line[0] != ' ' && line[0] != '\t' {
+			// Previous block ended; check if it was an associated client.
+			if curMode == "Client" && curESSID != "" {
+				return curESSID
+			}
+			curMode, curESSID = "", ""
+		}
+		if m := reESSID.FindStringSubmatch(line); m != nil {
+			curESSID = m[1]
+		}
+		if m := reMode.FindStringSubmatch(line); m != nil {
+			curMode = m[1]
+		}
+	}
+	if curMode == "Client" && curESSID != "" {
+		return curESSID
+	}
+	return ""
 }
 
 // getSSID returns connected SSID on Debian or broadcasting SSID on OpenWrt.
 func getSSID() (string, error) {
 	// OpenWrt detection
 	if isOpenWRT() {
-		// Smart WAN: when the onboard radio relays an upstream hotspot it runs
-		// a station (sta) iface. Show the SSID we are actually connected to
-		// rather than the parked AP's (often stale "OpenWrt") SSID.
-		if sta := getOpenWrtStaSSID(); sta != "" {
-			return sta, nil
+		// Smart WAN: when a radio relays an upstream hotspot it runs a station
+		// (sta) iface. Show the hotspot we are actually joined to rather than
+		// the parked AP's (often stale "OpenWrt") SSID; show "Standby" when the
+		// STA is configured but not currently associated.
+		if sta, configured := getOpenWrtStaSSID(); configured {
+			if sta != "" {
+				return sta, nil
+			}
+			return "Standby", nil
 		}
 		out, err := secureExecCommand("uci", "get", "wireless.@wifi-iface[0].ssid")
 		if err != nil {
@@ -1161,11 +1257,22 @@ func getSSID() (string, error) {
 	return "", fmt.Errorf("SSID could not be determined")
 }
 
-// getSSID returns connected SSID on Debian or broadcasting SSID on OpenWrt.
+// getSSID2 returns the second radio's SSID on OpenWrt (or the connected SSID on
+// Debian). Fallback for when pcat-manager-web is unreachable.
 func getSSID2() (string, error) {
 	// OpenWrt detection
-	if _, err := os.Stat("/etc/openwrt_release"); err == nil {
-		// OpenWrt: Use uci command
+	if isOpenWRT() {
+		// The second wifi-iface may itself be the upstream STA (the WAN priority
+		// wifi slot can sit on either radio). If so, report the live upstream /
+		// standby rather than the stale configured sta ssid.
+		if mode, err := secureExecCommand("uci", "-q", "get",
+			"wireless.@wifi-iface[1].mode"); err == nil &&
+			strings.TrimSpace(string(mode)) == "sta" {
+			if sta := liveStaSSID(); sta != "" {
+				return sta, nil
+			}
+			return "Standby", nil
+		}
 		out, err := secureExecCommand("uci", "get", "wireless.@wifi-iface[1].ssid")
 		if err != nil {
 			return "", fmt.Errorf("failed to get OpenWrt SSID: %v", err)

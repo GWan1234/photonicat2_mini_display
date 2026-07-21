@@ -26,9 +26,14 @@ import (
 // between web-provided numbers and direct Linux measurement.
 // pcatWebStateKnown is only touched by the getInfoFromPcatWeb goroutine and
 // keeps the up/down transition logs to one line per change.
+// pcatWebProbed is the atomic mirror of "have we completed at least one web
+// poll", readable from other goroutines (collectNetworkData consults it so it
+// doesn't briefly fill page-3 SSIDs from the coarse uci fallback before the
+// first dashboard.json poll on OpenWrt, where the web is the real source).
 var (
 	pcatWebUp         atomic.Bool
 	pcatWebStateKnown bool
+	pcatWebProbed     atomic.Bool
 )
 
 func haveCmd(name string) bool {
