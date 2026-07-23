@@ -420,6 +420,9 @@ func sendTopBar(display gc9307.Device, frame *image.RGBA) {
 	} else {
 		display.FillRectangleWithImage(0, 0, topBarSendWidth, topBarSendHeight, frame)
 	}
+	// Remember for HTTP snapshot (only published when web UI is polling).
+	rememberWebRegion("top", frame)
+	tryPublishWebSnapshot()
 }
 
 func sendFooter(display gc9307.Device, frame *image.RGBA) {
@@ -438,6 +441,8 @@ func sendFooter(display gc9307.Device, frame *image.RGBA) {
 	} else {
 		display.FillRectangleWithImage(0, footerSendY, footerSendWidth, footerSendHeight, frame)
 	}
+	rememberWebRegion("footer", frame)
+	tryPublishWebSnapshot()
 }
 
 // cropToContent scans the given frame and returns a sub-image that contains only non-background pixels.
@@ -554,6 +559,10 @@ func sendMiddle(display gc9307.Device, frame *image.RGBA) {
 	} else {
 		display.FillRectangleWithImage(0, middleSendY, middleSendWidth, middleSendHeight, frame)
 	}
+	// Middle is the last region of a normal frame; publish a complete snapshot
+	// for /api/v1/go_frame.png when the web UI is open (no-op otherwise).
+	rememberWebRegion("middle", frame)
+	tryPublishWebSnapshot()
 }
 
 // Global variable to store the last sent middle frame for comparison
