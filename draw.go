@@ -1202,14 +1202,15 @@ var (
 )
 
 const (
-	barFrameRadius = 3 // outer frame corner radius for the CPU box
-	hbarRadius     = 5 // horizontal bar corner radius (matches boot progress bar)
+	// Shared outer-frame corner radius for CPU bars and the mem hbar so both
+	// charts match visually.
+	hbarRadius = 5 // also used by drawCpuBars outer frame
 )
 
 // drawCpuBars renders a framed box of vertical bars — one per CPU core — at
 // (x0, y0) with total size w×h. Bars are pure yellow fills (no per-bar
-// frames, no padding/gap) rising from the bottom in proportion to each
-// core's usage (0-100). Cached keyed on quantized usages so it only
+// frames) with a 1px gap between cores, rising from the bottom in proportion
+// to each core's usage (0-100). Cached keyed on quantized usages so it only
 // re-rasterizes when the reading actually changes.
 func drawCpuBars(frame *image.RGBA, x0, y0, w, h int, usages []float64) {
 	numCores := len(usages)
@@ -1219,10 +1220,9 @@ func drawCpuBars(frame *image.RGBA, x0, y0, w, h int, usages []float64) {
 
 	// Build a cache key from usage buckets (5% granularity) so steady load
 	// reuses the rendered image instead of rasterizing every frame.
-	// "v2" bumps the key so any cached framed/gapped bars from older builds
-	// are not reused after the pure-fill layout change.
+	// "v3" bumps the key after the 1px-gap + shared-radius layout change.
 	var keyBuf strings.Builder
-	keyBuf.WriteString("gen:cpubars:v2:")
+	keyBuf.WriteString("gen:cpubars:v3:")
 	keyBuf.WriteString(strconv.Itoa(w))
 	keyBuf.WriteByte('x')
 	keyBuf.WriteString(strconv.Itoa(h))
@@ -1241,18 +1241,30 @@ func drawCpuBars(frame *image.RGBA, x0, y0, w, h int, usages []float64) {
 		canvas := svg.New(&buf)
 		canvas.Start(w, h)
 
-		// Background fill + outer frame only (no inner per-bar frames).
-		canvas.Roundrect(0, 0, w-1, h-1, barFrameRadius, barFrameRadius,
+		// Outer frame: same corner radius as the mem hbar.
+		r := hbarRadius
+		if r > h/2 {
+			r = h / 2
+		}
+		canvas.Roundrect(0, 0, w-1, h-1, r, r,
 			"fill:"+barBgHex+";stroke:"+barTrackHex+";stroke-width:1")
 
-		// Pure bars: 0 padding, 0 gap — column edges are adjacent (or share a
-		// pixel boundary via integer division so the full width is covered).
+		// Pure yellow columns with a 1px gap between cores; no padding from
+		// the outer frame edge. Width is split evenly across the bar slots
+		// after reserving the gaps so leftover pixels are distributed.
+		const gap = 1
+		avail := w - gap*(numCores-1)
+		if avail < numCores {
+			avail = w // too narrow for gaps; fall back to packed layout
+		}
 		for i := 0; i < numCores; i++ {
-			bx := i * w / numCores
-			barW := (i+1)*w/numCores - bx
+			barStart := i * avail / numCores
+			barEnd := (i + 1) * avail / numCores
+			barW := barEnd - barStart
 			if barW < 1 {
 				continue
 			}
+			bx := barStart + i*gap
 			u := usages[i]
 			if u < 0 {
 				u = 0

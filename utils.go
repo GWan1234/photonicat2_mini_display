@@ -302,12 +302,12 @@ func displayWake() {
 	forceTopBarRedraw = true
 	// Kick the rest in the background (1-minute collectors already keep most
 	// keys warm; this just covers the case where we wake just before a tick).
-	go collectLinuxData(cfg)
 	go collectNetworkData(cfg)
 	go collectWANNetworkSpeed()
 	go getInfoFromPcatWeb()
-	// Ping collector handles its own immediate refresh on reschedule.
+	// Page-sensitive collectors refresh immediately on reschedule.
 	signalPingReschedule()
+	signalLinuxReschedule()
 }
 
 func monitorKeyboard(changePageTriggered *bool) {

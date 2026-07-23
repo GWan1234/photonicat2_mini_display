@@ -65,7 +65,11 @@ const (
 	// shows Ping0/Ping1, poll every 3s; otherwise the same 1-minute cadence.
 	INTERVAL_PING_ACTIVE = 3 * time.Second
 	INTERVAL_PING_IDLE   = INTERVAL_DATA_COLLECT
-	INTERVAL_SMS_COLLECT = INTERVAL_DATA_COLLECT
+	// Linux stats (CPU bars, mem, temps…) run at 2 Hz (0.5s) while the
+	// CPU-bars page is visible and the screen is awake; otherwise 1 minute.
+	INTERVAL_LINUX_ACTIVE = 500 * time.Millisecond
+	INTERVAL_LINUX_IDLE   = INTERVAL_DATA_COLLECT
+	INTERVAL_SMS_COLLECT  = INTERVAL_DATA_COLLECT
 
 	ETC_USER_CONFIG_PATH   = "/etc/pcat2_mini_display-user_config.json"
 	ETC_CONFIG_PATH        = "/etc/pcat2_mini_display-config.json"
@@ -137,8 +141,9 @@ var (
 	battChargingStatus = false
 	battSOC            = 0
 
-	// Collection intervals. General dynamic data is always 1 minute; only
-	// ping changes with page/idle state (see currentPingInterval).
+	// Collection intervals. General dynamic data is always 1 minute; ping
+	// and linux stats change with page/idle state (see currentPingInterval /
+	// currentLinuxInterval).
 	baseBatteryDataInterval   = INTERVAL_DATA_COLLECT
 	baseDataGatherInterval    = INTERVAL_DATA_COLLECT
 	baseNetworkGatherInterval = INTERVAL_DATA_COLLECT
@@ -152,10 +157,11 @@ var (
 
 	// Idle FPS throttle only (data intervals no longer scale with idle).
 	// When fully dark (displayAsleep) the render loop skips SPI entirely.
-	idleMultiplier     = 10
-	// pingReschedule wakes the ping collector so entering the ping page
-	// switches to the 3s cadence without waiting out a leftover 1m sleep.
-	pingReschedule = make(chan struct{}, 1)
+	idleMultiplier = 10
+	// Reschedule channels wake page-sensitive collectors so entering the
+	// matching page switches cadence without waiting out a leftover 1m sleep.
+	pingReschedule  = make(chan struct{}, 1)
+	linuxReschedule = make(chan struct{}, 1)
 
 	baseFPS    = DEFAULT_FPS
 	desiredFPS = DEFAULT_FPS
@@ -522,7 +528,8 @@ func (dw *DisplayWrapper) GetTransferStats() map[string]interface{} {
 }
 
 // updateIntervals applies idle-state changes that still depend on it (FPS
-// throttle + ping cadence). General data collectors stay at 1 minute always.
+// throttle + page-sensitive cadences). General data collectors stay at 1
+// minute always.
 func updateIntervals() {
 	if idleState == STATE_IDLE {
 		// Very low FPS while idle-but-visible (min brightness > 0). When
@@ -532,10 +539,11 @@ func updateIntervals() {
 		desiredFPS = baseFPS
 	}
 	batteryDataInterval = baseBatteryDataInterval
-	dataGatherInterval = baseDataGatherInterval
+	dataGatherInterval = currentLinuxInterval()
 	networkGatherInterval = baseNetworkGatherInterval
 	pingGatherInterval = currentPingInterval()
 	signalPingReschedule()
+	signalLinuxReschedule()
 }
 
 // currentPingInterval returns 3s when the screen is awake and the current
@@ -547,9 +555,31 @@ func currentPingInterval() time.Duration {
 	return INTERVAL_PING_IDLE
 }
 
+// currentLinuxInterval returns 500ms (2 Hz) when the screen is awake and the
+// current page shows cpu_bars; otherwise 1 minute.
+func currentLinuxInterval() time.Duration {
+	if idleState != STATE_IDLE && pageShowsCpuBars(currPageIdx) {
+		return INTERVAL_LINUX_ACTIVE
+	}
+	return INTERVAL_LINUX_IDLE
+}
+
 // pageShowsPing reports whether the given page index (cfg page, not SMS)
 // has any element bound to Ping0 or Ping1.
 func pageShowsPing(pageIdx int) bool {
+	return pageHasMatch(pageIdx, func(el DisplayElement) bool {
+		return el.DataKey == "Ping0" || el.DataKey == "Ping1"
+	})
+}
+
+// pageShowsCpuBars reports whether the given page has a cpu_bars element.
+func pageShowsCpuBars(pageIdx int) bool {
+	return pageHasMatch(pageIdx, func(el DisplayElement) bool {
+		return el.Type == "cpu_bars"
+	})
+}
+
+func pageHasMatch(pageIdx int, match func(DisplayElement) bool) bool {
 	if pageIdx < 0 || pageIdx >= cfgNumPages {
 		return false
 	}
@@ -558,7 +588,7 @@ func pageShowsPing(pageIdx int) bool {
 		return false
 	}
 	for _, el := range page {
-		if el.DataKey == "Ping0" || el.DataKey == "Ping1" {
+		if match(el) {
 			return true
 		}
 	}
@@ -568,6 +598,13 @@ func pageShowsPing(pageIdx int) bool {
 func signalPingReschedule() {
 	select {
 	case pingReschedule <- struct{}{}:
+	default:
+	}
+}
+
+func signalLinuxReschedule() {
+	select {
+	case linuxReschedule <- struct{}{}:
 	default:
 	}
 }
@@ -771,8 +808,8 @@ func main() {
 	globalData.Store("RemainingTime_Unit", "")
 
 	// Dynamic data collectors: always 1 minute (idle and active), with an
-	// immediate first pass so the UI is populated at startup. Ping is the
-	// only exception — see the dedicated goroutine below.
+	// immediate first pass so the UI is populated at startup. Ping and linux
+	// stats are the exceptions — see the dedicated goroutines below.
 	startIntervalCollector := func(interval time.Duration, fn func()) {
 		go func() {
 			fn() // immediate first sample
@@ -786,37 +823,54 @@ func main() {
 			}
 		}()
 	}
-	startIntervalCollector(INTERVAL_DATA_COLLECT, func() { collectLinuxData(cfg) })
 	startIntervalCollector(INTERVAL_DATA_COLLECT, func() { collectNetworkData(cfg) })
 	startIntervalCollector(INTERVAL_DATA_COLLECT, collectBatteryData)
 	startIntervalCollector(INTERVAL_DATA_COLLECT, getInfoFromPcatWeb)
 	startIntervalCollector(INTERVAL_DATA_COLLECT, collectWANNetworkSpeed)
 
-	// Ping cadence follows the page + idle state: 3s on the ping page while
-	// awake, otherwise 1 minute. Reschedule is interruptible so flipping to
-	// the ping page does not wait out a leftover long sleep.
-	go func() {
-		collectPingData(cfg)
-		for weAreRunning {
-			interval := currentPingInterval()
-			pingGatherInterval = interval
-			timer := time.NewTimer(interval)
-			select {
-			case <-timer.C:
-				collectPingData(cfg)
-			case <-pingReschedule:
-				if !timer.Stop() {
-					select {
-					case <-timer.C:
-					default:
-					}
+	// Page-sensitive collector: fixed interval between runs, interruptible
+	// via reschedule so entering the matching page does not wait out a
+	// leftover long sleep. collect runs immediately on start and on each
+	// reschedule.
+	startPageSensitiveCollector := func(
+		intervalFn func() time.Duration,
+		reschedule <-chan struct{},
+		setInterval *time.Duration,
+		collect func(),
+	) {
+		go func() {
+			collect()
+			for weAreRunning {
+				interval := intervalFn()
+				if setInterval != nil {
+					*setInterval = interval
 				}
-				// Page change or wake: refresh immediately so the user does
-				// not stare at a leftover value until the next cadence tick.
-				collectPingData(cfg)
+				timer := time.NewTimer(interval)
+				select {
+				case <-timer.C:
+					collect()
+				case <-reschedule:
+					if !timer.Stop() {
+						select {
+						case <-timer.C:
+						default:
+						}
+					}
+					// Page change or wake: refresh immediately.
+					collect()
+				}
 			}
-		}
-	}()
+		}()
+	}
+
+	// Ping: 3s on the ping page while awake, otherwise 1 minute.
+	startPageSensitiveCollector(currentPingInterval, pingReschedule, &pingGatherInterval, func() {
+		collectPingData(cfg)
+	})
+	// Linux/CPU: 0.5s (2 Hz) on the cpu_bars page while awake, otherwise 1 minute.
+	startPageSensitiveCollector(currentLinuxInterval, linuxReschedule, &dataGatherInterval, func() {
+		collectLinuxData(cfg)
+	})
 
 	go collectFixedData()
 	go getSmsPages()
@@ -1043,10 +1097,13 @@ func mainLoop() {
 						localIdx = nextLocalIdx
 						currPageIdx = nextPageIdx
 						isSMS = isNextPageSMS
-						// Entering/leaving the ping page changes the ping
-						// cadence (3s vs 1m); wake the ping collector.
+						// Entering/leaving a page-sensitive screen changes
+						// its collector cadence; wake the matching goroutine.
 						if pageShowsPing(prevPageIdx) != pageShowsPing(currPageIdx) {
 							signalPingReschedule()
+						}
+						if pageShowsCpuBars(prevPageIdx) != pageShowsCpuBars(currPageIdx) {
+							signalLinuxReschedule()
 						}
 						nextPageLength := 0
 						if isNextPageSMS {

@@ -344,7 +344,7 @@
                 },
                 {
                     "type": "cpu_bars",
-                    "position": {"x": 30, "y": 9},
+                    "position": {"x": 30, "y": 11},
                     "data_key": "CpuUsages",
                     "size": {"width": 134, "height": 50},
                     "enable": 1
@@ -360,7 +360,7 @@
                 },
                 {
                     "type": "hbar",
-                    "position": {"x": 30, "y": 88},
+                    "position": {"x": 30, "y": 92},
                     "data_key": "MemUsagePercent",
                     "size": {"width": 134, "height": 18},
                     "enable": 1
