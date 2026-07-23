@@ -68,3 +68,24 @@ func TestDiskBaseRegex(t *testing.T) {
 		}
 	}
 }
+
+// collectDiskUsage must publish percent + presence flags used by disk_bars
+// (OpenWrt and Debian share the same keys).
+func TestCollectDiskUsageStoresPercents(t *testing.T) {
+	collectDiskUsage()
+	if _, ok := globalData.Load("DiskUsagePercent"); !ok {
+		t.Error("DiskUsagePercent missing after collectDiskUsage")
+	}
+	if _, ok := globalData.Load("DiskNvmePercent"); !ok {
+		t.Error("DiskNvmePercent missing after collectDiskUsage")
+	}
+	if _, ok := globalData.Load("DiskNvmePresent"); !ok {
+		t.Error("DiskNvmePresent missing after collectDiskUsage")
+	}
+	if v, ok := globalData.Load("DiskUsagePercent"); ok {
+		pct, ok := v.(float64)
+		if !ok || pct < 0 || pct > 100 {
+			t.Errorf("DiskUsagePercent = %v, want float64 in [0,100]", v)
+		}
+	}
+}

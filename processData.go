@@ -2123,17 +2123,33 @@ func pickExtraDiskMounts(mounts [][2]string) (nvmeMp, sdMp string) {
 	return nvmeMp, sdMp
 }
 
+// diskStatfs returns used/total GB and used percent (0-100) for mountpoint.
+// ok is false when the mount cannot be read or has no size.
+func diskStatfs(mountpoint string) (usedGB, totalGB, pct float64, ok bool) {
+	var stat syscall.Statfs_t
+	if err := syscall.Statfs(mountpoint, &stat); err != nil {
+		return 0, 0, 0, false
+	}
+	totalGB = float64(stat.Blocks) * float64(stat.Bsize) / (1 << 30)
+	usedGB = float64(stat.Blocks-stat.Bfree) * float64(stat.Bsize) / (1 << 30)
+	if totalGB <= 0 {
+		return 0, 0, 0, false
+	}
+	pct = usedGB / totalGB * 100
+	if pct < 0 {
+		pct = 0
+	} else if pct > 100 {
+		pct = 100
+	}
+	return usedGB, totalGB, pct, true
+}
+
 // formatDiskUsageGB returns "used/total" in GB (e.g. "3.1/29") for the
 // filesystem at mountpoint, or "-" if it cannot be read. Used space drops the
 // decimal at >=100 GB so large NVMe values still fit the display column.
 func formatDiskUsageGB(mountpoint string) string {
-	var stat syscall.Statfs_t
-	if err := syscall.Statfs(mountpoint, &stat); err != nil {
-		return "-"
-	}
-	totalGB := float64(stat.Blocks) * float64(stat.Bsize) / (1 << 30)
-	usedGB := float64(stat.Blocks-stat.Bfree) * float64(stat.Bsize) / (1 << 30)
-	if totalGB <= 0 {
+	usedGB, totalGB, _, ok := diskStatfs(mountpoint)
+	if !ok {
 		return "-"
 	}
 	used := fmt.Sprintf("%0.1f", usedGB)
@@ -2143,25 +2159,39 @@ func formatDiskUsageGB(mountpoint string) string {
 	return fmt.Sprintf("%s/%d", used, int(math.Ceil(totalGB)))
 }
 
-// collectDiskUsage stores per-disk "used/total" GB strings for the display:
-// DiskUsage for the root filesystem, DiskNvme for the first mounted NVMe
-// partition, and DiskSD for the first mounted partition of an mmcblk disk
-// other than the root disk (i.e. the SD card when root is on eMMC). Absent
-// disks store "-" so the display keeps its placeholder after hot-unplug.
+// collectDiskUsage stores per-disk "used/total" GB strings and 0-100 percent
+// values for the display:
+//   - DiskUsage / DiskUsagePercent — root (onboard) filesystem
+//   - DiskNvme / DiskNvmePercent / DiskNvmePresent — first mounted NVMe
+//   - DiskSD — first mounted non-root mmcblk (SD card when root is on eMMC)
+// Absent disks store "-" / 0 / false so the UI can hide the NVMe bar.
 func collectDiskUsage() {
 	globalData.Store("DiskUsage", formatDiskUsageGB("/"))
+	if _, _, pct, ok := diskStatfs("/"); ok {
+		globalData.Store("DiskUsagePercent", pct)
+	} else {
+		globalData.Store("DiskUsagePercent", 0.0)
+	}
 
 	nvme, sd := "-", "-"
+	nvmePresent := false
+	nvmePct := 0.0
 	if data, err := os.ReadFile("/proc/mounts"); err == nil {
 		nvmeMp, sdMp := pickExtraDiskMounts(parseBlockMounts(string(data)))
 		if nvmeMp != "" {
 			nvme = formatDiskUsageGB(nvmeMp)
+			if _, _, pct, ok := diskStatfs(nvmeMp); ok {
+				nvmePresent = true
+				nvmePct = pct
+			}
 		}
 		if sdMp != "" {
 			sd = formatDiskUsageGB(sdMp)
 		}
 	}
 	globalData.Store("DiskNvme", nvme)
+	globalData.Store("DiskNvmePercent", nvmePct)
+	globalData.Store("DiskNvmePresent", nvmePresent)
 	globalData.Store("DiskSD", sd)
 }
 

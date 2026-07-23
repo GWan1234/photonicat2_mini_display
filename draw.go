@@ -1271,7 +1271,17 @@ func drawCpuBars(frame *image.RGBA, x0, y0, w, h int, usages []float64) {
 			} else if u > 100 {
 				u = 100
 			}
-			fillH := int(math.Round(float64(h) * u / 100.0))
+			// Any non-zero usage draws at least 1px so tiny loads still show.
+			fillH := 0
+			if u > 0 {
+				fillH = int(math.Round(float64(h) * u / 100.0))
+				if fillH < 1 {
+					fillH = 1
+				}
+				if fillH > h {
+					fillH = h
+				}
+			}
 			if fillH > 0 {
 				fy := h - fillH
 				// Sharp rectangles — no radius, no stroke, no inset.
@@ -1288,6 +1298,52 @@ func drawCpuBars(frame *image.RGBA, x0, y0, w, h int, usages []float64) {
 		}
 	}
 	copyImageToImageAt(frame, img, x0, y0)
+}
+
+// drawDiskBars renders onboard (root) and optional NVMe usage as horizontal
+// bars with no text labels. When NVMe is present the width is split left/right
+// with a small gap; when absent the root bar takes the full width. Height
+// should match the mem hbar. Works the same on OpenWrt and Debian — presence
+// comes from DiskNvmePresent set by collectDiskUsage.
+func drawDiskBars(frame *image.RGBA, x0, y0, w, h int) {
+	if w <= 0 || h <= 0 {
+		return
+	}
+	rootPct := 0.0
+	if v, ok := globalData.Load("DiskUsagePercent"); ok && v != nil {
+		switch n := v.(type) {
+		case float64:
+			rootPct = n
+		case int:
+			rootPct = float64(n)
+		}
+	}
+	nvmePresent := false
+	if v, ok := globalData.Load("DiskNvmePresent"); ok {
+		if b, ok := v.(bool); ok {
+			nvmePresent = b
+		}
+	}
+	nvmePct := 0.0
+	if v, ok := globalData.Load("DiskNvmePercent"); ok && v != nil {
+		switch n := v.(type) {
+		case float64:
+			nvmePct = n
+		case int:
+			nvmePct = float64(n)
+		}
+	}
+
+	const gap = 4
+	if nvmePresent && w > gap+2 {
+		leftW := (w - gap) / 2
+		rightW := w - gap - leftW
+		drawHBar(frame, x0, y0, leftW, h, rootPct, "")
+		drawHBar(frame, x0+leftW+gap, y0, rightW, h, nvmePct, "")
+		return
+	}
+	// No NVMe: single onboard bar uses the full slot.
+	drawHBar(frame, x0, y0, w, h, rootPct, "")
 }
 
 // drawHBar renders a framed horizontal progress bar at (x0, y0) of size w×h:
@@ -1331,7 +1387,17 @@ func drawHBar(frame *image.RGBA, x0, y0, w, h int, pct float64, label string) {
 		inset := 1
 		innerW := w - 2*inset
 		innerH := h - 2*inset
-		fillW := int(math.Round(float64(innerW) * pct / 100.0))
+		// Any non-zero pct draws at least 1px of fill (same rule as CPU bars).
+		fillW := 0
+		if pct > 0 && innerW > 0 {
+			fillW = int(math.Round(float64(innerW) * pct / 100.0))
+			if fillW < 1 {
+				fillW = 1
+			}
+			if fillW > innerW {
+				fillW = innerW
+			}
+		}
 		if fillW > 0 && innerH > 0 {
 			fr := r - inset
 			if fr < 0 {
@@ -1820,25 +1886,14 @@ func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
 			}
 		
 		case "icon":
-			var iconImg *image.RGBA
-			var err error
-			iconImg, _, _, err = loadImage(assetsPrefix + "/" + element.IconPath)
-			if err != nil {
-				log.Printf("Error loading icon from %s: %v", element.IconPath, err)
-				continue
-			}
-
-			// Determine the size for the icon.
+			// Destination size (defaults applied after load for non-SVG).
 			var sz Size
 			if element.Size != nil {
 				sz = *element.Size
 			} else if element.Size2 != nil {
 				sz = *element.Size2
-			} else {
-				sz = Size{Width: iconImg.Bounds().Dx(), Height: iconImg.Bounds().Dy()}
 			}
 
-			// Define the destination rectangle for the icon.
 			iconX := element.Position.X
 			// When anchored to a text data_key, stick the icon to the right of
 			// that value's rendered width so it tracks variable-width text
@@ -1861,6 +1916,29 @@ func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
 					textW := font.MeasureString(anchorFace, anchorText).Round()
 					iconX = element.Position.X + textW + element.AnchorGap
 				}
+			}
+
+			fullPath := assetsPrefix + "/" + element.IconPath
+			// SVGs: rasterize at the requested size so size.width/height actually
+			// scale (loadImage only renders at intrinsic viewBox size).
+			if strings.HasSuffix(strings.ToLower(element.IconPath), ".svg") {
+				tw, th := sz.Width, sz.Height
+				if err := drawSVG(frame, fullPath, iconX, element.Position.Y, tw, th); err != nil {
+					log.Printf("Error drawing SVG icon %s: %v", element.IconPath, err)
+				}
+				continue
+			}
+
+			iconImg, iw, ih, err := loadImage(fullPath)
+			if err != nil {
+				log.Printf("Error loading icon from %s: %v", element.IconPath, err)
+				continue
+			}
+			if sz.Width == 0 {
+				sz.Width = iw
+			}
+			if sz.Height == 0 {
+				sz.Height = ih
 			}
 			pt := image.Pt(iconX, element.Position.Y)
 			rect := image.Rect(pt.X, pt.Y, pt.X+sz.Width, pt.Y+sz.Height)
@@ -2015,6 +2093,18 @@ func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
 				label = label + element.Units
 			}
 			drawHBar(frame, element.Position.X, element.Position.Y, sz.Width, sz.Height, pct, label)
+
+		case "disk_bars":
+			// Onboard + optional NVMe usage bars, same height as mem, no text.
+			// Full-width single bar when NVMe is absent; left/right split when
+			// present. Size comes from the element (defaults match mem bar).
+			sz := Size{Width: 134, Height: 26}
+			if element.Size != nil {
+				sz = *element.Size
+			} else if element.Size2 != nil {
+				sz = *element.Size2
+			}
+			drawDiskBars(frame, element.Position.X, element.Position.Y, sz.Width, sz.Height)
 
 		default:
 			log.Printf("Unknown element type: %s", element.Type)

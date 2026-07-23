@@ -1,0 +1,11 @@
+<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<!-- Bold RAM module — large fills, few details for 16–20px readability -->
+<path d="M2 4H14V12H2V4Z" fill="#FDE021"/>
+<path d="M3.5 2.5H5V4H3.5V2.5Z" fill="#FDE021"/>
+<path d="M6.5 2.5H8V4H6.5V2.5Z" fill="#FDE021"/>
+<path d="M9.5 2.5H11V4H9.5V2.5Z" fill="#FDE021"/>
+<path d="M3.5 12H5V13.5H3.5V12Z" fill="#FDE021"/>
+<path d="M6.5 12H8V13.5H6.5V12Z" fill="#FDE021"/>
+<path d="M9.5 12H11V13.5H9.5V12Z" fill="#FDE021"/>
+<path d="M10 6H12.5V10H10V6Z" fill="#000000"/>
+</svg>
