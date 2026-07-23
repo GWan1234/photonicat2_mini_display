@@ -317,8 +317,13 @@ func updateData(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
+// getDefaultConfig returns the package default only (embedded layout), not the
+// merged running config. The web editor uses this as the base before applying
+// user overrides.
 func getDefaultConfig(c *fiber.Ctx) error {
-	return c.JSON(cfg)
+	configMutex.RLock()
+	defer configMutex.RUnlock()
+	return c.JSON(dftCfg)
 }
 
 // GET /api/v1/get_user_config.json

@@ -1,6 +1,7 @@
 package main
 
 import (
+	_ "embed"
 	"flag"
 	"fmt"
 	"image"
@@ -23,6 +24,18 @@ import (
 	"periph.io/x/conn/v3/spi/spireg"
 	"periph.io/x/host/v3"
 )
+
+// Package default layouts ship inside the binary so every firmware update
+// carries the current config.json / config_debian.json. On startup they are
+// written to /etc (overwriting any stale system default) and then
+// user_config.json is merged on top. pcat-manager-web does not hold a copy —
+// it always fetches defaults from this process via HTTP.
+//
+//go:embed config.json
+var embeddedOpenWrtConfigJSON []byte
+
+//go:embed config_debian.json
+var embeddedDebianConfigJSON []byte
 
 const (
 	RST_PIN              = "GPIO122"
