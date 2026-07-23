@@ -855,16 +855,25 @@ func downscaleBox(src *image.RGBA, destW, destH int) *image.RGBA {
 // good balance of edge smoothness vs cost on the small LCD).
 const barFrameAAScale = 2
 
+// barInset keeps fills inside the grey stroke so AA frame edges stay clean.
+const barInset = 1
+
+// clampBarRadius keeps a corner radius legal for a given box height.
+func clampBarRadius(radius, h int) int {
+	if radius < 0 {
+		radius = 0
+	}
+	if h > 0 && radius > h/2 {
+		radius = h / 2
+	}
+	return radius
+}
+
 // getBarOuterFrame returns a cached anti-aliased outer frame: black fill +
 // thin grey rounded stroke. Shared by CPU bars and mem/disk hbars so the
 // expensive supersampled rasterize runs once per (w,h,radius).
 func getBarOuterFrame(w, h, radius int) *image.RGBA {
-	if radius > h/2 {
-		radius = h / 2
-	}
-	if radius < 0 {
-		radius = 0
-	}
+	radius = clampBarRadius(radius, h)
 	cacheKey := "gen:barframe:aa" + strconv.Itoa(barFrameAAScale) + ":" +
 		strconv.Itoa(w) + "x" + strconv.Itoa(h) + ":r" + strconv.Itoa(radius)
 
@@ -891,6 +900,143 @@ func getBarOuterFrame(w, h, radius int) *image.RGBA {
 		draw.Draw(fallback, fallback.Bounds(), image.NewUniform(PCAT_BLACK), image.Point{}, draw.Src)
 		return fallback
 	}
+	return img
+}
+
+// getBarOuterStroke returns a cached AA stroke-only overlay (no fill) so fills
+// cannot cover the grey frame edge; always composited last.
+func getBarOuterStroke(w, h, radius int) *image.RGBA {
+	radius = clampBarRadius(radius, h)
+	cacheKey := "gen:barstroke:aa" + strconv.Itoa(barFrameAAScale) + ":" +
+		strconv.Itoa(w) + "x" + strconv.Itoa(h) + ":r" + strconv.Itoa(radius)
+
+	imageCacheMu.RLock()
+	if img, ok := imageCache[cacheKey]; ok {
+		imageCacheMu.RUnlock()
+		return img
+	}
+	imageCacheMu.RUnlock()
+
+	var buf bytes.Buffer
+	canvas := svg.New(&buf)
+	canvas.Start(w, h)
+	canvas.Roundrect(0, 0, w-1, h-1, radius, radius,
+		"fill:none;stroke:"+barTrackHex+";stroke-width:1")
+	canvas.End()
+
+	img, err := renderSvgBytesAA(buf.Bytes(), cacheKey, barFrameAAScale)
+	if err != nil {
+		log.Printf("getBarOuterStroke: %v", err)
+		return image.NewRGBA(image.Rect(0, 0, w, h))
+	}
+	return img
+}
+
+// getBarInnerMask returns a cached AA white rounded-rect used to clip fills so
+// they never spill past the frame's inner corner curve.
+func getBarInnerMask(w, h, radius, inset int) *image.RGBA {
+	radius = clampBarRadius(radius, h)
+	if inset < 0 {
+		inset = 0
+	}
+	innerR := radius - inset
+	if innerR < 0 {
+		innerR = 0
+	}
+	cacheKey := "gen:barmask:aa" + strconv.Itoa(barFrameAAScale) + ":" +
+		strconv.Itoa(w) + "x" + strconv.Itoa(h) +
+		":r" + strconv.Itoa(radius) + ":i" + strconv.Itoa(inset)
+
+	imageCacheMu.RLock()
+	if img, ok := imageCache[cacheKey]; ok {
+		imageCacheMu.RUnlock()
+		return img
+	}
+	imageCacheMu.RUnlock()
+
+	iw := w - 2*inset
+	ih := h - 2*inset
+	if iw < 1 || ih < 1 {
+		empty := image.NewRGBA(image.Rect(0, 0, w, h))
+		imageCacheMu.Lock()
+		imageCache[cacheKey] = empty
+		imageCacheMu.Unlock()
+		return empty
+	}
+
+	var buf bytes.Buffer
+	canvas := svg.New(&buf)
+	canvas.Start(w, h)
+	// Opaque white interior = keep fill; transparent outside = clip.
+	canvas.Roundrect(inset, inset, iw-1, ih-1, innerR, innerR, "fill:#FFFFFF")
+	canvas.End()
+
+	img, err := renderSvgBytesAA(buf.Bytes(), cacheKey, barFrameAAScale)
+	if err != nil {
+		log.Printf("getBarInnerMask: %v", err)
+		// Fallback: solid rect inset (no rounded clip).
+		fallback := image.NewRGBA(image.Rect(0, 0, w, h))
+		fillRect(fallback, inset, inset, iw, ih, color.RGBA{255, 255, 255, 255})
+		return fallback
+	}
+	return img
+}
+
+// applyAlphaMask multiplies dst's RGBA by mask alpha so fills follow the
+// rounded interior (and soft AA edge) of the frame.
+func applyAlphaMask(dst, mask *image.RGBA) {
+	if dst == nil || mask == nil {
+		return
+	}
+	b := dst.Bounds().Intersect(mask.Bounds())
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			di := dst.PixOffset(x, y)
+			mi := mask.PixOffset(x, y)
+			ma := uint32(mask.Pix[mi+3])
+			if ma == 0 {
+				dst.Pix[di+0] = 0
+				dst.Pix[di+1] = 0
+				dst.Pix[di+2] = 0
+				dst.Pix[di+3] = 0
+				continue
+			}
+			if ma == 255 {
+				continue
+			}
+			dst.Pix[di+0] = uint8(uint32(dst.Pix[di+0]) * ma / 255)
+			dst.Pix[di+1] = uint8(uint32(dst.Pix[di+1]) * ma / 255)
+			dst.Pix[di+2] = uint8(uint32(dst.Pix[di+2]) * ma / 255)
+			dst.Pix[di+3] = uint8(uint32(dst.Pix[di+3]) * ma / 255)
+		}
+	}
+}
+
+// composeBarChart builds: black AA frame → clipped yellow fills → grey stroke
+// on top so nothing paints outside the rounded frame.
+func composeBarChart(w, h, radius int, paintFills func(layer *image.RGBA, inset, innerW, innerH, innerR int)) *image.RGBA {
+	radius = clampBarRadius(radius, h)
+	inset := barInset
+	innerW := w - 2*inset
+	innerH := h - 2*inset
+	innerR := radius - inset
+	if innerR < 0 {
+		innerR = 0
+	}
+
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	base := getBarOuterFrame(w, h, radius)
+	draw.Draw(img, img.Bounds(), base, image.Point{}, draw.Src)
+
+	if paintFills != nil && innerW > 0 && innerH > 0 {
+		fillLayer := image.NewRGBA(image.Rect(0, 0, w, h))
+		paintFills(fillLayer, inset, innerW, innerH, innerR)
+		applyAlphaMask(fillLayer, getBarInnerMask(w, h, radius, inset))
+		draw.Draw(img, img.Bounds(), fillLayer, image.Point{}, draw.Over)
+	}
+
+	// Stroke last: restores the AA grey edge over any fill that reached it.
+	draw.Draw(img, img.Bounds(), getBarOuterStroke(w, h, radius), image.Point{}, draw.Over)
 	return img
 }
 
@@ -1317,20 +1463,18 @@ const (
 )
 
 // drawCpuBars renders a framed box of vertical bars — one per CPU core — at
-// (x0, y0) with total size w×h. The outer rounded frame is supersampled and
-// cached once per size; yellow fills are sharp rects composited on top.
-// Full composites are also cached on quantized usages.
+// (x0, y0) with total size w×h. Fills are clipped to the rounded interior and
+// the grey stroke is drawn last so nothing sits outside the frame; full
+// height fills follow the top inner corner curve via the clip mask.
 func drawCpuBars(frame *image.RGBA, x0, y0, w, h int, usages []float64) {
 	numCores := len(usages)
 	if numCores == 0 || w <= 0 || h <= 0 {
 		return
 	}
 
-	// Build a cache key from usage buckets (5% granularity) so steady load
-	// reuses the rendered image instead of re-compositing every frame.
-	// "v4" bumps after AA outer-frame + separate frame cache.
+	// "v5": inner clip mask + stroke-on-top (no fill outside rounded frame).
 	var keyBuf strings.Builder
-	keyBuf.WriteString("gen:cpubars:v4:")
+	keyBuf.WriteString("gen:cpubars:v5:")
 	keyBuf.WriteString(strconv.Itoa(w))
 	keyBuf.WriteByte('x')
 	keyBuf.WriteString(strconv.Itoa(h))
@@ -1345,49 +1489,44 @@ func drawCpuBars(frame *image.RGBA, x0, y0, w, h int, usages []float64) {
 	img, cached := imageCache[cacheKey]
 	imageCacheMu.RUnlock()
 	if !cached {
-		// Cached AA outer frame (black fill + soft grey stroke).
-		r := hbarRadius
-		if r > h/2 {
-			r = h / 2
-		}
-		base := getBarOuterFrame(w, h, r)
-		img = image.NewRGBA(image.Rect(0, 0, w, h))
-		draw.Draw(img, img.Bounds(), base, image.Point{}, draw.Src)
-
-		// Pure yellow columns with a 1px gap; sharp fills (no AA needed).
-		const gap = 1
-		avail := w - gap*(numCores-1)
-		if avail < numCores {
-			avail = w
-		}
-		for i := 0; i < numCores; i++ {
-			barStart := i * avail / numCores
-			barEnd := (i + 1) * avail / numCores
-			barW := barEnd - barStart
-			if barW < 1 {
-				continue
+		img = composeBarChart(w, h, hbarRadius, func(layer *image.RGBA, inset, innerW, innerH, innerR int) {
+			const gap = 1
+			avail := innerW - gap*(numCores-1)
+			if avail < numCores {
+				avail = innerW
 			}
-			bx := barStart + i*gap
-			u := usages[i]
-			if u < 0 {
-				u = 0
-			} else if u > 100 {
-				u = 100
-			}
-			fillH := 0
-			if u > 0 {
-				fillH = int(math.Round(float64(h) * u / 100.0))
-				if fillH < 1 {
-					fillH = 1
+			for i := 0; i < numCores; i++ {
+				barStart := i * avail / numCores
+				barEnd := (i + 1) * avail / numCores
+				barW := barEnd - barStart
+				if barW < 1 {
+					continue
 				}
-				if fillH > h {
-					fillH = h
+				bx := inset + barStart + i*gap
+				u := usages[i]
+				if u < 0 {
+					u = 0
+				} else if u > 100 {
+					u = 100
+				}
+				fillH := 0
+				if u > 0 {
+					fillH = int(math.Round(float64(innerH) * u / 100.0))
+					if fillH < 1 {
+						fillH = 1
+					}
+					if fillH > innerH {
+						fillH = innerH
+					}
+				}
+				if fillH > 0 {
+					// From bottom of the inner box; top edge is clipped to the
+					// rounded mask so full bars match the frame's top corners.
+					fy := inset + (innerH - fillH)
+					fillRect(layer, bx, fy, barW, fillH, PCAT_YELLOW)
 				}
 			}
-			if fillH > 0 {
-				fillRect(img, bx, h-fillH, barW, fillH, PCAT_YELLOW)
-			}
-		}
+		})
 
 		imageCacheMu.Lock()
 		imageCache[cacheKey] = img
@@ -1396,11 +1535,11 @@ func drawCpuBars(frame *image.RGBA, x0, y0, w, h int, usages []float64) {
 	copyImageToImageAt(frame, img, x0, y0)
 }
 
-// drawDiskBars renders onboard (root) and optional NVMe usage as horizontal
-// bars with no text labels. When NVMe is present the width is split left/right
-// with a small gap; when absent the root bar takes the full width. Height
-// should match the mem hbar. Works the same on OpenWrt and Debian — presence
-// comes from DiskNvmePresent set by collectDiskUsage.
+// drawDiskBars renders onboard (root/eMMC) and optional NVMe usage as
+// horizontal bars. When NVMe is present the width is split left/right with a
+// small gap and tiny "eMMC"/"NVMe" labels are centered in each bar; when
+// absent a single full-width eMMC bar is shown. Height should match the mem
+// hbar. Works the same on OpenWrt and Debian.
 func drawDiskBars(frame *image.RGBA, x0, y0, w, h int) {
 	if w <= 0 || h <= 0 {
 		return
@@ -1436,17 +1575,70 @@ func drawDiskBars(frame *image.RGBA, x0, y0, w, h int) {
 		rightW := w - gap - leftW
 		drawHBar(frame, x0, y0, leftW, h, rootPct, "")
 		drawHBar(frame, x0+leftW+gap, y0, rightW, h, nvmePct, "")
+		drawTinyBarLabel(frame, x0+leftW/2, y0+h/2, "eMMC")
+		drawTinyBarLabel(frame, x0+leftW+gap+rightW/2, y0+h/2, "NVMe")
 		return
 	}
 	// No NVMe: single onboard bar uses the full slot.
 	drawHBar(frame, x0, y0, w, h, rootPct, "")
+	drawTinyBarLabel(frame, x0+w/2, y0+h/2, "eMMC")
 }
 
-// drawHBar renders a framed horizontal progress bar at (x0, y0) of size w×h:
-// a grey rounded track with a yellow rounded fill whose width is proportional
-// to pct (0-100). Outer frame is the shared AA-cached frame; yellow fill is
-// supersampled when rounded. Cached on quantized percentage. Optional label
-// is drawn centered with a 1px black aura (e.g. "3.2/16GB").
+// drawTinyBarLabel centers a tiny-font label with a 1px black aura so it stays
+// readable on both yellow fill and empty track (disk bar names).
+func drawTinyBarLabel(frame *image.RGBA, cx, cy int, label string) {
+	if frame == nil || label == "" {
+		return
+	}
+	face, _, err := getFontFace("tiny")
+	if err != nil {
+		face, _, err = getFontFace("micro")
+	}
+	if err != nil {
+		return
+	}
+	drawTextWithAura(frame, label, cx, cy, face, PCAT_WHITE, PCAT_BLACK)
+}
+
+// hbarFillSVG builds a yellow fill for the horizontal bar.
+// full=true → all corners use radius fr (seats into the rounded frame at 100%).
+// full=false → left corners rounded to match the track; right edge is sharp.
+func hbarFillSVG(canvasW, canvasH, x, y, fillW, fillH, fr int, full bool) []byte {
+	var buf bytes.Buffer
+	canvas := svg.New(&buf)
+	canvas.Start(canvasW, canvasH)
+	if fillW <= 0 || fillH <= 0 {
+		canvas.End()
+		return buf.Bytes()
+	}
+	if full || fr <= 0 {
+		canvas.Roundrect(x, y, fillW, fillH, fr, fr, "fill:"+barFillHex)
+		canvas.End()
+		return buf.Bytes()
+	}
+	// Left-rounded, right-sharp (y grows downward).
+	x0, y0 := x, y
+	x1, y1 := x+fillW, y+fillH
+	r := fr
+	d := fmt.Sprintf(
+		"M%d %d H%d V%d H%d A%d %d 0 0 1 %d %d V%d A%d %d 0 0 1 %d %d Z",
+		x0+r, y0,
+		x1,
+		y1,
+		x0+r,
+		r, r, x0, y1-r,
+		y0+r,
+		r, r, x0+r, y0,
+	)
+	canvas.Path(d, "fill:"+barFillHex)
+	canvas.End()
+	return buf.Bytes()
+}
+
+// drawHBar renders a framed horizontal progress bar at (x0, y0) of size w×h.
+// Yellow fill is rounded to the inner corner radius (right edge matches the
+// frame when full), clipped to the interior, with the grey stroke drawn last.
+// Optional label is centered with a 1px black aura (e.g. "3.2/16GB").
 func drawHBar(frame *image.RGBA, x0, y0, w, h int, pct float64, label string) {
 	if w <= 0 || h <= 0 {
 		return
@@ -1457,61 +1649,56 @@ func drawHBar(frame *image.RGBA, x0, y0, w, h int, pct float64, label string) {
 		pct = 100
 	}
 
-	bucket := int(pct) // 1% granularity is plenty and still caches well
-	// "v2" after AA outer frame + supersampled fill.
-	cacheKey := "gen:hbar:v2:" + strconv.Itoa(w) + "x" + strconv.Itoa(h) + ":" + strconv.Itoa(bucket)
+	bucket := int(pct)
+	// "v3": inner mask clip + stroke-on-top + matching inner fill radius.
+	cacheKey := "gen:hbar:v3:" + strconv.Itoa(w) + "x" + strconv.Itoa(h) + ":" + strconv.Itoa(bucket)
 
 	imageCacheMu.RLock()
 	img, cached := imageCache[cacheKey]
 	imageCacheMu.RUnlock()
 	if !cached {
-		r := hbarRadius
-		if r > h/2 {
-			r = h / 2
-		}
-		base := getBarOuterFrame(w, h, r)
-		img = image.NewRGBA(image.Rect(0, 0, w, h))
-		draw.Draw(img, img.Bounds(), base, image.Point{}, draw.Src)
-
-		// Fill from the left, inset by 1px so the AA grey frame stays visible.
-		inset := 1
-		innerW := w - 2*inset
-		innerH := h - 2*inset
-		fillW := 0
-		if pct > 0 && innerW > 0 {
-			fillW = int(math.Round(float64(innerW) * pct / 100.0))
-			if fillW < 1 {
-				fillW = 1
+		img = composeBarChart(w, h, hbarRadius, func(layer *image.RGBA, inset, innerW, innerH, innerR int) {
+			fillW := 0
+			if pct > 0 && innerW > 0 {
+				fillW = int(math.Round(float64(innerW) * pct / 100.0))
+				if fillW < 1 {
+					fillW = 1
+				}
+				if fillW > innerW {
+					fillW = innerW
+				}
 			}
-			if fillW > innerW {
-				fillW = innerW
+			if fillW <= 0 || innerH <= 0 {
+				return
 			}
-		}
-		if fillW > 0 && innerH > 0 {
-			fr := r - inset
-			if fr < 0 {
-				fr = 0
-			}
+			// Full (100%): all corners match the frame's inner radius.
+			// Partial: left seats into the track curve; right edge is always
+			// sharp so mid-track ends don't look inconsistently rounded.
+			full := fillW >= innerW
+			fr := innerR
 			if fr > fillW/2 {
 				fr = fillW / 2
 			}
-			// Supersample the rounded yellow fill so corners match the AA frame.
-			var buf bytes.Buffer
-			canvas := svg.New(&buf)
-			canvas.Start(w, h)
-			canvas.Roundrect(inset, inset, fillW, innerH, fr, fr, "fill:"+barFillHex)
-			canvas.End()
-			fillKey := "gen:hbarfill:aa" + strconv.Itoa(barFrameAAScale) + ":" +
-				strconv.Itoa(w) + "x" + strconv.Itoa(h) + ":" + strconv.Itoa(fillW) + ":r" + strconv.Itoa(fr)
-			fillImg, err := renderSvgBytesAA(buf.Bytes(), fillKey, barFrameAAScale)
-			if err != nil {
-				// Fallback: sharp rect if SVG AA fails.
-				fillRect(img, inset, inset, fillW, innerH, PCAT_YELLOW)
-			} else {
-				// Over so transparent corners of the fill layer keep the frame.
-				draw.Draw(img, img.Bounds(), fillImg, image.Point{}, draw.Over)
+			if fr > innerH/2 {
+				fr = innerH / 2
 			}
-		}
+
+			svgData := hbarFillSVG(w, h, inset, inset, fillW, innerH, fr, full)
+			shape := "full"
+			if !full {
+				shape = "sharpR"
+			}
+			fillKey := "gen:hbarfill:aa" + strconv.Itoa(barFrameAAScale) + ":" +
+				strconv.Itoa(w) + "x" + strconv.Itoa(h) +
+				":fw" + strconv.Itoa(fillW) + ":fh" + strconv.Itoa(innerH) +
+				":r" + strconv.Itoa(fr) + ":i" + strconv.Itoa(inset) + ":" + shape
+			fillImg, err := renderSvgBytesAA(svgData, fillKey, barFrameAAScale)
+			if err != nil {
+				fillRect(layer, inset, inset, fillW, innerH, PCAT_YELLOW)
+			} else {
+				draw.Draw(layer, layer.Bounds(), fillImg, image.Point{}, draw.Over)
+			}
+		})
 
 		imageCacheMu.Lock()
 		imageCache[cacheKey] = img
@@ -1520,15 +1707,11 @@ func drawHBar(frame *image.RGBA, x0, y0, w, h int, pct float64, label string) {
 	copyImageToImageAt(frame, img, x0, y0)
 
 	if label != "" {
-		// One step up from "tiny" (12) → "unit" (15) so used/total GB reads
-		// clearly inside the taller mem frame.
 		face, _, err := getFontFace("unit")
 		if err != nil {
 			face, _, err = getFontFace("tiny")
 		}
 		if err == nil {
-			// Center of the bar; 1px black aura keeps white text legible on
-			// both the yellow fill and the empty black track.
 			drawTextWithAura(frame, label, x0+w/2, y0+h/2, face, PCAT_WHITE, PCAT_BLACK)
 		}
 	}
