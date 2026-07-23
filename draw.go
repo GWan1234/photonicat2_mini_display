@@ -346,8 +346,8 @@ func loadImage(filePath string) (*image.RGBA, int, int, error) {
 			return nil, 0, 0, err
 		}
 	case ".svg":
-		// Check if SVG is already cached as rendered image
-		cacheKey := filePath + "_rendered"
+		// Supersampled AA cache key (old 1:1 keys are intentionally unused).
+		cacheKey := filePath + "_rendered_aa" + strconv.Itoa(barFrameAAScale)
 		imageCacheMu.RLock()
 		cachedSvg, svgCached := imageCache[cacheKey]
 		imageCacheMu.RUnlock()
@@ -355,35 +355,24 @@ func loadImage(filePath string) (*image.RGBA, int, int, error) {
 			bounds := cachedSvg.Bounds()
 			return cachedSvg, bounds.Dx(), bounds.Dy(), nil
 		}
-		
-		// Read the entire SVG file.
+
 		svgData, err := io.ReadAll(f)
 		if err != nil {
 			return nil, 0, 0, err
 		}
-		// Decode the SVG using oksvg.
 		icon, err := oksvg.ReadIconStream(bytes.NewReader(svgData))
 		if err != nil {
 			return nil, 0, 0, err
 		}
-		// Determine intrinsic dimensions.
 		w := int(icon.ViewBox.W)
 		h := int(icon.ViewBox.H)
-		// Create an RGBA image to serve as the rendering canvas.
-		rgba := image.NewRGBA(image.Rect(0, 0, w, h))
-		// Clear the canvas with a fully transparent color.
-		draw.Draw(rgba, rgba.Bounds(), image.NewUniform(color.RGBA{0, 0, 0, 0}), image.Point{}, draw.Src)
-		// Set the target dimensions.
-		icon.SetTarget(0, 0, float64(w), float64(h))
-		// Create a scanner and dasher for rendering.
-		scanner := rasterx.NewScannerGV(w, h, rgba, rgba.Bounds())
-		dasher := rasterx.NewDasher(w, h, scanner)
-		// Render the SVG onto the RGBA image.
-		icon.Draw(dasher, 1.0)
-		// Cache and return the rendered image.
+		if w <= 0 || h <= 0 {
+			return nil, 0, 0, fmt.Errorf("svg %s: invalid viewBox", filePath)
+		}
+		rgba := rasterizeIconAA(icon, w, h, barFrameAAScale)
 		imageCacheMu.Lock()
 		imageCache[cacheKey] = rgba
-		imageCache[filePath] = rgba // Also cache with original path for fast lookup
+		imageCache[filePath] = rgba
 		imageCacheMu.Unlock()
 		return rgba, w, h, nil
 	default:
@@ -700,42 +689,33 @@ func testClock(frame *image.RGBA) {
     drawText(frame, timeStr, 0, 30, face, randomColor, false)
 }
 
-func drawSVG(frame *image.RGBA, svgPath string, x0, y0, targetWidth, targetHeight int) error {
-	// If target dimensions are zero, we need to load the SVG to obtain its intrinsic size.
-	if targetWidth == 0 || targetHeight == 0 {
-		svgFile, err := os.Open(svgPath)
-		if err != nil {
-			return err
-		}
-		defer svgFile.Close()
-		
-		svgData, err := io.ReadAll(svgFile)
-		if err != nil {
-			return err
-		}
-		
-		icon, err := oksvg.ReadIconStream(bytes.NewReader(svgData))
-		if err != nil {
-			return err
-		}
-		if targetWidth == 0 {
-			targetWidth = int(icon.ViewBox.W)
-		}
-		if targetHeight == 0 {
-			targetHeight = int(icon.ViewBox.H)
-		}
+// rasterizeIconAA draws an oksvg icon at destW×destH with optional
+// supersample antialiasing (aaScale≥2 → render big, box-filter down).
+func rasterizeIconAA(icon *oksvg.SvgIcon, destW, destH, aaScale int) *image.RGBA {
+	if aaScale < 1 {
+		aaScale = 1
 	}
-	
-	// Build a cache key: svgPath + "_" + targetWidth + "_" + targetHeight.
-	cacheKey := fmt.Sprintf("%s_%d_%d", svgPath, targetWidth, targetHeight)
-	
-	// Check if we already have a cached rendered image.
-	if cachedImg, ok := svgCache[cacheKey]; ok {
-		copyImageToImageAt(frame, cachedImg, x0, y0)
-		return nil
+	if destW < 1 {
+		destW = 1
 	}
+	if destH < 1 {
+		destH = 1
+	}
+	bigW, bigH := destW*aaScale, destH*aaScale
+	rgba := image.NewRGBA(image.Rect(0, 0, bigW, bigH))
+	// Transparent clear (Pix is already zero / alpha 0).
+	icon.SetTarget(0, 0, float64(bigW), float64(bigH))
+	scanner := rasterx.NewScannerGV(bigW, bigH, rgba, rgba.Bounds())
+	dasher := rasterx.NewDasher(bigW, bigH, scanner)
+	icon.Draw(dasher, 1.0)
+	if aaScale == 1 {
+		return rgba
+	}
+	return downscaleBox(rgba, destW, destH)
+}
 
-	// Not in cache, so load and render the SVG.
+func drawSVG(frame *image.RGBA, svgPath string, x0, y0, targetWidth, targetHeight int) error {
+	// Resolve intrinsic size when the caller leaves a dimension at 0.
 	svgFile, err := os.Open(svgPath)
 	if err != nil {
 		return err
@@ -751,26 +731,26 @@ func drawSVG(frame *image.RGBA, svgPath string, x0, y0, targetWidth, targetHeigh
 	if err != nil {
 		return err
 	}
+	if targetWidth == 0 {
+		targetWidth = int(icon.ViewBox.W)
+	}
+	if targetHeight == 0 {
+		targetHeight = int(icon.ViewBox.H)
+	}
+	if targetWidth < 1 || targetHeight < 1 {
+		return fmt.Errorf("drawSVG %s: invalid target %dx%d", svgPath, targetWidth, targetHeight)
+	}
 
-	// Set the target dimensions for the SVG rendering.
-	icon.SetTarget(0, 0, float64(targetWidth), float64(targetHeight))
+	// Cache key includes AA scale so old 1:1 bitmaps are not reused.
+	cacheKey := fmt.Sprintf("%s_%d_%d_aa%d", svgPath, targetWidth, targetHeight, barFrameAAScale)
+	if cachedImg, ok := svgCache[cacheKey]; ok {
+		copyImageToImageAt(frame, cachedImg, x0, y0)
+		return nil
+	}
 
-	// Create an RGBA image to serve as the rendering canvas.
-	img := image.NewRGBA(image.Rect(0, 0, targetWidth, targetHeight))
-
-	// Set up the rasterizer context.
-	scanner := rasterx.NewScannerGV(targetWidth, targetHeight, img, img.Bounds())
-	dasher := rasterx.NewDasher(targetWidth, targetHeight, scanner)
-
-	// Render the SVG onto the image.
-	icon.Draw(dasher, 1.0)
-
-	// Cache the rendered image.
+	img := rasterizeIconAA(icon, targetWidth, targetHeight, barFrameAAScale)
 	svgCache[cacheKey] = img
-
-	// Copy the rendered image into the frame buffer at the specified offset.
 	copyImageToImageAt(frame, img, x0, y0)
-
 	return nil
 }
 
@@ -779,23 +759,152 @@ func drawSVG(frame *image.RGBA, svgPath string, x0, y0, targetWidth, targetHeigh
 // filesystem. If cacheKey is non-empty the rendered image is stored in
 // imageCache under that key for reuse.
 func renderSvgBytes(svgData []byte, cacheKey string) (*image.RGBA, error) {
+	return renderSvgBytesAA(svgData, cacheKey, 1)
+}
+
+// renderSvgBytesAA rasterizes SVG at aaScale× resolution then box-filters
+// down to the intrinsic size. aaScale>=2 softens curved strokes (outer bar
+// frames) via supersampling; aaScale==1 is a plain 1:1 rasterize.
+func renderSvgBytesAA(svgData []byte, cacheKey string, aaScale int) (*image.RGBA, error) {
+	if aaScale < 1 {
+		aaScale = 1
+	}
+	if cacheKey != "" {
+		imageCacheMu.RLock()
+		if cached, ok := imageCache[cacheKey]; ok {
+			imageCacheMu.RUnlock()
+			return cached, nil
+		}
+		imageCacheMu.RUnlock()
+	}
 	icon, err := oksvg.ReadIconStream(bytes.NewReader(svgData))
 	if err != nil {
 		return nil, err
 	}
 	w := int(icon.ViewBox.W)
 	h := int(icon.ViewBox.H)
-	rgba := image.NewRGBA(image.Rect(0, 0, w, h))
-	icon.SetTarget(0, 0, float64(w), float64(h))
-	scanner := rasterx.NewScannerGV(w, h, rgba, rgba.Bounds())
-	dasher := rasterx.NewDasher(w, h, scanner)
+	if w <= 0 || h <= 0 {
+		return nil, fmt.Errorf("renderSvgBytesAA: invalid viewBox %dx%d", w, h)
+	}
+	bigW, bigH := w*aaScale, h*aaScale
+	rgba := image.NewRGBA(image.Rect(0, 0, bigW, bigH))
+	icon.SetTarget(0, 0, float64(bigW), float64(bigH))
+	scanner := rasterx.NewScannerGV(bigW, bigH, rgba, rgba.Bounds())
+	dasher := rasterx.NewDasher(bigW, bigH, scanner)
 	icon.Draw(dasher, 1.0)
+
+	out := rgba
+	if aaScale > 1 {
+		out = downscaleBox(rgba, w, h)
+	}
 	if cacheKey != "" {
 		imageCacheMu.Lock()
-		imageCache[cacheKey] = rgba
+		imageCache[cacheKey] = out
 		imageCacheMu.Unlock()
 	}
-	return rgba, nil
+	return out, nil
+}
+
+// downscaleBox averages src into destW×destH with a box filter (used for
+// supersample antialiasing of SVG strokes).
+func downscaleBox(src *image.RGBA, destW, destH int) *image.RGBA {
+	sb := src.Bounds()
+	srcW, srcH := sb.Dx(), sb.Dy()
+	if destW <= 0 || destH <= 0 || srcW <= 0 || srcH <= 0 {
+		return image.NewRGBA(image.Rect(0, 0, destW, destH))
+	}
+	out := image.NewRGBA(image.Rect(0, 0, destW, destH))
+	// Integer box sizes; leftover edge pixels are included in the last cell.
+	for dy := 0; dy < destH; dy++ {
+		y0 := dy * srcH / destH
+		y1 := (dy + 1) * srcH / destH
+		if y1 <= y0 {
+			y1 = y0 + 1
+		}
+		for dx := 0; dx < destW; dx++ {
+			x0 := dx * srcW / destW
+			x1 := (dx + 1) * srcW / destW
+			if x1 <= x0 {
+				x1 = x0 + 1
+			}
+			var rSum, gSum, bSum, aSum, n uint32
+			for y := y0; y < y1; y++ {
+				for x := x0; x < x1; x++ {
+					off := src.PixOffset(sb.Min.X+x, sb.Min.Y+y)
+					rSum += uint32(src.Pix[off+0])
+					gSum += uint32(src.Pix[off+1])
+					bSum += uint32(src.Pix[off+2])
+					aSum += uint32(src.Pix[off+3])
+					n++
+				}
+			}
+			if n == 0 {
+				n = 1
+			}
+			off := out.PixOffset(dx, dy)
+			out.Pix[off+0] = uint8(rSum / n)
+			out.Pix[off+1] = uint8(gSum / n)
+			out.Pix[off+2] = uint8(bSum / n)
+			out.Pix[off+3] = uint8(aSum / n)
+		}
+	}
+	return out
+}
+
+// barFrameAAScale is the supersample factor for outer chart frames (2× is a
+// good balance of edge smoothness vs cost on the small LCD).
+const barFrameAAScale = 2
+
+// getBarOuterFrame returns a cached anti-aliased outer frame: black fill +
+// thin grey rounded stroke. Shared by CPU bars and mem/disk hbars so the
+// expensive supersampled rasterize runs once per (w,h,radius).
+func getBarOuterFrame(w, h, radius int) *image.RGBA {
+	if radius > h/2 {
+		radius = h / 2
+	}
+	if radius < 0 {
+		radius = 0
+	}
+	cacheKey := "gen:barframe:aa" + strconv.Itoa(barFrameAAScale) + ":" +
+		strconv.Itoa(w) + "x" + strconv.Itoa(h) + ":r" + strconv.Itoa(radius)
+
+	imageCacheMu.RLock()
+	if img, ok := imageCache[cacheKey]; ok {
+		imageCacheMu.RUnlock()
+		return img
+	}
+	imageCacheMu.RUnlock()
+
+	var buf bytes.Buffer
+	canvas := svg.New(&buf)
+	canvas.Start(w, h)
+	// Half-pixel inset keeps the 1px stroke from being clipped at the edge.
+	canvas.Roundrect(0, 0, w-1, h-1, radius, radius,
+		"fill:"+barBgHex+";stroke:"+barTrackHex+";stroke-width:1")
+	canvas.End()
+
+	img, err := renderSvgBytesAA(buf.Bytes(), cacheKey, barFrameAAScale)
+	if err != nil {
+		log.Printf("getBarOuterFrame: %v", err)
+		// Fallback empty black rect so callers still have a buffer.
+		fallback := image.NewRGBA(image.Rect(0, 0, w, h))
+		draw.Draw(fallback, fallback.Bounds(), image.NewUniform(PCAT_BLACK), image.Point{}, draw.Src)
+		return fallback
+	}
+	return img
+}
+
+// fillRect draws a solid axis-aligned rectangle (no AA — fills are sharp on
+// purpose; only the outer frame is supersampled).
+func fillRect(dst *image.RGBA, x, y, w, h int, c color.RGBA) {
+	if w <= 0 || h <= 0 || dst == nil {
+		return
+	}
+	rect := image.Rect(x, y, x+w, y+h).Intersect(dst.Bounds())
+	if rect.Empty() {
+		return
+	}
+	draw.Draw(dst, rect, image.NewUniform(c), image.Point{}, draw.Src)
 }
 
 // cropImageAt crops the given src image starting at (x0, y0) with the specified width and height.
@@ -1208,10 +1317,9 @@ const (
 )
 
 // drawCpuBars renders a framed box of vertical bars — one per CPU core — at
-// (x0, y0) with total size w×h. Bars are pure yellow fills (no per-bar
-// frames) with a 1px gap between cores, rising from the bottom in proportion
-// to each core's usage (0-100). Cached keyed on quantized usages so it only
-// re-rasterizes when the reading actually changes.
+// (x0, y0) with total size w×h. The outer rounded frame is supersampled and
+// cached once per size; yellow fills are sharp rects composited on top.
+// Full composites are also cached on quantized usages.
 func drawCpuBars(frame *image.RGBA, x0, y0, w, h int, usages []float64) {
 	numCores := len(usages)
 	if numCores == 0 || w <= 0 || h <= 0 {
@@ -1219,10 +1327,10 @@ func drawCpuBars(frame *image.RGBA, x0, y0, w, h int, usages []float64) {
 	}
 
 	// Build a cache key from usage buckets (5% granularity) so steady load
-	// reuses the rendered image instead of rasterizing every frame.
-	// "v3" bumps the key after the 1px-gap + shared-radius layout change.
+	// reuses the rendered image instead of re-compositing every frame.
+	// "v4" bumps after AA outer-frame + separate frame cache.
 	var keyBuf strings.Builder
-	keyBuf.WriteString("gen:cpubars:v3:")
+	keyBuf.WriteString("gen:cpubars:v4:")
 	keyBuf.WriteString(strconv.Itoa(w))
 	keyBuf.WriteByte('x')
 	keyBuf.WriteString(strconv.Itoa(h))
@@ -1237,25 +1345,20 @@ func drawCpuBars(frame *image.RGBA, x0, y0, w, h int, usages []float64) {
 	img, cached := imageCache[cacheKey]
 	imageCacheMu.RUnlock()
 	if !cached {
-		var buf bytes.Buffer
-		canvas := svg.New(&buf)
-		canvas.Start(w, h)
-
-		// Outer frame: same corner radius as the mem hbar.
+		// Cached AA outer frame (black fill + soft grey stroke).
 		r := hbarRadius
 		if r > h/2 {
 			r = h / 2
 		}
-		canvas.Roundrect(0, 0, w-1, h-1, r, r,
-			"fill:"+barBgHex+";stroke:"+barTrackHex+";stroke-width:1")
+		base := getBarOuterFrame(w, h, r)
+		img = image.NewRGBA(image.Rect(0, 0, w, h))
+		draw.Draw(img, img.Bounds(), base, image.Point{}, draw.Src)
 
-		// Pure yellow columns with a 1px gap between cores; no padding from
-		// the outer frame edge. Width is split evenly across the bar slots
-		// after reserving the gaps so leftover pixels are distributed.
+		// Pure yellow columns with a 1px gap; sharp fills (no AA needed).
 		const gap = 1
 		avail := w - gap*(numCores-1)
 		if avail < numCores {
-			avail = w // too narrow for gaps; fall back to packed layout
+			avail = w
 		}
 		for i := 0; i < numCores; i++ {
 			barStart := i * avail / numCores
@@ -1271,7 +1374,6 @@ func drawCpuBars(frame *image.RGBA, x0, y0, w, h int, usages []float64) {
 			} else if u > 100 {
 				u = 100
 			}
-			// Any non-zero usage draws at least 1px so tiny loads still show.
 			fillH := 0
 			if u > 0 {
 				fillH = int(math.Round(float64(h) * u / 100.0))
@@ -1283,19 +1385,13 @@ func drawCpuBars(frame *image.RGBA, x0, y0, w, h int, usages []float64) {
 				}
 			}
 			if fillH > 0 {
-				fy := h - fillH
-				// Sharp rectangles — no radius, no stroke, no inset.
-				canvas.Rect(bx, fy, barW, fillH, "fill:"+barFillHex)
+				fillRect(img, bx, h-fillH, barW, fillH, PCAT_YELLOW)
 			}
 		}
-		canvas.End()
 
-		var err error
-		img, err = renderSvgBytes(buf.Bytes(), cacheKey)
-		if err != nil {
-			log.Printf("drawCpuBars: render error: %v", err)
-			return
-		}
+		imageCacheMu.Lock()
+		imageCache[cacheKey] = img
+		imageCacheMu.Unlock()
 	}
 	copyImageToImageAt(frame, img, x0, y0)
 }
@@ -1348,10 +1444,9 @@ func drawDiskBars(frame *image.RGBA, x0, y0, w, h int) {
 
 // drawHBar renders a framed horizontal progress bar at (x0, y0) of size w×h:
 // a grey rounded track with a yellow rounded fill whose width is proportional
-// to pct (0-100). Corner radius matches the boot progress bar. Cached on the
-// quantized percentage. When label is non-empty it is drawn centered over the
-// bar in a small font with a 1px black aura so it stays readable on both the
-// yellow fill and the empty track (e.g. "3.2/16GB").
+// to pct (0-100). Outer frame is the shared AA-cached frame; yellow fill is
+// supersampled when rounded. Cached on quantized percentage. Optional label
+// is drawn centered with a 1px black aura (e.g. "3.2/16GB").
 func drawHBar(frame *image.RGBA, x0, y0, w, h int, pct float64, label string) {
 	if w <= 0 || h <= 0 {
 		return
@@ -1363,31 +1458,25 @@ func drawHBar(frame *image.RGBA, x0, y0, w, h int, pct float64, label string) {
 	}
 
 	bucket := int(pct) // 1% granularity is plenty and still caches well
-	cacheKey := "gen:hbar:" + strconv.Itoa(w) + "x" + strconv.Itoa(h) + ":" + strconv.Itoa(bucket)
+	// "v2" after AA outer frame + supersampled fill.
+	cacheKey := "gen:hbar:v2:" + strconv.Itoa(w) + "x" + strconv.Itoa(h) + ":" + strconv.Itoa(bucket)
 
 	imageCacheMu.RLock()
 	img, cached := imageCache[cacheKey]
 	imageCacheMu.RUnlock()
 	if !cached {
-		var buf bytes.Buffer
-		canvas := svg.New(&buf)
-		canvas.Start(w, h)
-
 		r := hbarRadius
 		if r > h/2 {
-			r = h / 2 // keep corners sane for short bars
+			r = h / 2
 		}
-		// Track spans the full width: black bg with a thin grey frame outline
-		// (iStat-menu style) so the bar edge reads against the page. Inset by
-		// half a pixel so the 1px stroke isn't clipped by the canvas edge.
-		canvas.Roundrect(0, 0, w-1, h-1, r, r,
-			"fill:"+barBgHex+";stroke:"+barTrackHex+";stroke-width:1")
-		// Fill from the left, inset by 1px so the grey frame stays visible
-		// around the yellow (iStat-menu style).
+		base := getBarOuterFrame(w, h, r)
+		img = image.NewRGBA(image.Rect(0, 0, w, h))
+		draw.Draw(img, img.Bounds(), base, image.Point{}, draw.Src)
+
+		// Fill from the left, inset by 1px so the AA grey frame stays visible.
 		inset := 1
 		innerW := w - 2*inset
 		innerH := h - 2*inset
-		// Any non-zero pct draws at least 1px of fill (same rule as CPU bars).
 		fillW := 0
 		if pct > 0 && innerW > 0 {
 			fillW = int(math.Round(float64(innerW) * pct / 100.0))
@@ -1406,16 +1495,27 @@ func drawHBar(frame *image.RGBA, x0, y0, w, h int, pct float64, label string) {
 			if fr > fillW/2 {
 				fr = fillW / 2
 			}
+			// Supersample the rounded yellow fill so corners match the AA frame.
+			var buf bytes.Buffer
+			canvas := svg.New(&buf)
+			canvas.Start(w, h)
 			canvas.Roundrect(inset, inset, fillW, innerH, fr, fr, "fill:"+barFillHex)
+			canvas.End()
+			fillKey := "gen:hbarfill:aa" + strconv.Itoa(barFrameAAScale) + ":" +
+				strconv.Itoa(w) + "x" + strconv.Itoa(h) + ":" + strconv.Itoa(fillW) + ":r" + strconv.Itoa(fr)
+			fillImg, err := renderSvgBytesAA(buf.Bytes(), fillKey, barFrameAAScale)
+			if err != nil {
+				// Fallback: sharp rect if SVG AA fails.
+				fillRect(img, inset, inset, fillW, innerH, PCAT_YELLOW)
+			} else {
+				// Over so transparent corners of the fill layer keep the frame.
+				draw.Draw(img, img.Bounds(), fillImg, image.Point{}, draw.Over)
+			}
 		}
-		canvas.End()
 
-		var err error
-		img, err = renderSvgBytes(buf.Bytes(), cacheKey)
-		if err != nil {
-			log.Printf("drawHBar: render error: %v", err)
-			return
-		}
+		imageCacheMu.Lock()
+		imageCache[cacheKey] = img
+		imageCacheMu.Unlock()
 	}
 	copyImageToImageAt(frame, img, x0, y0)
 
@@ -1494,96 +1594,151 @@ func renderAndCache(buf *bytes.Buffer, cacheKey string, frame *image.RGBA, x0, y
 	copyImageToImageAt(frame, img, x0, y0)
 }
 
+// batteryBodyRadius is a modest corner radius so the top-bar battery reads
+// soft without looking like a capsule.
+const batteryBodyRadius = 3
+
+// drawBattery paints the top-bar battery glyph: AA rounded body + nub, SOC
+// empty-region shade (preserving edge alpha), percent text, optional bolt.
+// Results are cached per size/SOC/charging so the supersample is rare.
 func drawBattery(w, h int, soc float64, isCharging bool, x0, y0 int) *image.RGBA {
-	terminalWidth := 3
-	face, _, err := getFontFace("clock")
-	if err != nil {
-		fmt.Println("Error loading font:", err)
-		return nil
+	if w <= 0 || h <= 0 {
+		return image.NewRGBA(image.Rect(0, 0, 1, 1))
 	}
-	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	if soc < 0 {
+		soc = 0
+	} else if soc > 100 {
+		soc = 100
+	}
+	socBucket := int(soc) // 1% cache granularity matches the label
+
+	cacheKey := "gen:batt:aa" + strconv.Itoa(barFrameAAScale) + ":" +
+		strconv.Itoa(w) + "x" + strconv.Itoa(h) +
+		":s" + strconv.Itoa(socBucket) +
+		":c" + strconv.FormatBool(isCharging)
+	imageCacheMu.RLock()
+	if cached, ok := imageCache[cacheKey]; ok {
+		imageCacheMu.RUnlock()
+		return cached
+	}
+	imageCacheMu.RUnlock()
+
+	terminalWidth := 3
+	terminalH := 6
+	if terminalH > h {
+		terminalH = h
+	}
+	bodyW := w - terminalWidth
+	if bodyW < 1 {
+		bodyW = w
+		terminalWidth = 0
+	}
+
 	var colorMain, colorShaded color.RGBA
 	if soc < 20 {
 		colorMain = PCAT_RED
-	}else{
-		if isCharging {
-			colorMain = PCAT_GREEN
-		}else{
-			colorMain = PCAT_WHITE
-		}
+	} else if isCharging {
+		colorMain = PCAT_GREEN
+	} else {
+		colorMain = PCAT_WHITE
 	}
 	colorShaded = PCAT_GREY
-	
-	drawRect(img, 0, 0, w-terminalWidth, h, colorMain) //main battery part
-	drawRect(img, w-terminalWidth, h/2-3, terminalWidth, 6, colorMain) //terminal part
-	
-	//soc shade
-	startShadeX := int(math.Round((soc / 100.0) * float64(w)))
+
+	r := batteryBodyRadius
+	if r > h/2 {
+		r = h / 2
+	}
+	mainHex := fmt.Sprintf("#%02X%02X%02X", colorMain.R, colorMain.G, colorMain.B)
+
+	// Supersampled rounded body + terminal nub (same AA path as chart frames).
+	var buf bytes.Buffer
+	canvas := svg.New(&buf)
+	canvas.Start(w, h)
+	// Body: slightly inset so the AA stroke of the curve isn't clipped.
+	canvas.Roundrect(0, 0, bodyW-1, h-1, r, r, "fill:"+mainHex)
+	if terminalWidth > 0 {
+		ty := (h - terminalH) / 2
+		tr := 1
+		if tr > terminalH/2 {
+			tr = terminalH / 2
+		}
+		canvas.Roundrect(bodyW, ty, terminalWidth-1, terminalH, tr, tr, "fill:"+mainHex)
+	}
+	canvas.End()
+
+	img, err := renderSvgBytesAA(buf.Bytes(), "", barFrameAAScale)
+	if err != nil {
+		log.Printf("drawBattery SVG: %v", err)
+		img = image.NewRGBA(image.Rect(0, 0, w, h))
+		fillRect(img, 0, 0, bodyW, h, colorMain)
+		if terminalWidth > 0 {
+			fillRect(img, bodyW, h/2-terminalH/2, terminalWidth, terminalH, colorMain)
+		}
+	}
+
+	// Empty capacity: recolour non-transparent pixels from startShadeX rightward
+	// so the AA edge soft-alpha is kept (just tinted grey).
+	startShadeX := int(math.Round((soc / 100.0) * float64(bodyW)))
+	if startShadeX < 0 {
+		startShadeX = 0
+	}
 	if startShadeX < w {
-		for x := startShadeX; x < w-3; x++ { 
-			for y := 0; y < h; y++ { 
-				img.SetRGBA(x, y, colorShaded)
-			}
-		}
-		var terminalX int
-		if startShadeX > w-3{
-			terminalX = startShadeX
-		}else{
-			terminalX = w-3
-		}
-		for x := terminalX; x < w; x++ { 
-			for y := h/2-3; y < h/2+3; y++ { 
-				img.SetRGBA(x, y, colorShaded)
+		for y := 0; y < h; y++ {
+			for x := startShadeX; x < w; x++ {
+				c := img.RGBAAt(x, y)
+				if c.A == 0 {
+					continue
+				}
+				// Premultiplied-ish: keep edge alpha, swap RGB to shaded.
+				img.SetRGBA(x, y, color.RGBA{
+					R: colorShaded.R,
+					G: colorShaded.G,
+					B: colorShaded.B,
+					A: c.A,
+				})
 			}
 		}
 	}
 
-	//draw corners
-	cornerCroods := []struct {X, Y int}{
-		{0, 0},
-		{w-terminalWidth-1, 0},
-		{0, h-1},
-		{w-terminalWidth-1, h-1},
-		{w-1, h/2-3},
-		{w-1, h/2+3-1},
+	face, _, err := getFontFace("clock")
+	if err != nil {
+		fmt.Println("Error loading font:", err)
+		imageCacheMu.Lock()
+		imageCache[cacheKey] = img
+		imageCacheMu.Unlock()
+		return img
 	}
-	
-	for _, coord := range cornerCroods {
-		origColor := img.RGBAAt(coord.X, coord.Y)
-		newColor := color.RGBA{uint8(float64(origColor.R) *0.6), uint8(float64(origColor.G) * 0.6), uint8(float64(origColor.B) *0.6), 255}
-		img.SetRGBA(coord.X, coord.Y, newColor)
-	}
-	
+
 	textColor := PCAT_BLACK
-	chargingBlotWidth := 10
-	//draw text
 	if soc < 20 {
 		textColor = PCAT_WHITE
-	}else{
-		textColor = PCAT_BLACK
 	}
-	batteryText := strconv.Itoa(int(soc))
+	batteryText := strconv.Itoa(socBucket)
+	chargingBlotWidth := 10
 	drawChargingBlot := true
-	if !isCharging || soc == 100 {
+	if !isCharging || socBucket == 100 {
 		chargingBlotWidth = 0
 		drawChargingBlot = false
 	}
-	//drawText(img, batteryText, (w-terminalWidth)/2, -3, face, textColor, true)
-	x, _ := drawText(img, batteryText, (w-terminalWidth-chargingBlotWidth)/2+1, -4, face, textColor, true)
+	tx, _ := drawText(img, batteryText, (bodyW-chargingBlotWidth)/2+1, -4, face, textColor, true)
 	if drawChargingBlot {
 		var chargingBolt *image.RGBA
-		var err error
+		var berr error
 		if soc < 20 {
-			chargingBolt, _, _, err = loadImage(assetsPrefix+"/assets/svg/blotWhite.svg")
-		}else{
-			chargingBolt, _, _, err = loadImage(assetsPrefix+"/assets/svg/blotBlack.svg")
+			chargingBolt, _, _, berr = loadImage(assetsPrefix + "/assets/svg/blotWhite.svg")
+		} else {
+			chargingBolt, _, _, berr = loadImage(assetsPrefix + "/assets/svg/blotBlack.svg")
 		}
-		if err != nil {
-			fmt.Println("Error loading charging bolt:", err)
-			return nil
+		if berr != nil {
+			fmt.Println("Error loading charging bolt:", berr)
+		} else {
+			copyImageToImageAt(img, chargingBolt, tx, 1)
 		}
-		copyImageToImageAt(img, chargingBolt, x, 1)
 	}
+
+	imageCacheMu.Lock()
+	imageCache[cacheKey] = img
+	imageCacheMu.Unlock()
 	return img
 }
 
