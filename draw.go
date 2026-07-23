@@ -1203,14 +1203,13 @@ var (
 
 const (
 	barFrameRadius = 3 // outer frame corner radius for the CPU box
-	barBarRadius   = 2 // per-core vertical bar corner radius
 	hbarRadius     = 5 // horizontal bar corner radius (matches boot progress bar)
 )
 
 // drawCpuBars renders a framed box of vertical bars — one per CPU core — at
-// (x0, y0) with total size w×h. Each bar is a full-height grey track with a
-// yellow fill rising from the bottom in proportion to that core's usage
-// (0-100). The whole thing is cached keyed on the quantized usages so it only
+// (x0, y0) with total size w×h. Bars are pure yellow fills (no per-bar
+// frames, no padding/gap) rising from the bottom in proportion to each
+// core's usage (0-100). Cached keyed on quantized usages so it only
 // re-rasterizes when the reading actually changes.
 func drawCpuBars(frame *image.RGBA, x0, y0, w, h int, usages []float64) {
 	numCores := len(usages)
@@ -1220,8 +1219,10 @@ func drawCpuBars(frame *image.RGBA, x0, y0, w, h int, usages []float64) {
 
 	// Build a cache key from usage buckets (5% granularity) so steady load
 	// reuses the rendered image instead of rasterizing every frame.
+	// "v2" bumps the key so any cached framed/gapped bars from older builds
+	// are not reused after the pure-fill layout change.
 	var keyBuf strings.Builder
-	keyBuf.WriteString("gen:cpubars:")
+	keyBuf.WriteString("gen:cpubars:v2:")
 	keyBuf.WriteString(strconv.Itoa(w))
 	keyBuf.WriteByte('x')
 	keyBuf.WriteString(strconv.Itoa(h))
@@ -1240,65 +1241,29 @@ func drawCpuBars(frame *image.RGBA, x0, y0, w, h int, usages []float64) {
 		canvas := svg.New(&buf)
 		canvas.Start(w, h)
 
-		// Background fill + outer frame: our black bg with a thin grey outline
-		// (iStat-menu style) so the box edge reads against the page.
+		// Background fill + outer frame only (no inner per-bar frames).
 		canvas.Roundrect(0, 0, w-1, h-1, barFrameRadius, barFrameRadius,
 			"fill:"+barBgHex+";stroke:"+barTrackHex+";stroke-width:1")
 
-		// Inner drawing area, inset from the frame so bars don't touch it.
-		padX := 3
-		padY := 3
-		innerX := padX
-		innerY := padY
-		innerW := w - 2*padX
-		innerH := h - 2*padY
-		if innerW <= 0 || innerH <= 0 {
-			canvas.End()
-			renderAndCache(&buf, cacheKey, frame, x0, y0)
-			return
-		}
-
-		// Evenly divide the inner width into numCores columns with a 1px gap
-		// between bars.
-		gap := 1
-		barW := (innerW - gap*(numCores-1)) / numCores
-		if barW < 1 {
-			barW = 1
-		}
-
+		// Pure bars: 0 padding, 0 gap — column edges are adjacent (or share a
+		// pixel boundary via integer division so the full width is covered).
 		for i := 0; i < numCores; i++ {
-			bx := innerX + i*(barW+gap)
-			// Track (full height) behind every bar: black background with a thin
-			// grey frame so the empty part of the bar still shows its edge.
-			canvas.Roundrect(bx, innerY, barW, innerH, barBarRadius, barBarRadius,
-				"fill:"+barBgHex+";stroke:"+barTrackHex+";stroke-width:0.5")
-			// Yellow fill rising from the bottom, inset 1px inside the bar's
-			// frame so the grey edge stays visible around it (iStat-menu look).
+			bx := i * w / numCores
+			barW := (i+1)*w/numCores - bx
+			if barW < 1 {
+				continue
+			}
 			u := usages[i]
 			if u < 0 {
 				u = 0
 			} else if u > 100 {
 				u = 100
 			}
-			fillX := bx + 1
-			fillW := barW - 2
-			if fillW < 1 {
-				fillX = bx
-				fillW = barW
-			}
-			fillTrackH := innerH - 2
-			if fillTrackH < 1 {
-				fillTrackH = innerH
-			}
-			fillH := int(math.Round(float64(fillTrackH) * u / 100.0))
+			fillH := int(math.Round(float64(h) * u / 100.0))
 			if fillH > 0 {
-				fr := barBarRadius - 1
-				if fr < 0 {
-					fr = 0
-				}
-				fy := innerY + 1 + (fillTrackH - fillH)
-				canvas.Roundrect(fillX, fy, fillW, fillH, fr, fr,
-					"fill:"+barFillHex)
+				fy := h - fillH
+				// Sharp rectangles — no radius, no stroke, no inset.
+				canvas.Rect(bx, fy, barW, fillH, "fill:"+barFillHex)
 			}
 		}
 		canvas.End()
