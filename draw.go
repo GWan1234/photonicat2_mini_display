@@ -1293,8 +1293,10 @@ func drawCpuBars(frame *image.RGBA, x0, y0, w, h int, usages []float64) {
 // drawHBar renders a framed horizontal progress bar at (x0, y0) of size w×h:
 // a grey rounded track with a yellow rounded fill whose width is proportional
 // to pct (0-100). Corner radius matches the boot progress bar. Cached on the
-// quantized percentage.
-func drawHBar(frame *image.RGBA, x0, y0, w, h int, pct float64) {
+// quantized percentage. When label is non-empty it is drawn centered over the
+// bar in a small font with a 1px black aura so it stays readable on both the
+// yellow fill and the empty track (e.g. "3.2/16GB").
+func drawHBar(frame *image.RGBA, x0, y0, w, h int, pct float64, label string) {
 	if w <= 0 || h <= 0 {
 		return
 	}
@@ -1350,6 +1352,69 @@ func drawHBar(frame *image.RGBA, x0, y0, w, h int, pct float64) {
 		}
 	}
 	copyImageToImageAt(frame, img, x0, y0)
+
+	if label != "" {
+		// One step up from "tiny" (12) → "unit" (15) so used/total GB reads
+		// clearly inside the taller mem frame.
+		face, _, err := getFontFace("unit")
+		if err != nil {
+			face, _, err = getFontFace("tiny")
+		}
+		if err == nil {
+			// Center of the bar; 1px black aura keeps white text legible on
+			// both the yellow fill and the empty black track.
+			drawTextWithAura(frame, label, x0+w/2, y0+h/2, face, PCAT_WHITE, PCAT_BLACK)
+		}
+	}
+}
+
+// drawTextWithAura draws text centered on (cx, cy) with a 1px outline (aura)
+// in auraClr around the foreground fg. Used for overlays on busy backgrounds
+// like the memory bar fill.
+func drawTextWithAura(img *image.RGBA, text string, cx, cy int, face font.Face, fg, auraClr color.Color) {
+	if img == nil || text == "" || face == nil {
+		return
+	}
+	d := &font.Drawer{Face: face}
+	tw := d.MeasureString(text).Round()
+	metrics := face.Metrics()
+	ascent := metrics.Ascent.Round()
+	descent := metrics.Descent.Round()
+	th := ascent + descent
+	// Top-left of the text box centered on (cx, cy); baseline = top + ascent.
+	x := cx - tw/2
+	baseline := cy - th/2 + ascent
+
+	// 8-neighbour outline, then the fill on top.
+	for dy := -1; dy <= 1; dy++ {
+		for dx := -1; dx <= 1; dx++ {
+			if dx == 0 && dy == 0 {
+				continue
+			}
+			drawTextAtBaseline(img, text, x+dx, baseline+dy, face, auraClr)
+		}
+	}
+	drawTextAtBaseline(img, text, x, baseline, face, fg)
+}
+
+// drawTextAtBaseline draws text with its baseline at (x, baselineY) — no
+// extra ascent offset (unlike drawText which treats y as top-ish).
+func drawTextAtBaseline(img *image.RGBA, text string, x, baselineY int, face font.Face, clr color.Color) {
+	if img == nil || text == "" || face == nil {
+		return
+	}
+	d := &font.Drawer{
+		Dst:  img,
+		Src:  image.NewUniform(clr),
+		Face: face,
+		Dot:  fixed.P(x, baselineY),
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("drawTextAtBaseline panic recovered: %v", r)
+		}
+	}()
+	d.DrawString(text)
 }
 
 // renderAndCache rasterizes the SVG buffer under cacheKey and blits it. Small
@@ -1918,7 +1983,8 @@ func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
 
 		case "hbar":
 			// Framed horizontal progress bar driven by a 0-100 data key
-			// (e.g. MemUsagePercent).
+			// (e.g. MemUsagePercent). Optional LabelDataKey (e.g. MemUsage
+			// "3.2/16") plus Units ("GB") is drawn centered over the bar.
 			sz := Size{Width: 100, Height: 12}
 			if element.Size != nil {
 				sz = *element.Size
@@ -1934,7 +2000,21 @@ func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
 					pct = float64(n)
 				}
 			}
-			drawHBar(frame, element.Position.X, element.Position.Y, sz.Width, sz.Height, pct)
+			label := ""
+			if element.LabelDataKey != "" {
+				if v, ok := globalData.Load(element.LabelDataKey); ok && v != nil {
+					switch s := v.(type) {
+					case string:
+						label = s
+					default:
+						label = fmt.Sprintf("%v", s)
+					}
+				}
+			}
+			if label != "" && element.Units != "" {
+				label = label + element.Units
+			}
+			drawHBar(frame, element.Position.X, element.Position.Y, sz.Width, sz.Height, pct, label)
 
 		default:
 			log.Printf("Unknown element type: %s", element.Type)

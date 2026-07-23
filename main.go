@@ -307,12 +307,15 @@ type DisplayElement struct {
 	Color       []int        `json:"color,omitempty"`
 	Units       string       `json:"units,omitempty"`
 	DataKey     string       `json:"data_key,omitempty"`
-	UnitsFont   string       `json:"units_font,omitempty"`
-	IconPath    string       `json:"icon_path,omitempty"`
-	Enable      int          `json:"enable,omitempty"`
-	Size        *Size        `json:"size,omitempty"`         // for icons, if provided
-	Size2       *Size        `json:"_size,omitempty"`        // sometimes provided as _size
-	GraphConfig *GraphConfig `json:"graph_config,omitempty"` // for graph elements
+	// LabelDataKey, when set on an hbar, loads a string (e.g. MemUsage "3.2/16")
+	// drawn centered over the bar; Units is appended if present ("GB" → "3.2/16GB").
+	LabelDataKey string       `json:"label_data_key,omitempty"`
+	UnitsFont    string       `json:"units_font,omitempty"`
+	IconPath     string       `json:"icon_path,omitempty"`
+	Enable       int          `json:"enable,omitempty"`
+	Size         *Size        `json:"size,omitempty"`         // for icons, if provided
+	Size2        *Size        `json:"_size,omitempty"`        // sometimes provided as _size
+	GraphConfig  *GraphConfig `json:"graph_config,omitempty"` // for graph elements
 	// AnchorAfterDataKey, when set on an icon, positions the icon immediately to
 	// the right of the named text data_key's rendered value (Position.X is then
 	// the text's start x, and the icon is offset by the measured text width plus
