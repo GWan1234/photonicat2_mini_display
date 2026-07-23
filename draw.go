@@ -1584,15 +1584,16 @@ func drawDiskBars(frame *image.RGBA, x0, y0, w, h int) {
 	drawTinyBarLabel(frame, x0+w/2, y0+h/2, "eMMC")
 }
 
-// drawTinyBarLabel centers a tiny-font label with a 1px black aura so it stays
-// readable on both yellow fill and empty track (disk bar names).
+// drawTinyBarLabel centers a label with a 1px black aura so it stays readable
+// on yellow fill and empty track (disk bar names). Uses the same "unit" face
+// as the mem bar "3.2/16GB" overlay so eMMC/NVMe match RAM size text.
 func drawTinyBarLabel(frame *image.RGBA, cx, cy int, label string) {
 	if frame == nil || label == "" {
 		return
 	}
-	face, _, err := getFontFace("tiny")
+	face, _, err := getFontFace("unit")
 	if err != nil {
-		face, _, err = getFontFace("micro")
+		face, _, err = getFontFace("tiny")
 	}
 	if err != nil {
 		return
@@ -1795,10 +1796,11 @@ func drawBattery(w, h int, soc float64, isCharging bool, x0, y0 int) *image.RGBA
 	}
 	socBucket := int(soc) // 1% cache granularity matches the label
 
+	// "v4" after ink-bounds vertical centering (Orbitron optical center).
 	cacheKey := "gen:batt:aa" + strconv.Itoa(barFrameAAScale) + ":" +
 		strconv.Itoa(w) + "x" + strconv.Itoa(h) +
 		":s" + strconv.Itoa(socBucket) +
-		":c" + strconv.FormatBool(isCharging)
+		":c" + strconv.FormatBool(isCharging) + ":v4"
 	imageCacheMu.RLock()
 	if cached, ok := imageCache[cacheKey]; ok {
 		imageCacheMu.RUnlock()
@@ -1897,15 +1899,48 @@ func drawBattery(w, h int, soc float64, isCharging bool, x0, y0 int) *image.RGBA
 		textColor = PCAT_WHITE
 	}
 	batteryText := strconv.Itoa(socBucket)
-	chargingBlotWidth := 10
-	drawChargingBlot := true
-	if !isCharging || socBucket == 100 {
-		chargingBlotWidth = 0
-		drawChargingBlot = false
+	drawChargingBlot := isCharging && socBucket < 100
+
+	// Measure text + optional bolt, then center the whole group in the body
+	// (excluding the terminal nub). Vertical center uses *ink* bounds — Orbitron
+	// has a tall em-box so metric-only centering sits too low.
+	d := &font.Drawer{Face: face}
+	textW := d.MeasureString(batteryText).Round()
+	metrics := face.Metrics()
+	ascent := metrics.Ascent.Round()
+	descent := metrics.Descent.Round()
+
+	// Ink box relative to baseline (Min.Y ≤ 0 above, Max.Y ≥ 0 below).
+	inkTop, inkBot := 0, 0 // pixels relative to baseline; top is ≤ 0
+	inkSet := false
+	for _, r := range batteryText {
+		b, _, ok := face.GlyphBounds(r)
+		if !ok {
+			continue
+		}
+		top := b.Min.Y.Ceil() // more negative = higher above baseline
+		bot := b.Max.Y.Ceil()
+		if !inkSet {
+			inkTop, inkBot = top, bot
+			inkSet = true
+			continue
+		}
+		if top < inkTop {
+			inkTop = top
+		}
+		if bot > inkBot {
+			inkBot = bot
+		}
 	}
-	tx, _ := drawText(img, batteryText, (bodyW-chargingBlotWidth)/2+1, -4, face, textColor, true)
+	if !inkSet || inkBot <= inkTop {
+		// Fallback to em-box if bounds unavailable.
+		inkTop = -ascent
+		inkBot = descent
+	}
+	var chargingBolt *image.RGBA
+	boltW, boltH := 0, 0
+	const boltGap = 1
 	if drawChargingBlot {
-		var chargingBolt *image.RGBA
 		var berr error
 		if soc < 20 {
 			chargingBolt, _, _, berr = loadImage(assetsPrefix + "/assets/svg/blotWhite.svg")
@@ -1914,9 +1949,40 @@ func drawBattery(w, h int, soc float64, isCharging bool, x0, y0 int) *image.RGBA
 		}
 		if berr != nil {
 			fmt.Println("Error loading charging bolt:", berr)
+			drawChargingBlot = false
 		} else {
-			copyImageToImageAt(img, chargingBolt, tx, 1)
+			boltW = chargingBolt.Bounds().Dx()
+			boltH = chargingBolt.Bounds().Dy()
 		}
+	}
+
+	totalW := textW
+	if drawChargingBlot {
+		totalW = textW + boltGap + boltW
+	}
+	startX := (bodyW - totalW) / 2
+	if startX < 0 {
+		startX = 0
+	}
+	// Place ink center at body mid-line: baseY + (inkTop+inkBot)/2 = h/2
+	// → baseY = h/2 - (inkTop+inkBot)/2
+	baseY := h/2 - (inkTop+inkBot)/2
+	if baseY+inkTop < 0 {
+		baseY = -inkTop
+	}
+	if baseY+inkBot > h {
+		baseY = h - inkBot
+	}
+
+	drawTextAtBaseline(img, batteryText, startX, baseY, face, textColor)
+	if drawChargingBlot && chargingBolt != nil {
+		// Vertically center bolt on the same ink mid-line as the digits.
+		inkMid := baseY + (inkTop+inkBot)/2
+		boltY := inkMid - boltH/2
+		if boltY < 0 {
+			boltY = 0
+		}
+		copyImageToImageAt(img, chargingBolt, startX+textW+boltGap, boltY)
 	}
 
 	imageCacheMu.Lock()
@@ -2101,7 +2167,7 @@ func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
 			
 			if exists {
 				if textValue == nil {
-					textToDisplay = "-"
+					textToDisplay = ""
 				} else {
 					// Special handling for ping timeout (-2) and errors
 					if (element.DataKey == "Ping0" || element.DataKey == "Ping1") {
@@ -2130,23 +2196,27 @@ func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
 								isPingTimeout = true
 							}
 						} else {
-							// If not a numeric type, show as error
-							textToDisplay = "-"
+							textToDisplay = ""
 						}
 					} else {
 						textToDisplay = fmt.Sprintf("%v", textValue)
 						// Failed custom-metric fetches store sentinels like
-						// "ERROR"/"TIMEOUT"; show the regular "-" placeholder
-						// instead of the raw sentinel (plus units).
+						// "ERROR"/"TIMEOUT"; treat as empty (no raw sentinel).
 						if isErrorSentinel(textToDisplay) {
-							textToDisplay = "-"
+							textToDisplay = ""
 						}
 					}
 				}
 			} else {
-				textToDisplay = "-" // or any default value you prefer
+				textToDisplay = ""
 			}
-			
+			// A lone "-" (or blank) means "nothing to show" — leave the slot
+			// empty (e.g. page0 RemainingTime) rather than drawing a dash.
+			textToDisplay = strings.TrimSpace(textToDisplay)
+			if textToDisplay == "" || textToDisplay == "-" {
+				continue
+			}
+
 			// Get the font face for the main text (choose Chinese font if needed)
 			face, _, err := getFontFaceForText(element.Font, textToDisplay)
 			if err != nil {

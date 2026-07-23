@@ -344,7 +344,7 @@
                 },
                 {
                     "type": "cpu_bars",
-                    "position": {"x": 28, "y": 8},
+                    "position": {"x": 28, "y": 9},
                     "data_key": "CpuUsages",
                     "size": {"width": 136, "height": 48},
                     "enable": 1

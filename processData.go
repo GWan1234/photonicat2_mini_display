@@ -1771,6 +1771,10 @@ func normalizeRemainingTime(s string) string {
 	s = strings.TrimSpace(s)
 	s = strings.TrimPrefix(s, "<")
 	s = strings.TrimSpace(s)
+	// Web sometimes sends a bare "-" placeholder; treat like empty.
+	if s == "" || s == "-" {
+		return ""
+	}
 	if zeroTimeRe.MatchString(s) {
 		return ""
 	}
