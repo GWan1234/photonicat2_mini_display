@@ -357,21 +357,21 @@ func getInfoFromPcatWeb() {
 				globalData.Store("UpSpeedBps", info.UpSpeedBps)
 				globalData.Store("DownSpeedBps", info.DownSpeedBps)
 				// OS version is fixed for the process lifetime — only set once.
+				// Keep it short for the 172px LCD: "R25.02 / r7748" (not the
+				// long git hash after '-').
 				if _, exists := globalData.Load("OSVersion"); !exists {
 					theOS := ""
-					raw := info.OpenWRTVersion // e.g. "R25.02.0 / r7465-d1ccd1687"
+					raw := info.OpenWRTVersion // e.g. "R25.02.0 / r7748-d1ccd1687"
 					parts := strings.SplitN(raw, "/", 2)
 					if len(parts) == 2 {
 						ver := strings.TrimSpace(parts[0])    // "R25.02.0"
-						commit := strings.TrimSpace(parts[1]) // "r7465-d1ccd1687"
+						commit := strings.TrimSpace(parts[1]) // "r7748-d1ccd1687"
 
-						// remove trailing ".0" from version
 						ver = strings.TrimSuffix(ver, ".0") // "R25.02"
+						// Keep revision number only: "r7748-d1ccd1687" → "r7748"
+						commit = strings.SplitN(commit, "-", 2)[0]
 
-						// keep only up to the first dash in commit
-						commit = strings.SplitN(commit, "-", 2)[0] // "r7465"
-
-						theOS = fmt.Sprintf("%s / %s", ver, commit) // "R25.02 / r7465"
+						theOS = fmt.Sprintf("%s / %s", ver, commit) // "R25.02 / r7748"
 					} else {
 						theOS = raw
 					}

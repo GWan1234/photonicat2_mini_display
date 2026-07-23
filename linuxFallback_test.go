@@ -53,3 +53,43 @@ func TestCollectLinuxFallbackDataNoPanic(t *testing.T) {
 		t.Error("SdState should always be set by the fallback sweep")
 	}
 }
+
+func TestFormatOSVersionFromOSReleaseDebian(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{
+			`PRETTY_NAME="Debian GNU/Linux 13 (trixie)"
+NAME="Debian GNU/Linux"
+VERSION_ID="13"
+ID=debian
+`,
+			"Debian 13",
+		},
+		{
+			`PRETTY_NAME="Debian GNU/Linux 12 (bookworm)"
+VERSION_ID="12"
+ID=debian
+`,
+			"Debian 12",
+		},
+		{
+			`ID=debian
+VERSION_ID="13.1"
+`,
+			"Debian 13",
+		},
+		{
+			`PRETTY_NAME="Ubuntu 24.04.1 LTS"
+ID=ubuntu
+VERSION_ID="24.04"
+`,
+			"Ubuntu 24.04.1 LTS",
+		},
+	}
+	for _, c := range cases {
+		if got := formatOSVersionFromOSRelease(c.in); got != c.want {
+			t.Errorf("formatOSVersionFromOSRelease(...) = %q, want %q", got, c.want)
+		}
+	}
+}

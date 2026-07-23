@@ -64,7 +64,7 @@ const (
 	// scrolling as a ticker (long SSID/IP/etc.). It is high enough for smooth
 	// motion; the loop drops back to DEFAULT_FPS the moment nothing overflows,
 	// so idle power draw is unchanged.
-	SCROLL_FPS                = 20
+	SCROLL_FPS                = 30
 	DEFAULT_IDLE_TIMEOUT      = 60 * time.Second
 	ON_CHARGING_IDLE_TIMEOUT  = 365 * 86400 * time.Second
 	KEYBOARD_DEBOUNCE_TIME    = 40 * time.Millisecond

@@ -135,12 +135,41 @@ func getOSVersionFromOSRelease() string {
 	if err != nil {
 		return ""
 	}
-	for _, line := range strings.Split(string(data), "\n") {
-		if strings.HasPrefix(line, "PRETTY_NAME=") {
-			v := strings.Trim(strings.TrimPrefix(line, "PRETTY_NAME="), `"`)
-			// "Debian GNU/Linux 12 (bookworm)" → "Debian 12 (bookworm)"
-			return strings.ReplaceAll(v, "GNU/Linux ", "")
+	return formatOSVersionFromOSRelease(string(data))
+}
+
+// formatOSVersionFromOSRelease turns /etc/os-release contents into a short
+// LCD label. Debian → "Debian 13" (major VERSION_ID only).
+func formatOSVersionFromOSRelease(content string) string {
+	fields := map[string]string{}
+	for _, line := range strings.Split(content, "\n") {
+		if i := strings.IndexByte(line, '='); i > 0 {
+			k := line[:i]
+			v := strings.Trim(line[i+1:], `"'`)
+			fields[k] = v
 		}
+	}
+	id := strings.ToLower(fields["ID"])
+	versionID := fields["VERSION_ID"] // e.g. "13"
+	if id == "debian" && versionID != "" {
+		// Prefer major only: "13.1" → "13"
+		major := versionID
+		if i := strings.IndexByte(versionID, '.'); i > 0 {
+			major = versionID[:i]
+		}
+		return "Debian " + major
+	}
+	// Other distros: compact PRETTY_NAME, or NAME + VERSION_ID.
+	if pretty := fields["PRETTY_NAME"]; pretty != "" {
+		// "Debian GNU/Linux 12 (bookworm)" → "Debian 12 (bookworm)" as fallback
+		// if VERSION_ID missing; Ubuntu keeps its pretty string after strip.
+		return strings.ReplaceAll(pretty, "GNU/Linux ", "")
+	}
+	if name := fields["NAME"]; name != "" {
+		if versionID != "" {
+			return name + " " + versionID
+		}
+		return name
 	}
 	return ""
 }
