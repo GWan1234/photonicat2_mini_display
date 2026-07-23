@@ -272,11 +272,8 @@ func applyRemainingTimeUnit() {
 }
 
 func getInfoFromPcatWeb() {
-	// All of this feeds the display; skip the HTTP calls and fallback execs
-	// while the backlight is off. displayWake() reruns it on wake-up.
-	if displayAsleep() {
-		return
-	}
+	// Runs on the shared 1-minute cadence (including while the screen is
+	// dark) so wake always has fresh dashboard values.
 	dashbarodURL := "http://localhost:80/api/v1/dashboard.json"
 	networkStatsURL := "http://localhost:80/api/v1/data_stats.json?network_type=mobile"
 	basicURL := "http://localhost:80/api/v1/modem/basic.json"
@@ -328,10 +325,17 @@ func getInfoFromPcatWeb() {
 					globalData.Store("WifiSignalPercent", -1)
 				}
 				globalData.Store("DHCPClientsCount", info.DHCPClientsCount)
-				globalData.Store("FirmwareVersion", info.FirmwareVersion)
+				// Firmware / model are fixed for a running process — set once.
+				if _, exists := globalData.Load("FirmwareVersion"); !exists {
+					globalData.Store("FirmwareVersion", info.FirmwareVersion)
+				}
 				globalData.Store("ISPName", info.ISPName)
-				globalData.Store("Model", info.Model)
-				globalData.Store("ModemModel", info.ModemModel)
+				if _, exists := globalData.Load("Model"); !exists {
+					globalData.Store("Model", info.Model)
+				}
+				if _, exists := globalData.Load("ModemModel"); !exists {
+					globalData.Store("ModemModel", info.ModemModel)
+				}
 				globalData.Store("ModemSignalStrength", info.ModemSignalStrength)
 				if info.SdState == 0 {
 					globalData.Store("SdState", "No")
@@ -352,24 +356,27 @@ func getInfoFromPcatWeb() {
 				globalData.Store("PublicIP", info.PublicIP)
 				globalData.Store("UpSpeedBps", info.UpSpeedBps)
 				globalData.Store("DownSpeedBps", info.DownSpeedBps)
-				theOS := ""
-				raw := info.OpenWRTVersion // e.g. "R25.02.0 / r7465-d1ccd1687"
-				parts := strings.SplitN(raw, "/", 2)
-				if len(parts) == 2 {
-					ver := strings.TrimSpace(parts[0])    // "R25.02.0"
-					commit := strings.TrimSpace(parts[1]) // "r7465-d1ccd1687"
+				// OS version is fixed for the process lifetime — only set once.
+				if _, exists := globalData.Load("OSVersion"); !exists {
+					theOS := ""
+					raw := info.OpenWRTVersion // e.g. "R25.02.0 / r7465-d1ccd1687"
+					parts := strings.SplitN(raw, "/", 2)
+					if len(parts) == 2 {
+						ver := strings.TrimSpace(parts[0])    // "R25.02.0"
+						commit := strings.TrimSpace(parts[1]) // "r7465-d1ccd1687"
 
-					// remove trailing ".0" from version
-					ver = strings.TrimSuffix(ver, ".0") // "R25.02"
+						// remove trailing ".0" from version
+						ver = strings.TrimSuffix(ver, ".0") // "R25.02"
 
-					// keep only up to the first dash in commit
-					commit = strings.SplitN(commit, "-", 2)[0] // "r7465"
+						// keep only up to the first dash in commit
+						commit = strings.SplitN(commit, "-", 2)[0] // "r7465"
 
-					theOS = fmt.Sprintf("%s / %s", ver, commit) // "R25.02 / r7465"
-				} else {
-					theOS = raw
+						theOS = fmt.Sprintf("%s / %s", ver, commit) // "R25.02 / r7465"
+					} else {
+						theOS = raw
+					}
+					globalData.Store("OSVersion", theOS)
 				}
-				globalData.Store("OSVersion", theOS)
 
 				// Build a slice of SSIDs for convenience
 				var ssids []string
@@ -452,8 +459,13 @@ func getInfoFromPcatWeb() {
 				fmt.Println("Could not unmarshal modem basic info:", err)
 			} else {
 				globalData.Store("CellCarrierInfo", mb.CellCarrierInfo)
-				globalData.Store("ModemFirmwareVer", mb.FirmwareVersion)
-				globalData.Store("IMEINum", mb.IMEINum)
+				// Firmware / IMEI don't change at runtime — set once.
+				if _, exists := globalData.Load("ModemFirmwareVer"); !exists {
+					globalData.Store("ModemFirmwareVer", mb.FirmwareVersion)
+				}
+				if _, exists := globalData.Load("IMEINum"); !exists {
+					globalData.Store("IMEINum", mb.IMEINum)
+				}
 				globalData.Store("ModemCellID", mb.ModemCellID)
 				globalData.Store("ModemCellInfo", mb.ModemCellInfo)
 				globalData.Store("ModemSignals", mb.ModemCellSignals)
@@ -519,9 +531,7 @@ func getWANInterface() (string, error) {
 }
 
 func collectWANNetworkSpeed() {
-	if displayAsleep() { // speed is display-only; skip the 1s sampling while dark
-		return
-	}
+	// 1-minute cadence including while dark (keeps WanUP/DOWN warm for wake).
 	var err error
 	// On OpenWrt the speeds come from pcat-manager-web; when it is down fall
 	// through to the direct /sys/class/net measurement used on Debian.
@@ -572,11 +582,20 @@ func collectWANNetworkSpeed() {
 	}
 }
 
+// collectFixedData fills values that never change for the life of the process
+// (kernel build date, serial number, device-tree model). OSVersion is set
+// once by the first successful pcat-manager-web poll (preferred OpenWrt
+// string) or by collectLinuxFallbackData from /etc/os-release.
 func collectFixedData() {
 	kernelDate, _ := getKernelDate()
 	globalData.Store("Kernel", kernelDate)
 	sn, _ := getSN()
 	globalData.Store("SN", sn)
+	if _, exists := globalData.Load("Model"); !exists {
+		if model := getDeviceTreeModel(); model != "" {
+			globalData.Store("Model", model)
+		}
+	}
 }
 
 // collectData gathers several pieces of system and network information and stores them in globalData.
@@ -734,13 +753,11 @@ func getFanSpeed() (int, error) {
 	return 0, fmt.Errorf("no valid fan1_input found under /sys/class/hwmon")
 }
 
+// collectNetworkData gathers IPs, SSIDs, clients, and data-usage counters.
+// Ping lives in collectPingData so it can run on a faster cadence when the
+// ping page is visible. This still runs every minute while the screen is
+// dark so wake does not show stale IPs/usage.
 func collectNetworkData(cfg Config) {
-	// Nothing here is visible with the backlight off; skipping saves the
-	// pings, exec spawns and any public-IP fetch that would otherwise keep
-	// the modem radio awake. displayWake() refreshes everything on wake-up.
-	if displayAsleep() {
-		return
-	}
 	if isOpenWRT() {
 		//we have aonther func to get data from pcat-manager-web
 	} else {
@@ -822,77 +839,61 @@ func collectNetworkData(cfg Config) {
 	} else {
 		globalData.Store("WifiClients", wifiClients)
 	}
+}
 
-	// Ping Site0 using ICMP with statistics tracking
-	ping0Stats.mu.Lock()
-	ping0Stats.total++
-	if ping0, err := pingICMP(cfg.PingSite0); err != nil {
+// collectPingData ICMP-pings both configured sites and updates Ping0/Ping1
+// plus success rates. Cadence is controlled by the main ping goroutine:
+// 3s on the ping page while awake, 1 minute otherwise (including idle).
+func collectPingData(cfg Config) {
+	// Run both sites in parallel so a single slow host does not double the
+	// cycle time (important for the 3s active cadence).
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		updateOnePing("Ping0", "Ping0Rate", cfg.PingSite0, &ping0Stats)
+	}()
+	go func() {
+		defer wg.Done()
+		updateOnePing("Ping1", "Ping1Rate", cfg.PingSite1, &ping1Stats)
+	}()
+	wg.Wait()
+}
+
+func updateOnePing(valueKey, rateKey, site string, stats *struct {
+	total       int
+	successful  int
+	lastSuccess int64
+	mu          sync.RWMutex
+}) {
+	stats.mu.Lock()
+	defer stats.mu.Unlock()
+	stats.total++
+	if pingMs, err := pingICMP(site); err != nil {
 		// Keep showing last successful ping value, or -1 if never succeeded
-		if ping0Stats.lastSuccess > 0 {
-			globalData.Store("Ping0", ping0Stats.lastSuccess)
+		if stats.lastSuccess > 0 {
+			globalData.Store(valueKey, stats.lastSuccess)
 		} else {
-			globalData.Store("Ping0", int64(-1))
+			globalData.Store(valueKey, int64(-1))
 		}
-	} else if ping0 == -2 {
+	} else if pingMs == -2 {
 		// Timeout case - show red X
-		globalData.Store("Ping0", int64(-2))
-	} else if ping0 > 0 {
+		globalData.Store(valueKey, int64(-2))
+	} else if pingMs > 0 {
 		// Successful ping - update last success and display it
-		ping0Stats.successful++
-		ping0Stats.lastSuccess = ping0
-		globalData.Store("Ping0", ping0)
+		stats.successful++
+		stats.lastSuccess = pingMs
+		globalData.Store(valueKey, pingMs)
 	} else {
 		// Other error case
-		if ping0Stats.lastSuccess > 0 {
-			globalData.Store("Ping0", ping0Stats.lastSuccess)
+		if stats.lastSuccess > 0 {
+			globalData.Store(valueKey, stats.lastSuccess)
 		} else {
-			globalData.Store("Ping0", int64(-1))
+			globalData.Store(valueKey, int64(-1))
 		}
 	}
-	// Calculate and store success rate
-	successRate0 := float64(ping0Stats.successful) / float64(ping0Stats.total) * 100
-	globalData.Store("Ping0Rate", fmt.Sprintf("%.0f", successRate0))
-	ping0Stats.mu.Unlock()
-
-	// Ping Site1 using ICMP with statistics tracking
-	ping1Stats.mu.Lock()
-	ping1Stats.total++
-	if ping1, err := pingICMP(cfg.PingSite1); err != nil {
-		// Keep showing last successful ping value, or -1 if never succeeded
-		if ping1Stats.lastSuccess > 0 {
-			globalData.Store("Ping1", ping1Stats.lastSuccess)
-		} else {
-			globalData.Store("Ping1", int64(-1))
-		}
-	} else if ping1 == -2 {
-		// Timeout case - show red X
-		globalData.Store("Ping1", int64(-2))
-	} else if ping1 > 0 {
-		// Successful ping - update last success and display it
-		ping1Stats.successful++
-		ping1Stats.lastSuccess = ping1
-		globalData.Store("Ping1", ping1)
-	} else {
-		// Other error case
-		if ping1Stats.lastSuccess > 0 {
-			globalData.Store("Ping1", ping1Stats.lastSuccess)
-		} else {
-			globalData.Store("Ping1", int64(-1))
-		}
-	}
-	// Calculate and store success rate
-	successRate1 := float64(ping1Stats.successful) / float64(ping1Stats.total) * 100
-	globalData.Store("Ping1Rate", fmt.Sprintf("%.0f", successRate1))
-	ping1Stats.mu.Unlock()
-
-	/*
-		// Country based on public IP geolocation.
-		if country, err := getCountry(); err != nil {
-			fmt.Printf("Could not get country: %v\n", err)
-			globalData.Store("Country", "Unknown")
-		} else {
-			globalData.Store("Country", country)
-		}*/
+	successRate := float64(stats.successful) / float64(stats.total) * 100
+	globalData.Store(rateKey, fmt.Sprintf("%.0f", successRate))
 }
 
 // Public IPs only change when the upstream connection does, so they are

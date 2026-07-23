@@ -279,7 +279,8 @@ func setBacklight(brightness int) {
 // displayAsleep reports whether the display is settled dark: idle state
 // reached AND the backlight physically at 0 (screen_min_brightness may keep
 // it visibly dim, in which case this stays false). While asleep the render
-// loop and the display-only collectors pause to save battery.
+// loop pauses SPI pushes to save battery; data collectors still run on their
+// 1-minute cadence so wake shows fresh values.
 func displayAsleep() bool {
 	if idleState != STATE_IDLE {
 		return false
@@ -289,13 +290,24 @@ func displayAsleep() bool {
 	return lastLogical == 0
 }
 
-// displayWake refreshes everything that was paused while the screen was dark,
-// so the data is current by the time the fade-in completes.
+// displayWake forces an immediate refresh of time-critical UI data so the
+// first frames after backlight-on already show the correct clock and battery
+// instead of waiting for the next 1-minute collector tick.
 func displayWake() {
+	// Battery SOC/charging feeds the top bar; do it synchronously so the
+	// forced top-bar redraw below has current numbers.
+	collectBatteryData()
+	// Invalidate top-bar cache and force a redraw on the next active frame.
+	cacheTopBarStr = ""
+	forceTopBarRedraw = true
+	// Kick the rest in the background (1-minute collectors already keep most
+	// keys warm; this just covers the case where we wake just before a tick).
 	go collectLinuxData(cfg)
 	go collectNetworkData(cfg)
 	go collectWANNetworkSpeed()
 	go getInfoFromPcatWeb()
+	// Ping collector handles its own immediate refresh on reschedule.
+	signalPingReschedule()
 }
 
 func monitorKeyboard(changePageTriggered *bool) {

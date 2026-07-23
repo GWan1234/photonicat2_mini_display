@@ -588,9 +588,7 @@ func getSmsPages() {
 		if !firstFetchComplete {
 			return startupRetryInterval
 		}
-		if idleState == STATE_IDLE {
-			return baseSmsInterval * time.Duration(idleMultiplier)
-		}
+		// Same 1-minute cadence as other dynamic data (idle and active).
 		return baseSmsInterval
 	}
 
@@ -614,36 +612,31 @@ func getSmsPages() {
 	defer ticker.Stop()
 
 	for {
-		select {
-		case <-ticker.C:
-			if cfg.ShowSms {
-				if !firstFetchComplete {
-					log.Println("Startup retry: attempting SMS fetch...")
-				}
-				lenSmsPagesImages = collectAndDrawSms(&cfg)
-				if lenSmsPagesImages == 0 {
-					lenSmsPagesImages = 1
-				}
-
-				// Check if this is the first successful fetch
-				if !firstFetchComplete && lastSuccessfulSmsJsonContent != "" {
-					firstFetchComplete = true
-					log.Println("First successful SMS fetch! Switching to normal interval. lenSmsPagesImages:", lenSmsPagesImages)
-					ticker.Stop()
-					ticker = time.NewTicker(getSmsInterval())
-				} else {
-					log.Println("collect lenSmsPagesImages:", lenSmsPagesImages)
-				}
-
-				totalNumPages = cfgNumPages + lenSmsPagesImages
-			} else {
-				// SMS disabled - only JSON config pages
-				lenSmsPagesImages = 0
-				totalNumPages = cfgNumPages
+		<-ticker.C
+		if cfg.ShowSms {
+			if !firstFetchComplete {
+				log.Println("Startup retry: attempting SMS fetch...")
 			}
-		case <-intervalUpdateChan:
-			ticker.Stop()
-			ticker = time.NewTicker(getSmsInterval())
+			lenSmsPagesImages = collectAndDrawSms(&cfg)
+			if lenSmsPagesImages == 0 {
+				lenSmsPagesImages = 1
+			}
+
+			// Check if this is the first successful fetch
+			if !firstFetchComplete && lastSuccessfulSmsJsonContent != "" {
+				firstFetchComplete = true
+				log.Println("First successful SMS fetch! Switching to normal interval. lenSmsPagesImages:", lenSmsPagesImages)
+				ticker.Stop()
+				ticker = time.NewTicker(getSmsInterval())
+			} else {
+				log.Println("collect lenSmsPagesImages:", lenSmsPagesImages)
+			}
+
+			totalNumPages = cfgNumPages + lenSmsPagesImages
+		} else {
+			// SMS disabled - only JSON config pages
+			lenSmsPagesImages = 0
+			totalNumPages = cfgNumPages
 		}
 	}
 }

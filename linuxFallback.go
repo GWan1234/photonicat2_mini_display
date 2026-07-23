@@ -57,11 +57,17 @@ func collectLinuxFallbackData() {
 	// pcat-manager-web, so show the egress actually in use instead.
 	globalData.Store("NetworkModeLabel", label)
 
-	if osVersion := getOSVersionFromOSRelease(); osVersion != "" {
-		globalData.Store("OSVersion", osVersion)
+	// Static identity fields: only fill if not already set (e.g. by
+	// collectFixedData or a prior web poll). They don't change at runtime.
+	if _, exists := globalData.Load("OSVersion"); !exists {
+		if osVersion := getOSVersionFromOSRelease(); osVersion != "" {
+			globalData.Store("OSVersion", osVersion)
+		}
 	}
-	if model := getDeviceTreeModel(); model != "" {
-		globalData.Store("Model", model)
+	if _, exists := globalData.Load("Model"); !exists {
+		if model := getDeviceTreeModel(); model != "" {
+			globalData.Store("Model", model)
+		}
 	}
 	// When the PMU data source (pcatPmu.go) is running it delivers the real
 	// MCU board temperature — don't overwrite it with an approximation.

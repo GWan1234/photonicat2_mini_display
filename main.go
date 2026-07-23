@@ -57,8 +57,15 @@ const (
 	KEYBOARD_DEBOUNCE_TIME    = 40 * time.Millisecond
 	ZERO_BACKLIGHT_DELAY      = 5 * time.Second
 	OFF_TIMEOUT               = 3 * time.Second
-	INTERVAL_SMS_COLLECT      = 60 * time.Second
-	INTERVAL_PCAT_WEB_COLLECT = 10 * time.Second // Increased from 5 to 10 seconds to reduce CPU usage
+	// Dynamic data (battery, linux stats, network, pcat-web, SMS, WAN speed)
+	// refreshes once a minute whether the screen is on or idle-dark, so wake
+	// shows current values without a burst of collectors.
+	INTERVAL_DATA_COLLECT = 60 * time.Second
+	// Ping is the exception: when the screen is awake and the current page
+	// shows Ping0/Ping1, poll every 3s; otherwise the same 1-minute cadence.
+	INTERVAL_PING_ACTIVE = 3 * time.Second
+	INTERVAL_PING_IDLE   = INTERVAL_DATA_COLLECT
+	INTERVAL_SMS_COLLECT = INTERVAL_DATA_COLLECT
 
 	ETC_USER_CONFIG_PATH   = "/etc/pcat2_mini_display-user_config.json"
 	ETC_CONFIG_PATH        = "/etc/pcat2_mini_display-config.json"
@@ -130,24 +137,32 @@ var (
 	battChargingStatus = false
 	battSOC            = 0
 
-	// Base intervals
-	baseBatteryDataInterval   = 1 * time.Second
-	baseDataGatherInterval    = 2 * time.Second
-	baseNetworkGatherInterval = 3 * time.Second
-	basePcatWebInterval       = INTERVAL_PCAT_WEB_COLLECT
+	// Collection intervals. General dynamic data is always 1 minute; only
+	// ping changes with page/idle state (see currentPingInterval).
+	baseBatteryDataInterval   = INTERVAL_DATA_COLLECT
+	baseDataGatherInterval    = INTERVAL_DATA_COLLECT
+	baseNetworkGatherInterval = INTERVAL_DATA_COLLECT
+	basePcatWebInterval       = INTERVAL_DATA_COLLECT
 	baseSmsInterval           = INTERVAL_SMS_COLLECT
 
-	// Current intervals (can be modified by idle state)
-	batteryDataInterval   = 1 * time.Second
-	dataGatherInterval    = 2 * time.Second
-	networkGatherInterval = 3 * time.Second
+	batteryDataInterval   = INTERVAL_DATA_COLLECT
+	dataGatherInterval    = INTERVAL_DATA_COLLECT
+	networkGatherInterval = INTERVAL_DATA_COLLECT
+	pingGatherInterval    = INTERVAL_PING_IDLE
 
-	// Idle state management
+	// Idle FPS throttle only (data intervals no longer scale with idle).
+	// When fully dark (displayAsleep) the render loop skips SPI entirely.
 	idleMultiplier     = 10
-	intervalUpdateChan = make(chan struct{}, 10)
+	// pingReschedule wakes the ping collector so entering the ping page
+	// switches to the 3s cadence without waiting out a leftover 1m sleep.
+	pingReschedule = make(chan struct{}, 1)
 
 	baseFPS    = DEFAULT_FPS
 	desiredFPS = DEFAULT_FPS
+
+	// forceTopBarRedraw is set on wake so the first active frame redraws
+	// clock/battery instead of waiting for the every-15-frames throttle.
+	forceTopBarRedraw = false
 
 	lastBrightness = -1
 
@@ -506,28 +521,54 @@ func (dw *DisplayWrapper) GetTransferStats() map[string]interface{} {
 	}
 }
 
-// updateIntervals updates all intervals and FPS based on current idle state
+// updateIntervals applies idle-state changes that still depend on it (FPS
+// throttle + ping cadence). General data collectors stay at 1 minute always.
 func updateIntervals() {
 	if idleState == STATE_IDLE {
-		// Increase intervals by idle multiplier during idle state
-		batteryDataInterval = baseBatteryDataInterval * time.Duration(idleMultiplier)
-		dataGatherInterval = baseDataGatherInterval * time.Duration(idleMultiplier)
-		networkGatherInterval = baseNetworkGatherInterval * time.Duration(idleMultiplier)
-		// Set FPS to very low value during idle (effectively 0.1 FPS by using 1 and adjusting sleep calculation)
-		desiredFPS = 1  // Will be adjusted in the sleep calculation for idle state
+		// Very low FPS while idle-but-visible (min brightness > 0). When
+		// fully dark the main loop skips render entirely.
+		desiredFPS = 1
 	} else {
-		// Reset to base intervals and FPS when active
-		batteryDataInterval = baseBatteryDataInterval
-		dataGatherInterval = baseDataGatherInterval
-		networkGatherInterval = baseNetworkGatherInterval
 		desiredFPS = baseFPS
 	}
+	batteryDataInterval = baseBatteryDataInterval
+	dataGatherInterval = baseDataGatherInterval
+	networkGatherInterval = baseNetworkGatherInterval
+	pingGatherInterval = currentPingInterval()
+	signalPingReschedule()
+}
 
-	// Signal all goroutines to update their intervals
+// currentPingInterval returns 3s when the screen is awake and the current
+// page shows ping metrics; otherwise 1 minute (idle or other pages).
+func currentPingInterval() time.Duration {
+	if idleState != STATE_IDLE && pageShowsPing(currPageIdx) {
+		return INTERVAL_PING_ACTIVE
+	}
+	return INTERVAL_PING_IDLE
+}
+
+// pageShowsPing reports whether the given page index (cfg page, not SMS)
+// has any element bound to Ping0 or Ping1.
+func pageShowsPing(pageIdx int) bool {
+	if pageIdx < 0 || pageIdx >= cfgNumPages {
+		return false
+	}
+	page, ok := cfg.DisplayTemplate.Elements["page"+strconv.Itoa(pageIdx)]
+	if !ok {
+		return false
+	}
+	for _, el := range page {
+		if el.DataKey == "Ping0" || el.DataKey == "Ping1" {
+			return true
+		}
+	}
+	return false
+}
+
+func signalPingReschedule() {
 	select {
-	case intervalUpdateChan <- struct{}{}:
+	case pingReschedule <- struct{}{}:
 	default:
-		// Channel is full, skip
 	}
 }
 
@@ -729,82 +770,50 @@ func main() {
 	globalData.Store("RemainingTime", "")
 	globalData.Store("RemainingTime_Unit", "")
 
-	//collect data for middle and footer, non-blocking
-	go func() {
-		ticker := time.NewTicker(dataGatherInterval)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ticker.C:
-				collectLinuxData(cfg)
-			case <-intervalUpdateChan:
-				ticker.Stop()
-				ticker = time.NewTicker(dataGatherInterval)
-			}
-		}
-	}()
-
-	go func() {
-		ticker := time.NewTicker(dataGatherInterval)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ticker.C:
-				collectNetworkData(cfg)
-			case <-intervalUpdateChan:
-				ticker.Stop()
-				ticker = time.NewTicker(dataGatherInterval)
-			}
-		}
-	}()
-
-	go func() {
-		ticker := time.NewTicker(batteryDataInterval)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ticker.C:
-				collectBatteryData()
-			case <-intervalUpdateChan:
-				ticker.Stop()
-				ticker = time.NewTicker(batteryDataInterval)
-			}
-		}
-	}()
-
-	go func() {
-		ticker := time.NewTicker(basePcatWebInterval)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ticker.C:
-				getInfoFromPcatWeb()
-			case <-intervalUpdateChan:
-				currentInterval := basePcatWebInterval
-				if idleState == STATE_IDLE {
-					currentInterval = basePcatWebInterval * time.Duration(idleMultiplier)
+	// Dynamic data collectors: always 1 minute (idle and active), with an
+	// immediate first pass so the UI is populated at startup. Ping is the
+	// only exception — see the dedicated goroutine below.
+	startIntervalCollector := func(interval time.Duration, fn func()) {
+		go func() {
+			fn() // immediate first sample
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+			for range ticker.C {
+				if !weAreRunning {
+					return
 				}
-				ticker.Stop()
-				ticker = time.NewTicker(currentInterval)
+				fn()
 			}
-		}
-	}()
+		}()
+	}
+	startIntervalCollector(INTERVAL_DATA_COLLECT, func() { collectLinuxData(cfg) })
+	startIntervalCollector(INTERVAL_DATA_COLLECT, func() { collectNetworkData(cfg) })
+	startIntervalCollector(INTERVAL_DATA_COLLECT, collectBatteryData)
+	startIntervalCollector(INTERVAL_DATA_COLLECT, getInfoFromPcatWeb)
+	startIntervalCollector(INTERVAL_DATA_COLLECT, collectWANNetworkSpeed)
 
+	// Ping cadence follows the page + idle state: 3s on the ping page while
+	// awake, otherwise 1 minute. Reschedule is interruptible so flipping to
+	// the ping page does not wait out a leftover long sleep.
 	go func() {
-		ticker := time.NewTicker(networkGatherInterval)
-		defer ticker.Stop()
-
-		for {
+		collectPingData(cfg)
+		for weAreRunning {
+			interval := currentPingInterval()
+			pingGatherInterval = interval
+			timer := time.NewTimer(interval)
 			select {
-			case <-ticker.C:
-				collectWANNetworkSpeed()
-			case <-intervalUpdateChan:
-				ticker.Stop()
-				ticker = time.NewTicker(networkGatherInterval)
+			case <-timer.C:
+				collectPingData(cfg)
+			case <-pingReschedule:
+				if !timer.Stop() {
+					select {
+					case <-timer.C:
+					default:
+					}
+				}
+				// Page change or wake: refresh immediately so the user does
+				// not stare at a leftover value until the next cadence tick.
+				collectPingData(cfg)
 			}
 		}
 	}()
@@ -1030,9 +1039,15 @@ func mainLoop() {
 				// Process all frames - use pre-calculated if ready, otherwise calculate on-demand
 				for i := 1; i < numIntermediatePages; i++ {
 					if i == numIntermediatePages/3 { // Update page indices at the halfway point /3 cos we are not linear.
+						prevPageIdx := currPageIdx
 						localIdx = nextLocalIdx
 						currPageIdx = nextPageIdx
 						isSMS = isNextPageSMS
+						// Entering/leaving the ping page changes the ping
+						// cadence (3s vs 1m); wake the ping collector.
+						if pageShowsPing(prevPageIdx) != pageShowsPing(currPageIdx) {
+							signalPingReschedule()
+						}
 						nextPageLength := 0
 						if isNextPageSMS {
 							nextPageLength = lenSmsPagesImages
@@ -1212,10 +1227,11 @@ func mainLoop() {
 					continue
 				}
 
-				// Only update top bar and footer when needed (every few frames) to save CPU
-				// Top bar contains mostly static information (time, battery, signal)
-				// Update it less frequently to improve performance
-				if middleFrames%15 == 0 { // Update top bar every 15 frames instead of every frame
+				// Top bar (clock + battery + signal): throttle normally, but
+				// always redraw immediately after wake so the user never sees
+				// a stale minute/SOC from before the screen went dark.
+				if forceTopBarRedraw || middleFrames%15 == 0 {
+					forceTopBarRedraw = false
 					drawTopBar(display, topBarFramebuffers[topFrames%2])
 				}
 
