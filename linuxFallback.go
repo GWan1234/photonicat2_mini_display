@@ -138,8 +138,50 @@ func getOSVersionFromOSRelease() string {
 	return formatOSVersionFromOSRelease(string(data))
 }
 
+// formatOpenWrtVersionLabel shortens OpenWrt / photonicatWrt version strings
+// for the 172px LCD.
+//
+//	"R26.04.1 / r7760-f45d919e58" → "R26.04.1 / r7760"
+//	"R25.02.0 / r7748-d1ccd1687"  → "R25.02 / r7748"
+//
+// Trailing ".0" on the release is dropped; the git hash after '-' is dropped.
+// Returns raw unchanged when it has no "ver / rev" shape.
+func formatOpenWrtVersionLabel(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	parts := strings.SplitN(raw, "/", 2)
+	if len(parts) != 2 {
+		return raw
+	}
+	ver := strings.TrimSpace(parts[0])
+	commit := strings.TrimSpace(parts[1])
+	if ver == "" || commit == "" {
+		return raw
+	}
+	ver = strings.TrimSuffix(ver, ".0")
+	commit = strings.SplitN(commit, "-", 2)[0]
+	return fmt.Sprintf("%s / %s", ver, commit)
+}
+
+// isOpenWrtFamily reports whether /etc/os-release identifies OpenWrt or a
+// derivative (photonicatWrt, LEDE, etc.).
+func isOpenWrtFamily(id, idLike string) bool {
+	id = strings.ToLower(id)
+	idLike = strings.ToLower(idLike)
+	if id == "openwrt" || id == "photonicatwrt" || id == "lede" {
+		return true
+	}
+	return strings.Contains(idLike, "openwrt") || strings.Contains(idLike, "lede")
+}
+
 // formatOSVersionFromOSRelease turns /etc/os-release contents into a short
-// LCD label. Debian → "Debian 13" (major VERSION_ID only).
+// LCD label:
+//
+//	Debian          → "Debian 13"   (major VERSION_ID only)
+//	photonicatWrt   → "R26.04.1 / r7760"  (R+VERSION_ID / BUILD_ID short rev)
+//	other           → compact PRETTY_NAME
 func formatOSVersionFromOSRelease(content string) string {
 	fields := map[string]string{}
 	for _, line := range strings.Split(content, "\n") {
@@ -150,14 +192,32 @@ func formatOSVersionFromOSRelease(content string) string {
 		}
 	}
 	id := strings.ToLower(fields["ID"])
-	versionID := fields["VERSION_ID"] // e.g. "13"
+	versionID := fields["VERSION_ID"] // e.g. "13" or "26.04.1"
 	if id == "debian" && versionID != "" {
-		// Prefer major only: "13.1" → "13"
+		// Prefer major only: "13.1" → "13" → "Debian 13"
 		major := versionID
 		if i := strings.IndexByte(versionID, '.'); i > 0 {
 			major = versionID[:i]
 		}
 		return "Debian " + major
+	}
+	// OpenWrt / photonicatWrt: prefer "R26.04.1 / r7760" over PRETTY_NAME
+	// ("photonicatWrt 26.04.1"), matching pcat-manager-web's openwrt_version.
+	if isOpenWrtFamily(id, fields["ID_LIKE"]) {
+		ver := versionID
+		if ver == "" {
+			ver = fields["VERSION"]
+		}
+		if ver != "" && !strings.HasPrefix(ver, "R") && !strings.HasPrefix(ver, "r") {
+			ver = "R" + ver
+		}
+		commit := fields["BUILD_ID"] // e.g. "r7760-f45d919e58"
+		if ver != "" && commit != "" {
+			return formatOpenWrtVersionLabel(ver + " / " + commit)
+		}
+		if ver != "" {
+			return strings.TrimSuffix(ver, ".0")
+		}
 	}
 	// Other distros: compact PRETTY_NAME, or NAME + VERSION_ID.
 	if pretty := fields["PRETTY_NAME"]; pretty != "" {

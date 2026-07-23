@@ -356,26 +356,14 @@ func getInfoFromPcatWeb() {
 				globalData.Store("PublicIP", info.PublicIP)
 				globalData.Store("UpSpeedBps", info.UpSpeedBps)
 				globalData.Store("DownSpeedBps", info.DownSpeedBps)
-				// OS version is fixed for the process lifetime — only set once.
-				// Keep it short for the 172px LCD: "R25.02 / r7748" (not the
-				// long git hash after '-').
-				if _, exists := globalData.Load("OSVersion"); !exists {
-					theOS := ""
-					raw := info.OpenWRTVersion // e.g. "R25.02.0 / r7748-d1ccd1687"
-					parts := strings.SplitN(raw, "/", 2)
-					if len(parts) == 2 {
-						ver := strings.TrimSpace(parts[0])    // "R25.02.0"
-						commit := strings.TrimSpace(parts[1]) // "r7748-d1ccd1687"
-
-						ver = strings.TrimSuffix(ver, ".0") // "R25.02"
-						// Keep revision number only: "r7748-d1ccd1687" → "r7748"
-						commit = strings.SplitN(commit, "-", 2)[0]
-
-						theOS = fmt.Sprintf("%s / %s", ver, commit) // "R25.02 / r7748"
-					} else {
-						theOS = raw
+				// OS version from pcat-manager-web is authoritative on OpenWrt.
+				// Always apply it so an earlier os-release fallback
+				// ("photonicatWrt 26.04.1") does not stick for the process
+				// lifetime. Short form: "R26.04.1 / r7760" (no git hash).
+				if raw := info.OpenWRTVersion; raw != "" {
+					if theOS := formatOpenWrtVersionLabel(raw); theOS != "" {
+						globalData.Store("OSVersion", theOS)
 					}
-					globalData.Store("OSVersion", theOS)
 				}
 
 				// Build a slice of SSIDs for convenience
@@ -583,9 +571,9 @@ func collectWANNetworkSpeed() {
 }
 
 // collectFixedData fills values that never change for the life of the process
-// (kernel build date, serial number, device-tree model). OSVersion is set
-// once by the first successful pcat-manager-web poll (preferred OpenWrt
-// string) or by collectLinuxFallbackData from /etc/os-release.
+// (kernel build date, serial number, device-tree model). OSVersion is filled
+// by collectLinuxFallbackData from /etc/os-release, then upgraded to the
+// short OpenWrt form ("R26.04.1 / r7760") once pcat-manager-web answers.
 func collectFixedData() {
 	kernelDate, _ := getKernelDate()
 	globalData.Store("Kernel", kernelDate)
