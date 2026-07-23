@@ -127,10 +127,12 @@ func getFontFace(fontName string) (font.Face, int, error) {
 	}
 
 	// 4) Create the face
+	// HintingNone: softest glyph edges (max AA fringe). golang.org/x/image
+	// has no HintingSlight — only None / Vertical / Full.
 	face, err := opentype.NewFace(ttfFont, &opentype.FaceOptions{
 		Size:    cfg.FontSize,
 		DPI:     72,
-		Hinting: font.HintingFull,
+		Hinting: font.HintingNone,
 	})
 	if err != nil {
 		return nil, 0, err
