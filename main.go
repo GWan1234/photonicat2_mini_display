@@ -169,6 +169,9 @@ var (
 	// forceTopBarRedraw is set on wake so the first active frame redraws
 	// clock/battery instead of waiting for the every-15-frames throttle.
 	forceTopBarRedraw = false
+	// lastTopBarRefresh drives the once-per-minute clock update even while
+	// the screen is dark (displayAsleep skips full renders).
+	lastTopBarRefresh = time.Time{}
 
 	lastBrightness = -1
 
@@ -1276,9 +1279,18 @@ func mainLoop() {
 				httpChangePageTriggered = false
 				changePageTriggered = false
 			} else { //normal page rendering
-				// Backlight is physically off: nothing is visible, so skip
-				// the render + SPI push entirely and just poll for wake-up.
+				// Backlight is physically off: skip full middle/footer renders
+				// to save power, but still refresh the top bar once a minute
+				// so the clock (and battery SOC) stay current for wake / dim
+				// idle-visible cases. drawTopBar no-ops when magicStr is
+				// unchanged, so this is cheap between minute ticks.
 				if displayAsleep() {
+					if forceTopBarRedraw || time.Since(lastTopBarRefresh) >= time.Minute {
+						forceTopBarRedraw = false
+						drawTopBar(display, topBarFramebuffers[topFrames%2])
+						lastTopBarRefresh = time.Now()
+						topFrames++
+					}
 					select {
 					case <-pageChangeSignal:
 						// fall through; next iteration handles the change
@@ -1287,12 +1299,13 @@ func mainLoop() {
 					continue
 				}
 
-				// Top bar (clock + battery + signal): throttle normally, but
-				// always redraw immediately after wake so the user never sees
-				// a stale minute/SOC from before the screen went dark.
-				if forceTopBarRedraw || middleFrames%15 == 0 {
+				// Top bar (clock + battery + signal): every ~15 frames while
+				// awake, on wake, or at least once per minute (covers low
+				// idle FPS where frame-based throttle would stall the clock).
+				if forceTopBarRedraw || middleFrames%15 == 0 || time.Since(lastTopBarRefresh) >= time.Minute {
 					forceTopBarRedraw = false
 					drawTopBar(display, topBarFramebuffers[topFrames%2])
+					lastTopBarRefresh = time.Now()
 				}
 
 				// Update footer less frequently as well, except when showing SMS
