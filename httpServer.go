@@ -61,7 +61,6 @@ func secureUnmarshal(data []byte, v interface{}) error {
 
 var (
 	drawMu         sync.Mutex
-	webFrame       *image.RGBA
 	configMutex    sync.RWMutex
 	defaultConfig  Config                 // loaded from default_config.json
 	userOverrides  map[string]interface{} // raw overrides from user_config.json
@@ -70,74 +69,118 @@ var (
 	// Runtime brightness override system
 	runtimeBrightnessMu  sync.RWMutex
 	runtimeMaxBrightness *int // nil = use config.json, non-nil = override value
+
+	// Web preview snapshot: only maintained while the screen page is polling.
+	// HTTP never reads the live double-buffers (those are mid-draw and race).
+	// The render loop publishes a fully composed frame after each complete
+	// send — zero cost when nobody is watching (webFrameDemandUntil expired).
+	webSnapMu            sync.RWMutex
+	webSnapshot          *image.RGBA // last complete full-LCD image
+	webSnapCompose       *image.RGBA // scratch used only on the render thread
+	webFrameDemandMu     sync.Mutex
+	webFrameDemandUntil  time.Time
+	webLastTop           *image.RGBA // last fully drawn top/middle/footer (ptrs into double buffers; only read from the render thread at publish time)
+	webLastMiddle        *image.RGBA
+	webLastFooter        *image.RGBA
+	webFrameDemandWindow = 3 * time.Second // keep publishing this long after last HTTP hit
 )
 
+// noteWebFrameDemand marks that a browser is requesting preview frames so the
+// render loop will start publishing complete snapshots.
+func noteWebFrameDemand() {
+	webFrameDemandMu.Lock()
+	webFrameDemandUntil = time.Now().Add(webFrameDemandWindow)
+	webFrameDemandMu.Unlock()
+}
+
+func webFrameDemanded() bool {
+	webFrameDemandMu.Lock()
+	defer webFrameDemandMu.Unlock()
+	return time.Now().Before(webFrameDemandUntil)
+}
+
+// rememberWebRegion stores the latest fully-drawn region pointer. Called only
+// from the single-threaded render path after a region is finished.
+func rememberWebRegion(kind string, frame *image.RGBA) {
+	if frame == nil {
+		return
+	}
+	switch kind {
+	case "top":
+		webLastTop = frame
+	case "middle":
+		webLastMiddle = frame
+	case "footer":
+		webLastFooter = frame
+	}
+}
+
+// tryPublishWebSnapshot composes top+middle+footer into a complete LCD image
+// for HTTP. No-op when the web UI is not polling — normal display path pays
+// nothing. Safe to call only from the render thread (uses region ptrs without
+// locking them; the publish copy is protected by webSnapMu).
+func tryPublishWebSnapshot() {
+	if !webFrameDemanded() {
+		return
+	}
+	top, mid, foot := webLastTop, webLastMiddle, webLastFooter
+	if top == nil || mid == nil || foot == nil {
+		return
+	}
+
+	if webSnapCompose == nil {
+		webSnapCompose = image.NewRGBA(image.Rect(0, 0, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT))
+	}
+	// Compose offline (render thread only) then swap under a short lock.
+	_ = copyImageToImageAt(webSnapCompose, top, 0, 0)
+	_ = copyImageToImageAt(webSnapCompose, mid, 0, PCAT2_TOP_BAR_HEIGHT)
+	_ = copyImageToImageAt(webSnapCompose, foot, 0, PCAT2_LCD_HEIGHT-PCAT2_FOOTER_HEIGHT)
+
+	webSnapMu.Lock()
+	if webSnapshot == nil {
+		webSnapshot = image.NewRGBA(image.Rect(0, 0, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT))
+	}
+	copy(webSnapshot.Pix, webSnapCompose.Pix)
+	webSnapMu.Unlock()
+}
+
 func serveFrame(c *fiber.Ctx) error {
-	var err error
+	// Tell the render loop we want snapshots; it will publish after the next
+	// complete frame(s) with no work when demand expires.
+	noteWebFrameDemand()
+
+	// Wait briefly for a complete snapshot if none yet (first open of /screen).
+	var snapPix []byte
+	var stride int
+	var rect image.Rectangle
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for {
+		webSnapMu.RLock()
+		if webSnapshot != nil && len(webSnapshot.Pix) > 0 {
+			// Copy under RLock so encode never races a publish, then unlock
+			// before the (slow) PNG encode.
+			snapPix = make([]byte, len(webSnapshot.Pix))
+			copy(snapPix, webSnapshot.Pix)
+			stride = webSnapshot.Stride
+			rect = webSnapshot.Rect
+			webSnapMu.RUnlock()
+			break
+		}
+		webSnapMu.RUnlock()
+		if time.Now().After(deadline) {
+			return c.Status(fiber.StatusServiceUnavailable).SendString("No complete frame available yet")
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+
+	img := &image.RGBA{Pix: snapPix, Stride: stride, Rect: rect}
 	var buf bytes.Buffer
-
-	if webFrame == nil {
-		webFrame = GetFrameBuffer(PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT)
-		clearFrame(webFrame, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT)
-	}
-
-	frameMutex.RLock()
-	// Use legacy framebuffers that are actively being rendered to
-	var topBuffer, middleBuffer, footerBuffer *image.RGBA
-	topBuffer = getTopBarFramebuffer(0)
-	middleBuffer = getMiddleFramebuffer(0)
-	footerBuffer = getFooterFramebuffer(frames % 2)
-
-	// Safety checks for nil buffers
-	if topBuffer == nil {
-		frameMutex.RUnlock()
-		log.Printf("⚠️ HTTP serveFrame: topBuffer is nil")
-		return c.Status(fiber.StatusServiceUnavailable).SendString("Top bar frame buffer not available")
-	}
-	if middleBuffer == nil {
-		frameMutex.RUnlock()
-		log.Printf("⚠️ HTTP serveFrame: middleBuffer is nil")
-		return c.Status(fiber.StatusServiceUnavailable).SendString("Middle frame buffer not available")
-	}
-	if footerBuffer == nil {
-		frameMutex.RUnlock()
-		log.Printf("⚠️ HTTP serveFrame: footerBuffer is nil")
-		return c.Status(fiber.StatusServiceUnavailable).SendString("Footer frame buffer not available")
-	}
-
-	// Copy frame buffers with proper bounds - each buffer has its own dimensions
-	// Top bar: 172×32 at y=0
-	err = copyImageToImageAt(webFrame, topBuffer, 0, 0)
-	if err != nil {
-		log.Printf("❌ HTTP serveFrame: Failed to copy top bar frame (172×32 at y=0): %v", err)
-		return c.Status(fiber.StatusInternalServerError).SendString("Failed to copy top bar frame: " + err.Error())
-	}
-
-	// Middle: 172×266 at y=32
-	err = copyImageToImageAt(webFrame, middleBuffer, 0, PCAT2_TOP_BAR_HEIGHT)
-	if err != nil {
-		log.Printf("❌ HTTP serveFrame: Failed to copy middle frame (172×266 at y=%d): %v", PCAT2_TOP_BAR_HEIGHT, err)
-		return c.Status(fiber.StatusInternalServerError).SendString("Failed to copy middle frame: " + err.Error())
-	}
-
-	// Footer: 172×22 at y=298
-	err = copyImageToImageAt(webFrame, footerBuffer, 0, PCAT2_LCD_HEIGHT-PCAT2_FOOTER_HEIGHT)
-	if err != nil {
-		log.Printf("❌ HTTP serveFrame: Failed to copy footer frame (172×22 at y=%d): %v", PCAT2_LCD_HEIGHT-PCAT2_FOOTER_HEIGHT, err)
-		return c.Status(fiber.StatusInternalServerError).SendString("Failed to copy footer frame: " + err.Error())
-	}
-	frameMutex.RUnlock()
-
-	if webFrame == nil {
-		return c.Status(fiber.StatusServiceUnavailable).SendString("No frame available")
-	}
-
-	err = png.Encode(&buf, webFrame)
-	if err != nil {
+	if err := png.Encode(&buf, img); err != nil {
 		return c.Status(fiber.StatusInternalServerError).SendString("Failed to encode image")
 	}
 
 	c.Set("Content-Type", "image/png")
+	c.Set("Cache-Control", "no-store")
 	c.Set("Content-Length", strconv.Itoa(buf.Len()))
 	return c.Send(buf.Bytes())
 }
@@ -317,8 +360,13 @@ func updateData(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
+// getDefaultConfig returns the package default only (embedded layout), not the
+// merged running config. The web editor uses this as the base before applying
+// user overrides.
 func getDefaultConfig(c *fiber.Ctx) error {
-	return c.JSON(cfg)
+	configMutex.RLock()
+	defer configMutex.RUnlock()
+	return c.JSON(dftCfg)
 }
 
 // GET /api/v1/get_user_config.json
@@ -467,6 +515,24 @@ func deepCopy(src map[string]interface{}) map[string]interface{} {
 
 func getStatus(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"status": "ok"})
+}
+
+// POST /api/v1/go_poweroff?confirm=yes — shut the device down via the PMU.
+// The confirm parameter is required so a stray POST can't power the box off.
+func requestPowerOff(c *fiber.Ctx) error {
+	if c.Query("confirm") != "yes" && c.FormValue("confirm") != "yes" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"status":  "error",
+			"message": "add confirm=yes to actually power off",
+		})
+	}
+	log.Println("Power off requested via HTTP")
+	go func() {
+		if err := pmuPowerOff(); err != nil {
+			log.Printf("Power off failed: %v", err)
+		}
+	}()
+	return c.JSON(fiber.Map{"status": "ok", "message": "powering off"})
 }
 
 func resetConfig(c *fiber.Ctx) error {
@@ -753,6 +819,7 @@ func httpServer(port string) {
 	app.Post("/api/v1/go_set_user_config.json", setUserConfig)
 	app.Get("/api/v1/go_get_status.json", getStatus)
 	app.Get("/api/v1/go_reset_config", resetConfig)
+	app.Post("/api/v1/go_poweroff", requestPowerOff)
 
 	//get/set individual configs
 	app.Post("/api/v1/go_set_ping_sites", setPingSites)

@@ -136,7 +136,12 @@ func getJsonContent(cfg *Config) string {
 	resp, err := localHTTPClient.Get(url)
 	if err != nil {
 		log.Printf("GET /sms/list.json failed: %v", err)
-		// Return last successful result if we have one, otherwise return empty
+		// pcat-manager-web is down: try reading the messages straight from
+		// ModemManager before falling back to cached data.
+		if fallback := getSmsJsonFromModemManager(smsLimit); fallback != "" {
+			lastSuccessfulSmsJsonContent = fallback
+			return fallback
+		}
 		if lastSuccessfulSmsJsonContent != "" {
 			log.Printf("Using cached SMS data due to request failure")
 			return lastSuccessfulSmsJsonContent
@@ -148,6 +153,10 @@ func getJsonContent(cfg *Config) string {
 	// 2. Check HTTP status
 	if resp.StatusCode != http.StatusOK {
 		log.Printf("unexpected HTTP status: %s", resp.Status)
+		if fallback := getSmsJsonFromModemManager(smsLimit); fallback != "" {
+			lastSuccessfulSmsJsonContent = fallback
+			return fallback
+		}
 		// Return last successful result if we have one, otherwise return empty
 		if lastSuccessfulSmsJsonContent != "" {
 			log.Printf("Using cached SMS data due to HTTP error")
@@ -579,9 +588,7 @@ func getSmsPages() {
 		if !firstFetchComplete {
 			return startupRetryInterval
 		}
-		if idleState == STATE_IDLE {
-			return baseSmsInterval * time.Duration(idleMultiplier)
-		}
+		// Same 1-minute cadence as other dynamic data (idle and active).
 		return baseSmsInterval
 	}
 
@@ -605,36 +612,31 @@ func getSmsPages() {
 	defer ticker.Stop()
 
 	for {
-		select {
-		case <-ticker.C:
-			if cfg.ShowSms {
-				if !firstFetchComplete {
-					log.Println("Startup retry: attempting SMS fetch...")
-				}
-				lenSmsPagesImages = collectAndDrawSms(&cfg)
-				if lenSmsPagesImages == 0 {
-					lenSmsPagesImages = 1
-				}
-
-				// Check if this is the first successful fetch
-				if !firstFetchComplete && lastSuccessfulSmsJsonContent != "" {
-					firstFetchComplete = true
-					log.Println("First successful SMS fetch! Switching to normal interval. lenSmsPagesImages:", lenSmsPagesImages)
-					ticker.Stop()
-					ticker = time.NewTicker(getSmsInterval())
-				} else {
-					log.Println("collect lenSmsPagesImages:", lenSmsPagesImages)
-				}
-
-				totalNumPages = cfgNumPages + lenSmsPagesImages
-			} else {
-				// SMS disabled - only JSON config pages
-				lenSmsPagesImages = 0
-				totalNumPages = cfgNumPages
+		<-ticker.C
+		if cfg.ShowSms {
+			if !firstFetchComplete {
+				log.Println("Startup retry: attempting SMS fetch...")
 			}
-		case <-intervalUpdateChan:
-			ticker.Stop()
-			ticker = time.NewTicker(getSmsInterval())
+			lenSmsPagesImages = collectAndDrawSms(&cfg)
+			if lenSmsPagesImages == 0 {
+				lenSmsPagesImages = 1
+			}
+
+			// Check if this is the first successful fetch
+			if !firstFetchComplete && lastSuccessfulSmsJsonContent != "" {
+				firstFetchComplete = true
+				log.Println("First successful SMS fetch! Switching to normal interval. lenSmsPagesImages:", lenSmsPagesImages)
+				ticker.Stop()
+				ticker = time.NewTicker(getSmsInterval())
+			} else {
+				log.Println("collect lenSmsPagesImages:", lenSmsPagesImages)
+			}
+
+			totalNumPages = cfgNumPages + lenSmsPagesImages
+		} else {
+			// SMS disabled - only JSON config pages
+			lenSmsPagesImages = 0
+			totalNumPages = cfgNumPages
 		}
 	}
 }

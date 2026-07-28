@@ -101,6 +101,140 @@ func drawText(img *image.RGBA, text string, posX, posY int, face font.Face, clr 
     return
 }
 
+// drawVerticalText draws text with each rune stacked on its own line, reading
+// top-to-bottom (e.g. "CPU" as C / P / U). It is used for the compact axis-style
+// labels beside the CPU and memory bar meters. (x, y) is the top-left of the
+// column; letters are horizontally centered within charW. lineH is the vertical
+// step between letters.
+func drawVerticalText(frame *image.RGBA, text string, x, y, charW, lineH int, face font.Face, clr color.Color) {
+	if frame == nil || text == "" {
+		return
+	}
+	d := &font.Drawer{Face: face}
+	cy := y
+	for _, r := range text {
+		s := string(r)
+		w := d.MeasureString(s).Round()
+		// Center each glyph in the column width.
+		gx := x + (charW-w)/2
+		drawText(frame, s, gx, cy, face, clr, false)
+		cy += lineH
+	}
+}
+
+//---------------- Horizontal ticker (marquee) scrolling ----------------
+//
+// Long values (e.g. a Wi-Fi SSID that is wider than the 172px screen) would
+// otherwise be clipped at the right edge. drawScrollingText renders such a
+// value as a NASDAQ-style ticker: the text pauses briefly, then scrolls left
+// at a constant pixel-per-second rate and wraps around seamlessly, so every
+// character is eventually readable. Text that already fits is drawn in place,
+// unchanged.
+//
+// Scrolling is driven off wall-clock time (not the frame counter) so the
+// motion speed is identical regardless of the render FPS; the main loop only
+// controls how *smooth* it looks by choosing how often to re-render.
+
+const (
+	// scrollSpeedPxPerSec is how fast the ticker slides left. ~40 px/s reads
+	// like a stock ticker: fast enough to get through a long SSID quickly,
+	// slow enough to actually read.
+	scrollSpeedPxPerSec = 40.0
+	// scrollStartPauseMs holds the text still at the start of each loop so the
+	// beginning (the most important part) is readable before it moves.
+	scrollStartPauseMs = 1200.0
+	// scrollGapPx is the blank space between the end of the text and the start
+	// of its wrapped-around copy, so the loop seam is visually obvious.
+	scrollGapPx = 24
+)
+
+// scrollEpoch anchors the ticker time base. Set once on first use so all
+// tickers share a phase and elapsed time never depends on process start
+// details. time.Now() is fine here (this is the running app, not a workflow).
+var scrollEpoch time.Time
+
+// anyTextScrolling is set true by drawScrollingText whenever it renders a
+// value that is actually overflowing (and thus animating) during the current
+// render pass. The main loop reads and resets it to decide whether to bump the
+// frame rate for smoothness. It is written and read from the single render
+// goroutine, so no locking is required.
+var anyTextScrolling bool
+
+// drawScrollingText draws text at (x, y). availWidth is the horizontal space
+// the text may occupy (from x to the clip edge). If the text fits, it is drawn
+// normally and false is returned. If it overflows, it is drawn as a clipped,
+// wrapping ticker and true is returned. clr is the text color; face its font.
+func drawScrollingText(frame *image.RGBA, text string, x, y, availWidth int, face font.Face, clr color.Color) bool {
+	if frame == nil || text == "" || availWidth <= 0 {
+		drawText(frame, text, x, y, face, clr, false)
+		return false
+	}
+
+	d := &font.Drawer{Face: face}
+	textW := d.MeasureString(text).Round()
+
+	// Fits comfortably: draw in place, no scrolling.
+	if textW <= availWidth {
+		drawText(frame, text, x, y, face, clr, false)
+		return false
+	}
+
+	if scrollEpoch.IsZero() {
+		scrollEpoch = time.Now()
+	}
+
+	metrics := face.Metrics()
+	ascent := metrics.Ascent.Round()
+	regionH := ascent + metrics.Descent.Round()
+	if regionH <= 0 {
+		regionH = 1
+	}
+
+	// One full loop = the text plus a trailing gap; wrapping this distance
+	// brings the identical second copy exactly into the first's start.
+	loopW := textW + scrollGapPx
+
+	// Time within the current loop: a stationary start pause followed by the
+	// slide. Using milliseconds keeps the math integer-friendly.
+	scrollMs := (float64(loopW) / scrollSpeedPxPerSec) * 1000.0
+	cycleMs := scrollStartPauseMs + scrollMs
+	elapsed := math.Mod(float64(time.Since(scrollEpoch).Milliseconds()), cycleMs)
+
+	var offset int // how many px the text is shifted left
+	if elapsed > scrollStartPauseMs {
+		offset = int(((elapsed - scrollStartPauseMs) / 1000.0) * scrollSpeedPxPerSec)
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	if offset >= loopW {
+		offset = offset % loopW
+	}
+
+	// Render into a region-sized scratch image so the text is clipped to
+	// [x, x+availWidth) and never paints over neighbouring elements. Draw two
+	// copies (loopW apart) so the wrap is seamless.
+	region := image.NewRGBA(image.Rect(0, 0, availWidth, regionH))
+	src := image.NewUniform(clr)
+	rd := &font.Drawer{Dst: region, Src: src, Face: face}
+	baseline := ascent
+	rd.Dot = fixed.P(-offset, baseline)
+	rd.DrawString(text)
+	// Second copy trails the first by loopW; it scrolls in from the right as
+	// the first leaves on the left.
+	rd.Dot = fixed.P(-offset+loopW, baseline)
+	rd.DrawString(text)
+
+	// Blit the clipped region into the frame at the element position. Use Over
+	// so anti-aliased edges blend; the region's transparent pixels leave the
+	// background untouched.
+	dstRect := image.Rect(x, y, x+availWidth, y+regionH)
+	draw.Draw(frame, dstRect, region, image.Point{}, draw.Over)
+
+	anyTextScrolling = true
+	return true
+}
+
 // remoteImageCacheDir is where downloaded remote icons are stored on disk.
 const remoteImageCacheDir = "/tmp/pcat_remote_icons"
 
@@ -212,8 +346,8 @@ func loadImage(filePath string) (*image.RGBA, int, int, error) {
 			return nil, 0, 0, err
 		}
 	case ".svg":
-		// Check if SVG is already cached as rendered image
-		cacheKey := filePath + "_rendered"
+		// Supersampled AA cache key (old 1:1 keys are intentionally unused).
+		cacheKey := filePath + "_rendered_aa" + strconv.Itoa(barFrameAAScale)
 		imageCacheMu.RLock()
 		cachedSvg, svgCached := imageCache[cacheKey]
 		imageCacheMu.RUnlock()
@@ -221,35 +355,24 @@ func loadImage(filePath string) (*image.RGBA, int, int, error) {
 			bounds := cachedSvg.Bounds()
 			return cachedSvg, bounds.Dx(), bounds.Dy(), nil
 		}
-		
-		// Read the entire SVG file.
+
 		svgData, err := io.ReadAll(f)
 		if err != nil {
 			return nil, 0, 0, err
 		}
-		// Decode the SVG using oksvg.
 		icon, err := oksvg.ReadIconStream(bytes.NewReader(svgData))
 		if err != nil {
 			return nil, 0, 0, err
 		}
-		// Determine intrinsic dimensions.
 		w := int(icon.ViewBox.W)
 		h := int(icon.ViewBox.H)
-		// Create an RGBA image to serve as the rendering canvas.
-		rgba := image.NewRGBA(image.Rect(0, 0, w, h))
-		// Clear the canvas with a fully transparent color.
-		draw.Draw(rgba, rgba.Bounds(), image.NewUniform(color.RGBA{0, 0, 0, 0}), image.Point{}, draw.Src)
-		// Set the target dimensions.
-		icon.SetTarget(0, 0, float64(w), float64(h))
-		// Create a scanner and dasher for rendering.
-		scanner := rasterx.NewScannerGV(w, h, rgba, rgba.Bounds())
-		dasher := rasterx.NewDasher(w, h, scanner)
-		// Render the SVG onto the RGBA image.
-		icon.Draw(dasher, 1.0)
-		// Cache and return the rendered image.
+		if w <= 0 || h <= 0 {
+			return nil, 0, 0, fmt.Errorf("svg %s: invalid viewBox", filePath)
+		}
+		rgba := rasterizeIconAA(icon, w, h, barFrameAAScale)
 		imageCacheMu.Lock()
 		imageCache[cacheKey] = rgba
-		imageCache[filePath] = rgba // Also cache with original path for fast lookup
+		imageCache[filePath] = rgba
 		imageCacheMu.Unlock()
 		return rgba, w, h, nil
 	default:
@@ -297,6 +420,9 @@ func sendTopBar(display gc9307.Device, frame *image.RGBA) {
 	} else {
 		display.FillRectangleWithImage(0, 0, topBarSendWidth, topBarSendHeight, frame)
 	}
+	// Remember for HTTP snapshot (only published when web UI is polling).
+	rememberWebRegion("top", frame)
+	tryPublishWebSnapshot()
 }
 
 func sendFooter(display gc9307.Device, frame *image.RGBA) {
@@ -315,6 +441,8 @@ func sendFooter(display gc9307.Device, frame *image.RGBA) {
 	} else {
 		display.FillRectangleWithImage(0, footerSendY, footerSendWidth, footerSendHeight, frame)
 	}
+	rememberWebRegion("footer", frame)
+	tryPublishWebSnapshot()
 }
 
 // cropToContent scans the given frame and returns a sub-image that contains only non-background pixels.
@@ -431,6 +559,10 @@ func sendMiddle(display gc9307.Device, frame *image.RGBA) {
 	} else {
 		display.FillRectangleWithImage(0, middleSendY, middleSendWidth, middleSendHeight, frame)
 	}
+	// Middle is the last region of a normal frame; publish a complete snapshot
+	// for /api/v1/go_frame.png when the web UI is open (no-op otherwise).
+	rememberWebRegion("middle", frame)
+	tryPublishWebSnapshot()
 }
 
 // Global variable to store the last sent middle frame for comparison
@@ -566,42 +698,33 @@ func testClock(frame *image.RGBA) {
     drawText(frame, timeStr, 0, 30, face, randomColor, false)
 }
 
-func drawSVG(frame *image.RGBA, svgPath string, x0, y0, targetWidth, targetHeight int) error {
-	// If target dimensions are zero, we need to load the SVG to obtain its intrinsic size.
-	if targetWidth == 0 || targetHeight == 0 {
-		svgFile, err := os.Open(svgPath)
-		if err != nil {
-			return err
-		}
-		defer svgFile.Close()
-		
-		svgData, err := io.ReadAll(svgFile)
-		if err != nil {
-			return err
-		}
-		
-		icon, err := oksvg.ReadIconStream(bytes.NewReader(svgData))
-		if err != nil {
-			return err
-		}
-		if targetWidth == 0 {
-			targetWidth = int(icon.ViewBox.W)
-		}
-		if targetHeight == 0 {
-			targetHeight = int(icon.ViewBox.H)
-		}
+// rasterizeIconAA draws an oksvg icon at destW×destH with optional
+// supersample antialiasing (aaScale≥2 → render big, box-filter down).
+func rasterizeIconAA(icon *oksvg.SvgIcon, destW, destH, aaScale int) *image.RGBA {
+	if aaScale < 1 {
+		aaScale = 1
 	}
-	
-	// Build a cache key: svgPath + "_" + targetWidth + "_" + targetHeight.
-	cacheKey := fmt.Sprintf("%s_%d_%d", svgPath, targetWidth, targetHeight)
-	
-	// Check if we already have a cached rendered image.
-	if cachedImg, ok := svgCache[cacheKey]; ok {
-		copyImageToImageAt(frame, cachedImg, x0, y0)
-		return nil
+	if destW < 1 {
+		destW = 1
 	}
+	if destH < 1 {
+		destH = 1
+	}
+	bigW, bigH := destW*aaScale, destH*aaScale
+	rgba := image.NewRGBA(image.Rect(0, 0, bigW, bigH))
+	// Transparent clear (Pix is already zero / alpha 0).
+	icon.SetTarget(0, 0, float64(bigW), float64(bigH))
+	scanner := rasterx.NewScannerGV(bigW, bigH, rgba, rgba.Bounds())
+	dasher := rasterx.NewDasher(bigW, bigH, scanner)
+	icon.Draw(dasher, 1.0)
+	if aaScale == 1 {
+		return rgba
+	}
+	return downscaleBox(rgba, destW, destH)
+}
 
-	// Not in cache, so load and render the SVG.
+func drawSVG(frame *image.RGBA, svgPath string, x0, y0, targetWidth, targetHeight int) error {
+	// Resolve intrinsic size when the caller leaves a dimension at 0.
 	svgFile, err := os.Open(svgPath)
 	if err != nil {
 		return err
@@ -617,27 +740,326 @@ func drawSVG(frame *image.RGBA, svgPath string, x0, y0, targetWidth, targetHeigh
 	if err != nil {
 		return err
 	}
+	if targetWidth == 0 {
+		targetWidth = int(icon.ViewBox.W)
+	}
+	if targetHeight == 0 {
+		targetHeight = int(icon.ViewBox.H)
+	}
+	if targetWidth < 1 || targetHeight < 1 {
+		return fmt.Errorf("drawSVG %s: invalid target %dx%d", svgPath, targetWidth, targetHeight)
+	}
 
-	// Set the target dimensions for the SVG rendering.
-	icon.SetTarget(0, 0, float64(targetWidth), float64(targetHeight))
+	// Cache key includes AA scale so old 1:1 bitmaps are not reused.
+	cacheKey := fmt.Sprintf("%s_%d_%d_aa%d", svgPath, targetWidth, targetHeight, barFrameAAScale)
+	if cachedImg, ok := svgCache[cacheKey]; ok {
+		copyImageToImageAt(frame, cachedImg, x0, y0)
+		return nil
+	}
 
-	// Create an RGBA image to serve as the rendering canvas.
-	img := image.NewRGBA(image.Rect(0, 0, targetWidth, targetHeight))
+	img := rasterizeIconAA(icon, targetWidth, targetHeight, barFrameAAScale)
+	svgCache[cacheKey] = img
+	copyImageToImageAt(frame, img, x0, y0)
+	return nil
+}
 
-	// Set up the rasterizer context.
-	scanner := rasterx.NewScannerGV(targetWidth, targetHeight, img, img.Bounds())
-	dasher := rasterx.NewDasher(targetWidth, targetHeight, scanner)
+// renderSvgBytes rasterizes in-memory SVG data at its intrinsic size, so
+// generated graphics (signal bars, boot progress bar) never touch the
+// filesystem. If cacheKey is non-empty the rendered image is stored in
+// imageCache under that key for reuse.
+func renderSvgBytes(svgData []byte, cacheKey string) (*image.RGBA, error) {
+	return renderSvgBytesAA(svgData, cacheKey, 1)
+}
 
-	// Render the SVG onto the image.
+// renderSvgBytesAA rasterizes SVG at aaScale× resolution then box-filters
+// down to the intrinsic size. aaScale>=2 softens curved strokes (outer bar
+// frames) via supersampling; aaScale==1 is a plain 1:1 rasterize.
+func renderSvgBytesAA(svgData []byte, cacheKey string, aaScale int) (*image.RGBA, error) {
+	if aaScale < 1 {
+		aaScale = 1
+	}
+	if cacheKey != "" {
+		imageCacheMu.RLock()
+		if cached, ok := imageCache[cacheKey]; ok {
+			imageCacheMu.RUnlock()
+			return cached, nil
+		}
+		imageCacheMu.RUnlock()
+	}
+	icon, err := oksvg.ReadIconStream(bytes.NewReader(svgData))
+	if err != nil {
+		return nil, err
+	}
+	w := int(icon.ViewBox.W)
+	h := int(icon.ViewBox.H)
+	if w <= 0 || h <= 0 {
+		return nil, fmt.Errorf("renderSvgBytesAA: invalid viewBox %dx%d", w, h)
+	}
+	bigW, bigH := w*aaScale, h*aaScale
+	rgba := image.NewRGBA(image.Rect(0, 0, bigW, bigH))
+	icon.SetTarget(0, 0, float64(bigW), float64(bigH))
+	scanner := rasterx.NewScannerGV(bigW, bigH, rgba, rgba.Bounds())
+	dasher := rasterx.NewDasher(bigW, bigH, scanner)
 	icon.Draw(dasher, 1.0)
 
-	// Cache the rendered image.
-	svgCache[cacheKey] = img
+	out := rgba
+	if aaScale > 1 {
+		out = downscaleBox(rgba, w, h)
+	}
+	if cacheKey != "" {
+		imageCacheMu.Lock()
+		imageCache[cacheKey] = out
+		imageCacheMu.Unlock()
+	}
+	return out, nil
+}
 
-	// Copy the rendered image into the frame buffer at the specified offset.
-	copyImageToImageAt(frame, img, x0, y0)
+// downscaleBox averages src into destW×destH with a box filter (used for
+// supersample antialiasing of SVG strokes).
+func downscaleBox(src *image.RGBA, destW, destH int) *image.RGBA {
+	sb := src.Bounds()
+	srcW, srcH := sb.Dx(), sb.Dy()
+	if destW <= 0 || destH <= 0 || srcW <= 0 || srcH <= 0 {
+		return image.NewRGBA(image.Rect(0, 0, destW, destH))
+	}
+	out := image.NewRGBA(image.Rect(0, 0, destW, destH))
+	// Integer box sizes; leftover edge pixels are included in the last cell.
+	for dy := 0; dy < destH; dy++ {
+		y0 := dy * srcH / destH
+		y1 := (dy + 1) * srcH / destH
+		if y1 <= y0 {
+			y1 = y0 + 1
+		}
+		for dx := 0; dx < destW; dx++ {
+			x0 := dx * srcW / destW
+			x1 := (dx + 1) * srcW / destW
+			if x1 <= x0 {
+				x1 = x0 + 1
+			}
+			var rSum, gSum, bSum, aSum, n uint32
+			for y := y0; y < y1; y++ {
+				for x := x0; x < x1; x++ {
+					off := src.PixOffset(sb.Min.X+x, sb.Min.Y+y)
+					rSum += uint32(src.Pix[off+0])
+					gSum += uint32(src.Pix[off+1])
+					bSum += uint32(src.Pix[off+2])
+					aSum += uint32(src.Pix[off+3])
+					n++
+				}
+			}
+			if n == 0 {
+				n = 1
+			}
+			off := out.PixOffset(dx, dy)
+			out.Pix[off+0] = uint8(rSum / n)
+			out.Pix[off+1] = uint8(gSum / n)
+			out.Pix[off+2] = uint8(bSum / n)
+			out.Pix[off+3] = uint8(aSum / n)
+		}
+	}
+	return out
+}
 
-	return nil
+// barFrameAAScale is the supersample factor for outer chart frames (2× is a
+// good balance of edge smoothness vs cost on the small LCD).
+const barFrameAAScale = 2
+
+// barInset keeps fills inside the grey stroke so AA frame edges stay clean.
+const barInset = 1
+
+// clampBarRadius keeps a corner radius legal for a given box height.
+func clampBarRadius(radius, h int) int {
+	if radius < 0 {
+		radius = 0
+	}
+	if h > 0 && radius > h/2 {
+		radius = h / 2
+	}
+	return radius
+}
+
+// getBarOuterFrame returns a cached anti-aliased outer frame: black fill +
+// thin grey rounded stroke. Shared by CPU bars and mem/disk hbars so the
+// expensive supersampled rasterize runs once per (w,h,radius).
+func getBarOuterFrame(w, h, radius int) *image.RGBA {
+	radius = clampBarRadius(radius, h)
+	cacheKey := "gen:barframe:aa" + strconv.Itoa(barFrameAAScale) + ":" +
+		strconv.Itoa(w) + "x" + strconv.Itoa(h) + ":r" + strconv.Itoa(radius)
+
+	imageCacheMu.RLock()
+	if img, ok := imageCache[cacheKey]; ok {
+		imageCacheMu.RUnlock()
+		return img
+	}
+	imageCacheMu.RUnlock()
+
+	var buf bytes.Buffer
+	canvas := svg.New(&buf)
+	canvas.Start(w, h)
+	// Half-pixel inset keeps the 1px stroke from being clipped at the edge.
+	canvas.Roundrect(0, 0, w-1, h-1, radius, radius,
+		"fill:"+barBgHex+";stroke:"+barTrackHex+";stroke-width:1")
+	canvas.End()
+
+	img, err := renderSvgBytesAA(buf.Bytes(), cacheKey, barFrameAAScale)
+	if err != nil {
+		log.Printf("getBarOuterFrame: %v", err)
+		// Fallback empty black rect so callers still have a buffer.
+		fallback := image.NewRGBA(image.Rect(0, 0, w, h))
+		draw.Draw(fallback, fallback.Bounds(), image.NewUniform(PCAT_BLACK), image.Point{}, draw.Src)
+		return fallback
+	}
+	return img
+}
+
+// getBarOuterStroke returns a cached AA stroke-only overlay (no fill) so fills
+// cannot cover the grey frame edge; always composited last.
+func getBarOuterStroke(w, h, radius int) *image.RGBA {
+	radius = clampBarRadius(radius, h)
+	cacheKey := "gen:barstroke:aa" + strconv.Itoa(barFrameAAScale) + ":" +
+		strconv.Itoa(w) + "x" + strconv.Itoa(h) + ":r" + strconv.Itoa(radius)
+
+	imageCacheMu.RLock()
+	if img, ok := imageCache[cacheKey]; ok {
+		imageCacheMu.RUnlock()
+		return img
+	}
+	imageCacheMu.RUnlock()
+
+	var buf bytes.Buffer
+	canvas := svg.New(&buf)
+	canvas.Start(w, h)
+	canvas.Roundrect(0, 0, w-1, h-1, radius, radius,
+		"fill:none;stroke:"+barTrackHex+";stroke-width:1")
+	canvas.End()
+
+	img, err := renderSvgBytesAA(buf.Bytes(), cacheKey, barFrameAAScale)
+	if err != nil {
+		log.Printf("getBarOuterStroke: %v", err)
+		return image.NewRGBA(image.Rect(0, 0, w, h))
+	}
+	return img
+}
+
+// getBarInnerMask returns a cached AA white rounded-rect used to clip fills so
+// they never spill past the frame's inner corner curve.
+func getBarInnerMask(w, h, radius, inset int) *image.RGBA {
+	radius = clampBarRadius(radius, h)
+	if inset < 0 {
+		inset = 0
+	}
+	innerR := radius - inset
+	if innerR < 0 {
+		innerR = 0
+	}
+	cacheKey := "gen:barmask:aa" + strconv.Itoa(barFrameAAScale) + ":" +
+		strconv.Itoa(w) + "x" + strconv.Itoa(h) +
+		":r" + strconv.Itoa(radius) + ":i" + strconv.Itoa(inset)
+
+	imageCacheMu.RLock()
+	if img, ok := imageCache[cacheKey]; ok {
+		imageCacheMu.RUnlock()
+		return img
+	}
+	imageCacheMu.RUnlock()
+
+	iw := w - 2*inset
+	ih := h - 2*inset
+	if iw < 1 || ih < 1 {
+		empty := image.NewRGBA(image.Rect(0, 0, w, h))
+		imageCacheMu.Lock()
+		imageCache[cacheKey] = empty
+		imageCacheMu.Unlock()
+		return empty
+	}
+
+	var buf bytes.Buffer
+	canvas := svg.New(&buf)
+	canvas.Start(w, h)
+	// Opaque white interior = keep fill; transparent outside = clip.
+	canvas.Roundrect(inset, inset, iw-1, ih-1, innerR, innerR, "fill:#FFFFFF")
+	canvas.End()
+
+	img, err := renderSvgBytesAA(buf.Bytes(), cacheKey, barFrameAAScale)
+	if err != nil {
+		log.Printf("getBarInnerMask: %v", err)
+		// Fallback: solid rect inset (no rounded clip).
+		fallback := image.NewRGBA(image.Rect(0, 0, w, h))
+		fillRect(fallback, inset, inset, iw, ih, color.RGBA{255, 255, 255, 255})
+		return fallback
+	}
+	return img
+}
+
+// applyAlphaMask multiplies dst's RGBA by mask alpha so fills follow the
+// rounded interior (and soft AA edge) of the frame.
+func applyAlphaMask(dst, mask *image.RGBA) {
+	if dst == nil || mask == nil {
+		return
+	}
+	b := dst.Bounds().Intersect(mask.Bounds())
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			di := dst.PixOffset(x, y)
+			mi := mask.PixOffset(x, y)
+			ma := uint32(mask.Pix[mi+3])
+			if ma == 0 {
+				dst.Pix[di+0] = 0
+				dst.Pix[di+1] = 0
+				dst.Pix[di+2] = 0
+				dst.Pix[di+3] = 0
+				continue
+			}
+			if ma == 255 {
+				continue
+			}
+			dst.Pix[di+0] = uint8(uint32(dst.Pix[di+0]) * ma / 255)
+			dst.Pix[di+1] = uint8(uint32(dst.Pix[di+1]) * ma / 255)
+			dst.Pix[di+2] = uint8(uint32(dst.Pix[di+2]) * ma / 255)
+			dst.Pix[di+3] = uint8(uint32(dst.Pix[di+3]) * ma / 255)
+		}
+	}
+}
+
+// composeBarChart builds: black AA frame → clipped yellow fills → grey stroke
+// on top so nothing paints outside the rounded frame.
+func composeBarChart(w, h, radius int, paintFills func(layer *image.RGBA, inset, innerW, innerH, innerR int)) *image.RGBA {
+	radius = clampBarRadius(radius, h)
+	inset := barInset
+	innerW := w - 2*inset
+	innerH := h - 2*inset
+	innerR := radius - inset
+	if innerR < 0 {
+		innerR = 0
+	}
+
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	base := getBarOuterFrame(w, h, radius)
+	draw.Draw(img, img.Bounds(), base, image.Point{}, draw.Src)
+
+	if paintFills != nil && innerW > 0 && innerH > 0 {
+		fillLayer := image.NewRGBA(image.Rect(0, 0, w, h))
+		paintFills(fillLayer, inset, innerW, innerH, innerR)
+		applyAlphaMask(fillLayer, getBarInnerMask(w, h, radius, inset))
+		draw.Draw(img, img.Bounds(), fillLayer, image.Point{}, draw.Over)
+	}
+
+	// Stroke last: restores the AA grey edge over any fill that reached it.
+	draw.Draw(img, img.Bounds(), getBarOuterStroke(w, h, radius), image.Point{}, draw.Over)
+	return img
+}
+
+// fillRect draws a solid axis-aligned rectangle (no AA — fills are sharp on
+// purpose; only the outer frame is supersampled).
+func fillRect(dst *image.RGBA, x, y, w, h int, c color.RGBA) {
+	if w <= 0 || h <= 0 || dst == nil {
+		return
+	}
+	rect := image.Rect(x, y, x+w, y+h).Intersect(dst.Bounds())
+	if rect.Empty() {
+		return
+	}
+	draw.Draw(dst, rect, image.NewUniform(c), image.Point{}, draw.Src)
 }
 
 // cropImageAt crops the given src image starting at (x0, y0) with the specified width and height.
@@ -1003,11 +1425,12 @@ func drawSignalStrength(frame *image.RGBA, x0, y0 int, strength float64) {
 	numBars := 4
 	yMinHeight := 6
 	strengthInt := int(math.Ceil(strength * 4))
-	fn := "/tmp/strength-"+strconv.Itoa(strengthInt)+".svg"
+	cacheKey := "gen:strength-" + strconv.Itoa(strengthInt)
 
-	if _, err := os.Stat(fn); err == nil {	//if file exists, serve the file from disk
-		//do nothing
-	}else{
+	imageCacheMu.RLock()
+	img, cached := imageCache[cacheKey]
+	imageCacheMu.RUnlock()
+	if !cached {
 		var buf bytes.Buffer
 		canvas := svg.New(&buf)
 		canvas.Start(xBarSize*numBars+barSpace*(numBars-1), yBarSize+yMinHeight)
@@ -1021,115 +1444,559 @@ func drawSignalStrength(frame *image.RGBA, x0, y0 int, strength float64) {
 			}
 		}
 		canvas.End()
-		
-		svgFile, err := os.Create(fn)
-		if err != nil {
-			panic(err)
-		}
-		_, err = svgFile.Write(buf.Bytes())
-		if err != nil {
-			panic(err)
-		}
-		svgFile.Close()
-	}
 
-	img, _, _, err := loadImage(fn)
-	if err != nil {
-		panic(err)
+		var err error
+		img, err = renderSvgBytes(buf.Bytes(), cacheKey)
+		if err != nil {
+			panic(err)
+		}
 	}
 	copyImageToImageAt(frame, img, x0, y0)
 }
 
-func drawBattery(w, h int, soc float64, isCharging bool, x0, y0 int) *image.RGBA {
-	terminalWidth := 3
-	face, _, err := getFontFace("clock")
-	if err != nil {
-		fmt.Println("Error loading font:", err)
-		return nil
+// Bar-chart styling shared by the CPU and memory meters. Colors reuse the boot
+// progress bar's palette (yellow fill on a grey track); the corner radii echo
+// its rounded look, scaled down for the small in-page bars.
+var (
+	barFillHex  = fmt.Sprintf("#%02X%02X%02X", PCAT_YELLOW.R, PCAT_YELLOW.G, PCAT_YELLOW.B)
+	barTrackHex = fmt.Sprintf("#%02X%02X%02X", PCAT_GREY.R, PCAT_GREY.G, PCAT_GREY.B)
+	// iStat-menu look: track sits on our black background with only a thin
+	// grey frame drawn to show the edge of each bar.
+	barBgHex = fmt.Sprintf("#%02X%02X%02X", PCAT_BLACK.R, PCAT_BLACK.G, PCAT_BLACK.B)
+)
+
+const (
+	// Shared outer-frame corner radius for CPU bars and the mem hbar so both
+	// charts match visually.
+	hbarRadius = 5 // also used by drawCpuBars outer frame
+)
+
+// drawCpuBars renders a framed box of vertical bars — one per CPU core — at
+// (x0, y0) with total size w×h. Fills are clipped to the rounded interior and
+// the grey stroke is drawn last so nothing sits outside the frame; full
+// height fills follow the top inner corner curve via the clip mask.
+func drawCpuBars(frame *image.RGBA, x0, y0, w, h int, usages []float64) {
+	numCores := len(usages)
+	if numCores == 0 || w <= 0 || h <= 0 {
+		return
 	}
-	img := image.NewRGBA(image.Rect(0, 0, w, h))
+
+	// "v5": inner clip mask + stroke-on-top (no fill outside rounded frame).
+	var keyBuf strings.Builder
+	keyBuf.WriteString("gen:cpubars:v5:")
+	keyBuf.WriteString(strconv.Itoa(w))
+	keyBuf.WriteByte('x')
+	keyBuf.WriteString(strconv.Itoa(h))
+	for _, u := range usages {
+		bucket := int(u) / 5
+		keyBuf.WriteByte(':')
+		keyBuf.WriteString(strconv.Itoa(bucket))
+	}
+	cacheKey := keyBuf.String()
+
+	imageCacheMu.RLock()
+	img, cached := imageCache[cacheKey]
+	imageCacheMu.RUnlock()
+	if !cached {
+		img = composeBarChart(w, h, hbarRadius, func(layer *image.RGBA, inset, innerW, innerH, innerR int) {
+			const gap = 1
+			avail := innerW - gap*(numCores-1)
+			if avail < numCores {
+				avail = innerW
+			}
+			for i := 0; i < numCores; i++ {
+				barStart := i * avail / numCores
+				barEnd := (i + 1) * avail / numCores
+				barW := barEnd - barStart
+				if barW < 1 {
+					continue
+				}
+				bx := inset + barStart + i*gap
+				u := usages[i]
+				if u < 0 {
+					u = 0
+				} else if u > 100 {
+					u = 100
+				}
+				fillH := 0
+				if u > 0 {
+					fillH = int(math.Round(float64(innerH) * u / 100.0))
+					if fillH < 1 {
+						fillH = 1
+					}
+					if fillH > innerH {
+						fillH = innerH
+					}
+				}
+				if fillH > 0 {
+					// From bottom of the inner box; top edge is clipped to the
+					// rounded mask so full bars match the frame's top corners.
+					fy := inset + (innerH - fillH)
+					fillRect(layer, bx, fy, barW, fillH, PCAT_YELLOW)
+				}
+			}
+		})
+
+		imageCacheMu.Lock()
+		imageCache[cacheKey] = img
+		imageCacheMu.Unlock()
+	}
+	copyImageToImageAt(frame, img, x0, y0)
+}
+
+// drawDiskBars renders onboard (root/eMMC) and optional NVMe usage as
+// horizontal bars. When NVMe is present the width is split left/right with a
+// small gap and tiny "eMMC"/"NVMe" labels are centered in each bar; when
+// absent a single full-width eMMC bar is shown. Height should match the mem
+// hbar. Works the same on OpenWrt and Debian.
+func drawDiskBars(frame *image.RGBA, x0, y0, w, h int) {
+	if w <= 0 || h <= 0 {
+		return
+	}
+	rootPct := 0.0
+	if v, ok := globalData.Load("DiskUsagePercent"); ok && v != nil {
+		switch n := v.(type) {
+		case float64:
+			rootPct = n
+		case int:
+			rootPct = float64(n)
+		}
+	}
+	nvmePresent := false
+	if v, ok := globalData.Load("DiskNvmePresent"); ok {
+		if b, ok := v.(bool); ok {
+			nvmePresent = b
+		}
+	}
+	nvmePct := 0.0
+	if v, ok := globalData.Load("DiskNvmePercent"); ok && v != nil {
+		switch n := v.(type) {
+		case float64:
+			nvmePct = n
+		case int:
+			nvmePct = float64(n)
+		}
+	}
+
+	const gap = 4
+	if nvmePresent && w > gap+2 {
+		leftW := (w - gap) / 2
+		rightW := w - gap - leftW
+		drawHBar(frame, x0, y0, leftW, h, rootPct, "")
+		drawHBar(frame, x0+leftW+gap, y0, rightW, h, nvmePct, "")
+		drawTinyBarLabel(frame, x0+leftW/2, y0+h/2, "eMMC")
+		drawTinyBarLabel(frame, x0+leftW+gap+rightW/2, y0+h/2, "NVMe")
+		return
+	}
+	// No NVMe: single onboard bar uses the full slot.
+	drawHBar(frame, x0, y0, w, h, rootPct, "")
+	drawTinyBarLabel(frame, x0+w/2, y0+h/2, "eMMC")
+}
+
+// drawTinyBarLabel centers a label with a 1px black aura so it stays readable
+// on yellow fill and empty track (disk bar names). Uses the same "unit" face
+// as the mem bar "3.2/16GB" overlay so eMMC/NVMe match RAM size text.
+func drawTinyBarLabel(frame *image.RGBA, cx, cy int, label string) {
+	if frame == nil || label == "" {
+		return
+	}
+	face, _, err := getFontFace("unit")
+	if err != nil {
+		face, _, err = getFontFace("tiny")
+	}
+	if err != nil {
+		return
+	}
+	drawTextWithAura(frame, label, cx, cy, face, PCAT_WHITE, PCAT_BLACK)
+}
+
+// hbarFillSVG builds a yellow fill for the horizontal bar.
+// full=true → all corners use radius fr (seats into the rounded frame at 100%).
+// full=false → left corners rounded to match the track; right edge is sharp.
+func hbarFillSVG(canvasW, canvasH, x, y, fillW, fillH, fr int, full bool) []byte {
+	var buf bytes.Buffer
+	canvas := svg.New(&buf)
+	canvas.Start(canvasW, canvasH)
+	if fillW <= 0 || fillH <= 0 {
+		canvas.End()
+		return buf.Bytes()
+	}
+	if full || fr <= 0 {
+		canvas.Roundrect(x, y, fillW, fillH, fr, fr, "fill:"+barFillHex)
+		canvas.End()
+		return buf.Bytes()
+	}
+	// Left-rounded, right-sharp (y grows downward).
+	x0, y0 := x, y
+	x1, y1 := x+fillW, y+fillH
+	r := fr
+	d := fmt.Sprintf(
+		"M%d %d H%d V%d H%d A%d %d 0 0 1 %d %d V%d A%d %d 0 0 1 %d %d Z",
+		x0+r, y0,
+		x1,
+		y1,
+		x0+r,
+		r, r, x0, y1-r,
+		y0+r,
+		r, r, x0+r, y0,
+	)
+	canvas.Path(d, "fill:"+barFillHex)
+	canvas.End()
+	return buf.Bytes()
+}
+
+// drawHBar renders a framed horizontal progress bar at (x0, y0) of size w×h.
+// Yellow fill is rounded to the inner corner radius (right edge matches the
+// frame when full), clipped to the interior, with the grey stroke drawn last.
+// Optional label is centered with a 1px black aura (e.g. "3.2/16GB").
+func drawHBar(frame *image.RGBA, x0, y0, w, h int, pct float64, label string) {
+	if w <= 0 || h <= 0 {
+		return
+	}
+	if pct < 0 {
+		pct = 0
+	} else if pct > 100 {
+		pct = 100
+	}
+
+	bucket := int(pct)
+	// "v3": inner mask clip + stroke-on-top + matching inner fill radius.
+	cacheKey := "gen:hbar:v3:" + strconv.Itoa(w) + "x" + strconv.Itoa(h) + ":" + strconv.Itoa(bucket)
+
+	imageCacheMu.RLock()
+	img, cached := imageCache[cacheKey]
+	imageCacheMu.RUnlock()
+	if !cached {
+		img = composeBarChart(w, h, hbarRadius, func(layer *image.RGBA, inset, innerW, innerH, innerR int) {
+			fillW := 0
+			if pct > 0 && innerW > 0 {
+				fillW = int(math.Round(float64(innerW) * pct / 100.0))
+				if fillW < 1 {
+					fillW = 1
+				}
+				if fillW > innerW {
+					fillW = innerW
+				}
+			}
+			if fillW <= 0 || innerH <= 0 {
+				return
+			}
+			// Full (100%): all corners match the frame's inner radius.
+			// Partial: left seats into the track curve; right edge is always
+			// sharp so mid-track ends don't look inconsistently rounded.
+			full := fillW >= innerW
+			fr := innerR
+			if fr > fillW/2 {
+				fr = fillW / 2
+			}
+			if fr > innerH/2 {
+				fr = innerH / 2
+			}
+
+			svgData := hbarFillSVG(w, h, inset, inset, fillW, innerH, fr, full)
+			shape := "full"
+			if !full {
+				shape = "sharpR"
+			}
+			fillKey := "gen:hbarfill:aa" + strconv.Itoa(barFrameAAScale) + ":" +
+				strconv.Itoa(w) + "x" + strconv.Itoa(h) +
+				":fw" + strconv.Itoa(fillW) + ":fh" + strconv.Itoa(innerH) +
+				":r" + strconv.Itoa(fr) + ":i" + strconv.Itoa(inset) + ":" + shape
+			fillImg, err := renderSvgBytesAA(svgData, fillKey, barFrameAAScale)
+			if err != nil {
+				fillRect(layer, inset, inset, fillW, innerH, PCAT_YELLOW)
+			} else {
+				draw.Draw(layer, layer.Bounds(), fillImg, image.Point{}, draw.Over)
+			}
+		})
+
+		imageCacheMu.Lock()
+		imageCache[cacheKey] = img
+		imageCacheMu.Unlock()
+	}
+	copyImageToImageAt(frame, img, x0, y0)
+
+	if label != "" {
+		face, _, err := getFontFace("unit")
+		if err != nil {
+			face, _, err = getFontFace("tiny")
+		}
+		if err == nil {
+			drawTextWithAura(frame, label, x0+w/2, y0+h/2, face, PCAT_WHITE, PCAT_BLACK)
+		}
+	}
+}
+
+// drawTextWithAura draws text centered on (cx, cy) with a 1px outline (aura)
+// in auraClr around the foreground fg. Used for overlays on busy backgrounds
+// like the memory bar fill.
+func drawTextWithAura(img *image.RGBA, text string, cx, cy int, face font.Face, fg, auraClr color.Color) {
+	if img == nil || text == "" || face == nil {
+		return
+	}
+	d := &font.Drawer{Face: face}
+	tw := d.MeasureString(text).Round()
+	metrics := face.Metrics()
+	ascent := metrics.Ascent.Round()
+	descent := metrics.Descent.Round()
+	th := ascent + descent
+	// Top-left of the text box centered on (cx, cy); baseline = top + ascent.
+	x := cx - tw/2
+	baseline := cy - th/2 + ascent
+
+	// 8-neighbour outline, then the fill on top.
+	for dy := -1; dy <= 1; dy++ {
+		for dx := -1; dx <= 1; dx++ {
+			if dx == 0 && dy == 0 {
+				continue
+			}
+			drawTextAtBaseline(img, text, x+dx, baseline+dy, face, auraClr)
+		}
+	}
+	drawTextAtBaseline(img, text, x, baseline, face, fg)
+}
+
+// drawTextAtBaseline draws text with its baseline at (x, baselineY) — no
+// extra ascent offset (unlike drawText which treats y as top-ish).
+func drawTextAtBaseline(img *image.RGBA, text string, x, baselineY int, face font.Face, clr color.Color) {
+	if img == nil || text == "" || face == nil {
+		return
+	}
+	d := &font.Drawer{
+		Dst:  img,
+		Src:  image.NewUniform(clr),
+		Face: face,
+		Dot:  fixed.P(x, baselineY),
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("drawTextAtBaseline panic recovered: %v", r)
+		}
+	}()
+	d.DrawString(text)
+}
+
+// renderAndCache rasterizes the SVG buffer under cacheKey and blits it. Small
+// helper used by the early-return path in drawCpuBars.
+func renderAndCache(buf *bytes.Buffer, cacheKey string, frame *image.RGBA, x0, y0 int) {
+	img, err := renderSvgBytes(buf.Bytes(), cacheKey)
+	if err != nil {
+		log.Printf("renderAndCache: render error: %v", err)
+		return
+	}
+	copyImageToImageAt(frame, img, x0, y0)
+}
+
+// batteryBodyRadius is a modest corner radius so the top-bar battery reads
+// soft without looking like a capsule.
+const batteryBodyRadius = 3
+
+// drawBattery paints the top-bar battery glyph: AA rounded body + nub, SOC
+// empty-region shade (preserving edge alpha), percent text, optional bolt.
+// Results are cached per size/SOC/charging so the supersample is rare.
+func drawBattery(w, h int, soc float64, isCharging bool, x0, y0 int) *image.RGBA {
+	if w <= 0 || h <= 0 {
+		return image.NewRGBA(image.Rect(0, 0, 1, 1))
+	}
+	if soc < 0 {
+		soc = 0
+	} else if soc > 100 {
+		soc = 100
+	}
+	socBucket := int(soc) // 1% cache granularity matches the label
+
+	// "v4" after ink-bounds vertical centering (Orbitron optical center).
+	cacheKey := "gen:batt:aa" + strconv.Itoa(barFrameAAScale) + ":" +
+		strconv.Itoa(w) + "x" + strconv.Itoa(h) +
+		":s" + strconv.Itoa(socBucket) +
+		":c" + strconv.FormatBool(isCharging) + ":v4"
+	imageCacheMu.RLock()
+	if cached, ok := imageCache[cacheKey]; ok {
+		imageCacheMu.RUnlock()
+		return cached
+	}
+	imageCacheMu.RUnlock()
+
+	terminalWidth := 3
+	terminalH := 6
+	if terminalH > h {
+		terminalH = h
+	}
+	bodyW := w - terminalWidth
+	if bodyW < 1 {
+		bodyW = w
+		terminalWidth = 0
+	}
+
 	var colorMain, colorShaded color.RGBA
 	if soc < 20 {
 		colorMain = PCAT_RED
-	}else{
-		if isCharging {
-			colorMain = PCAT_GREEN
-		}else{
-			colorMain = PCAT_WHITE
-		}
+	} else if isCharging {
+		colorMain = PCAT_GREEN
+	} else {
+		colorMain = PCAT_WHITE
 	}
 	colorShaded = PCAT_GREY
-	
-	drawRect(img, 0, 0, w-terminalWidth, h, colorMain) //main battery part
-	drawRect(img, w-terminalWidth, h/2-3, terminalWidth, 6, colorMain) //terminal part
-	
-	//soc shade
-	startShadeX := int(math.Round((soc / 100.0) * float64(w)))
+
+	r := batteryBodyRadius
+	if r > h/2 {
+		r = h / 2
+	}
+	mainHex := fmt.Sprintf("#%02X%02X%02X", colorMain.R, colorMain.G, colorMain.B)
+
+	// Supersampled rounded body + terminal nub (same AA path as chart frames).
+	var buf bytes.Buffer
+	canvas := svg.New(&buf)
+	canvas.Start(w, h)
+	// Body: slightly inset so the AA stroke of the curve isn't clipped.
+	canvas.Roundrect(0, 0, bodyW-1, h-1, r, r, "fill:"+mainHex)
+	if terminalWidth > 0 {
+		ty := (h - terminalH) / 2
+		tr := 1
+		if tr > terminalH/2 {
+			tr = terminalH / 2
+		}
+		canvas.Roundrect(bodyW, ty, terminalWidth-1, terminalH, tr, tr, "fill:"+mainHex)
+	}
+	canvas.End()
+
+	img, err := renderSvgBytesAA(buf.Bytes(), "", barFrameAAScale)
+	if err != nil {
+		log.Printf("drawBattery SVG: %v", err)
+		img = image.NewRGBA(image.Rect(0, 0, w, h))
+		fillRect(img, 0, 0, bodyW, h, colorMain)
+		if terminalWidth > 0 {
+			fillRect(img, bodyW, h/2-terminalH/2, terminalWidth, terminalH, colorMain)
+		}
+	}
+
+	// Empty capacity: recolour non-transparent pixels from startShadeX rightward
+	// so the AA edge soft-alpha is kept (just tinted grey).
+	startShadeX := int(math.Round((soc / 100.0) * float64(bodyW)))
+	if startShadeX < 0 {
+		startShadeX = 0
+	}
 	if startShadeX < w {
-		for x := startShadeX; x < w-3; x++ { 
-			for y := 0; y < h; y++ { 
-				img.SetRGBA(x, y, colorShaded)
-			}
-		}
-		var terminalX int
-		if startShadeX > w-3{
-			terminalX = startShadeX
-		}else{
-			terminalX = w-3
-		}
-		for x := terminalX; x < w; x++ { 
-			for y := h/2-3; y < h/2+3; y++ { 
-				img.SetRGBA(x, y, colorShaded)
+		for y := 0; y < h; y++ {
+			for x := startShadeX; x < w; x++ {
+				c := img.RGBAAt(x, y)
+				if c.A == 0 {
+					continue
+				}
+				// Premultiplied-ish: keep edge alpha, swap RGB to shaded.
+				img.SetRGBA(x, y, color.RGBA{
+					R: colorShaded.R,
+					G: colorShaded.G,
+					B: colorShaded.B,
+					A: c.A,
+				})
 			}
 		}
 	}
 
-	//draw corners
-	cornerCroods := []struct {X, Y int}{
-		{0, 0},
-		{w-terminalWidth-1, 0},
-		{0, h-1},
-		{w-terminalWidth-1, h-1},
-		{w-1, h/2-3},
-		{w-1, h/2+3-1},
+	face, _, err := getFontFace("clock")
+	if err != nil {
+		fmt.Println("Error loading font:", err)
+		imageCacheMu.Lock()
+		imageCache[cacheKey] = img
+		imageCacheMu.Unlock()
+		return img
 	}
-	
-	for _, coord := range cornerCroods {
-		origColor := img.RGBAAt(coord.X, coord.Y)
-		newColor := color.RGBA{uint8(float64(origColor.R) *0.6), uint8(float64(origColor.G) * 0.6), uint8(float64(origColor.B) *0.6), 255}
-		img.SetRGBA(coord.X, coord.Y, newColor)
-	}
-	
+
 	textColor := PCAT_BLACK
-	chargingBlotWidth := 10
-	//draw text
 	if soc < 20 {
 		textColor = PCAT_WHITE
-	}else{
-		textColor = PCAT_BLACK
 	}
-	batteryText := strconv.Itoa(int(soc))
-	drawChargingBlot := true
-	if !isCharging || soc == 100 {
-		chargingBlotWidth = 0
-		drawChargingBlot = false
+	batteryText := strconv.Itoa(socBucket)
+	drawChargingBlot := isCharging && socBucket < 100
+
+	// Measure text + optional bolt, then center the whole group in the body
+	// (excluding the terminal nub). Vertical center uses *ink* bounds — Orbitron
+	// has a tall em-box so metric-only centering sits too low.
+	d := &font.Drawer{Face: face}
+	textW := d.MeasureString(batteryText).Round()
+	metrics := face.Metrics()
+	ascent := metrics.Ascent.Round()
+	descent := metrics.Descent.Round()
+
+	// Ink box relative to baseline (Min.Y ≤ 0 above, Max.Y ≥ 0 below).
+	inkTop, inkBot := 0, 0 // pixels relative to baseline; top is ≤ 0
+	inkSet := false
+	for _, r := range batteryText {
+		b, _, ok := face.GlyphBounds(r)
+		if !ok {
+			continue
+		}
+		top := b.Min.Y.Ceil() // more negative = higher above baseline
+		bot := b.Max.Y.Ceil()
+		if !inkSet {
+			inkTop, inkBot = top, bot
+			inkSet = true
+			continue
+		}
+		if top < inkTop {
+			inkTop = top
+		}
+		if bot > inkBot {
+			inkBot = bot
+		}
 	}
-	//drawText(img, batteryText, (w-terminalWidth)/2, -3, face, textColor, true)
-	x, _ := drawText(img, batteryText, (w-terminalWidth-chargingBlotWidth)/2+1, -4, face, textColor, true)
+	if !inkSet || inkBot <= inkTop {
+		// Fallback to em-box if bounds unavailable.
+		inkTop = -ascent
+		inkBot = descent
+	}
+	var chargingBolt *image.RGBA
+	boltW, boltH := 0, 0
+	const boltGap = 1
 	if drawChargingBlot {
-		var chargingBolt *image.RGBA
-		var err error
+		var berr error
 		if soc < 20 {
-			chargingBolt, _, _, err = loadImage(assetsPrefix+"/assets/svg/blotWhite.svg")
-		}else{
-			chargingBolt, _, _, err = loadImage(assetsPrefix+"/assets/svg/blotBlack.svg")
+			chargingBolt, _, _, berr = loadImage(assetsPrefix + "/assets/svg/blotWhite.svg")
+		} else {
+			chargingBolt, _, _, berr = loadImage(assetsPrefix + "/assets/svg/blotBlack.svg")
 		}
-		if err != nil {
-			fmt.Println("Error loading charging bolt:", err)
-			return nil
+		if berr != nil {
+			fmt.Println("Error loading charging bolt:", berr)
+			drawChargingBlot = false
+		} else {
+			boltW = chargingBolt.Bounds().Dx()
+			boltH = chargingBolt.Bounds().Dy()
 		}
-		copyImageToImageAt(img, chargingBolt, x, 1)
 	}
+
+	totalW := textW
+	if drawChargingBlot {
+		totalW = textW + boltGap + boltW
+	}
+	startX := (bodyW - totalW) / 2
+	if startX < 0 {
+		startX = 0
+	}
+	// Place ink center at body mid-line: baseY + (inkTop+inkBot)/2 = h/2
+	// → baseY = h/2 - (inkTop+inkBot)/2
+	baseY := h/2 - (inkTop+inkBot)/2
+	if baseY+inkTop < 0 {
+		baseY = -inkTop
+	}
+	if baseY+inkBot > h {
+		baseY = h - inkBot
+	}
+
+	drawTextAtBaseline(img, batteryText, startX, baseY, face, textColor)
+	if drawChargingBlot && chargingBolt != nil {
+		// Vertically center bolt on the same ink mid-line as the digits.
+		inkMid := baseY + (inkTop+inkBot)/2
+		boltY := inkMid - boltH/2
+		if boltY < 0 {
+			boltY = 0
+		}
+		copyImageToImageAt(img, chargingBolt, startX+textW+boltGap, boltY)
+	}
+
+	imageCacheMu.Lock()
+	imageCache[cacheKey] = img
+	imageCacheMu.Unlock()
 	return img
 }
 
@@ -1151,7 +2018,8 @@ func drawTopBar(display gc9307.Device, frame *image.RGBA) {
 
 	// Prefer the precise active egress (which can also be "wifi" in Smart WAN
 	// mode) over the coarse wired/mobile gateway hint.
-	// networkStr: "5"/"4"/"3" cellular, "w" ethernet, "i" WiFi (Smart WAN).
+	// networkStr: "5"/"4"/"3" cellular, "w" ethernet, "i" WiFi (Smart WAN),
+	// "" (empty) when no WAN is secured yet.
 	if activeEgress == "wifi" {
 		networkStr = "i"
 	} else if activeEgress == "wan" || activeEgress == "lan" {
@@ -1165,7 +2033,10 @@ func drawTopBar(display gc9307.Device, frame *image.RGBA) {
 	}else if gatewayDevice == "wired"{
 		networkStr = "w"
 	}else{
-		networkStr = "w"  // Default to ethernet when network status is unknown
+		// No WAN secured yet (e.g. at startup before pcat-manager-web reports
+		// a real egress, or when it reports none). Show no network icon rather
+		// than falsely claiming ethernet.
+		networkStr = ""
 	}
 	signalStrength := 0.43
 	// Resolve the cellular signal level for the cache key so the bar refreshes
@@ -1305,7 +2176,7 @@ func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
 			
 			if exists {
 				if textValue == nil {
-					textToDisplay = "-"
+					textToDisplay = ""
 				} else {
 					// Special handling for ping timeout (-2) and errors
 					if (element.DataKey == "Ping0" || element.DataKey == "Ping1") {
@@ -1334,23 +2205,27 @@ func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
 								isPingTimeout = true
 							}
 						} else {
-							// If not a numeric type, show as error
-							textToDisplay = "-"
+							textToDisplay = ""
 						}
 					} else {
 						textToDisplay = fmt.Sprintf("%v", textValue)
 						// Failed custom-metric fetches store sentinels like
-						// "ERROR"/"TIMEOUT"; show the regular "-" placeholder
-						// instead of the raw sentinel (plus units).
+						// "ERROR"/"TIMEOUT"; treat as empty (no raw sentinel).
 						if isErrorSentinel(textToDisplay) {
-							textToDisplay = "-"
+							textToDisplay = ""
 						}
 					}
 				}
 			} else {
-				textToDisplay = "-" // or any default value you prefer
+				textToDisplay = ""
 			}
-			
+			// A lone "-" (or blank) means "nothing to show" — leave the slot
+			// empty (e.g. page0 RemainingTime) rather than drawing a dash.
+			textToDisplay = strings.TrimSpace(textToDisplay)
+			if textToDisplay == "" || textToDisplay == "-" {
+				continue
+			}
+
 			// Get the font face for the main text (choose Chinese font if needed)
 			face, _, err := getFontFaceForText(element.Font, textToDisplay)
 			if err != nil {
@@ -1388,6 +2263,27 @@ func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
 			mainAscent := face.Metrics().Ascent.Round()
 			// element.Position.Y acts as the top of the text area.
 			mainBaseline := element.Position.Y + mainAscent
+
+			// Available horizontal space for this value: from its start x to the
+			// right screen edge (minus the standard right margin), unless the
+			// element pins an explicit width via "size".width. Values wider than
+			// this (long SSIDs, IPv6 addresses, ISP names, …) scroll as a ticker
+			// instead of being clipped; values that fit are drawn in place.
+			availWidth := PCAT2_LCD_WIDTH - element.Position.X - PCAT2_R_MARGIN
+			if element.Size != nil && element.Size.Width > 0 {
+				availWidth = element.Size.Width
+			} else if element.Size2 != nil && element.Size2.Width > 0 {
+				availWidth = element.Size2.Width
+			}
+
+			mainW := font.MeasureString(face, textToDisplay).Round()
+			// A ping timeout is a single "X"; never scroll it. Only overflowing
+			// values scroll, and a scrolling value carries no trailing units.
+			if !isPingTimeout && mainW > availWidth {
+				drawScrollingText(frame, textToDisplay, element.Position.X, element.Position.Y, availWidth, face, clr)
+				break
+			}
+
 			xMain, _ := drawText(frame, textToDisplay, element.Position.X, element.Position.Y, face, clr, false)
 
 			// Calculate the y position for the units text so that its baseline aligns with the main text.
@@ -1407,26 +2303,61 @@ func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
 			}
 		
 		case "icon":
-			var iconImg *image.RGBA
-			var err error
-			iconImg, _, _, err = loadImage(assetsPrefix + "/" + element.IconPath)
-			if err != nil {
-				log.Printf("Error loading icon from %s: %v", element.IconPath, err)
-				continue
-			}
-
-			// Determine the size for the icon.
+			// Destination size (defaults applied after load for non-SVG).
 			var sz Size
 			if element.Size != nil {
 				sz = *element.Size
 			} else if element.Size2 != nil {
 				sz = *element.Size2
-			} else {
-				sz = Size{Width: iconImg.Bounds().Dx(), Height: iconImg.Bounds().Dy()}
 			}
 
-			// Define the destination rectangle for the icon.
-			pt := image.Pt(element.Position.X, element.Position.Y)
+			iconX := element.Position.X
+			// When anchored to a text data_key, stick the icon to the right of
+			// that value's rendered width so it tracks variable-width text
+			// (e.g. "0:10" vs "12:30") instead of sitting at a fixed x.
+			if element.AnchorAfterDataKey != "" {
+				anchorText := ""
+				if v, ok := globalData.Load(element.AnchorAfterDataKey); ok && v != nil {
+					anchorText = fmt.Sprintf("%v", v)
+				}
+				// The icon labels the anchored value; when there is no value
+				// yet (startup) or nothing to show ("" / "-"), draw neither.
+				if anchorText == "" || anchorText == "-" {
+					continue
+				}
+				anchorFontName := element.AnchorFont
+				if anchorFontName == "" {
+					anchorFontName = "reg"
+				}
+				if anchorFace, _, ferr := getFontFaceForText(anchorFontName, anchorText); ferr == nil {
+					textW := font.MeasureString(anchorFace, anchorText).Round()
+					iconX = element.Position.X + textW + element.AnchorGap
+				}
+			}
+
+			fullPath := assetsPrefix + "/" + element.IconPath
+			// SVGs: rasterize at the requested size so size.width/height actually
+			// scale (loadImage only renders at intrinsic viewBox size).
+			if strings.HasSuffix(strings.ToLower(element.IconPath), ".svg") {
+				tw, th := sz.Width, sz.Height
+				if err := drawSVG(frame, fullPath, iconX, element.Position.Y, tw, th); err != nil {
+					log.Printf("Error drawing SVG icon %s: %v", element.IconPath, err)
+				}
+				continue
+			}
+
+			iconImg, iw, ih, err := loadImage(fullPath)
+			if err != nil {
+				log.Printf("Error loading icon from %s: %v", element.IconPath, err)
+				continue
+			}
+			if sz.Width == 0 {
+				sz.Width = iw
+			}
+			if sz.Height == 0 {
+				sz.Height = ih
+			}
+			pt := image.Pt(iconX, element.Position.Y)
 			rect := image.Rect(pt.X, pt.Y, pt.X+sz.Width, pt.Y+sz.Height)
 			draw.Draw(frame, rect, iconImg, image.Point{}, draw.Over)
 		case "fixed_text":
@@ -1464,6 +2395,34 @@ func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
 
 			drawText(frame, label, element.Position.X, element.Position.Y, face, clr, false)
 
+		case "vtext":
+			// Vertical (stacked-letter) fixed label, e.g. "CPU"/"MEM" beside a
+			// bar meter. Font, color and position come from the element; the
+			// per-letter line height defaults to the font height but can be
+			// tuned via size.height, and the column width via size.width.
+			face, fh, err := getFontFace(element.Font)
+			if err != nil {
+				log.Printf("Error getting font face for %s: %v", element.Font, err)
+				continue
+			}
+			var clr color.RGBA
+			if len(element.Color) >= 3 {
+				clr = color.RGBA{uint8(element.Color[0]), uint8(element.Color[1]), uint8(element.Color[2]), 255}
+			} else {
+				clr = color.RGBA{255, 255, 255, 255}
+			}
+			charW := 10
+			lineH := fh
+			if element.Size != nil {
+				if element.Size.Width > 0 {
+					charW = element.Size.Width
+				}
+				if element.Size.Height > 0 {
+					lineH = element.Size.Height
+				}
+			}
+			drawVerticalText(frame, element.Label, element.Position.X, element.Position.Y, charW, lineH, face, clr)
+
 		case "graph":
 			// Handle graph elements
 			if element.GraphConfig == nil {
@@ -1494,7 +2453,76 @@ func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
 			default:
 				log.Printf("Unknown graph type: %s", element.GraphConfig.GraphType)
 			}
-			
+
+		case "cpu_bars":
+			// Framed 8-bar (per-core) CPU meter. Size comes from the element;
+			// the per-core usages come from the CpuUsages data key.
+			sz := Size{Width: 80, Height: 40}
+			if element.Size != nil {
+				sz = *element.Size
+			} else if element.Size2 != nil {
+				sz = *element.Size2
+			}
+			var usages []float64
+			if v, ok := globalData.Load(element.DataKey); ok && v != nil {
+				if u, ok := v.([]float64); ok {
+					usages = u
+				}
+			}
+			// Nothing sampled yet (startup): draw an empty framed box so the
+			// slot isn't blank, using a default 8 cores at 0%.
+			if len(usages) == 0 {
+				usages = make([]float64, 8)
+			}
+			drawCpuBars(frame, element.Position.X, element.Position.Y, sz.Width, sz.Height, usages)
+
+		case "hbar":
+			// Framed horizontal progress bar driven by a 0-100 data key
+			// (e.g. MemUsagePercent). Optional LabelDataKey (e.g. MemUsage
+			// "3.2/16") plus Units ("GB") is drawn centered over the bar.
+			sz := Size{Width: 100, Height: 12}
+			if element.Size != nil {
+				sz = *element.Size
+			} else if element.Size2 != nil {
+				sz = *element.Size2
+			}
+			pct := 0.0
+			if v, ok := globalData.Load(element.DataKey); ok && v != nil {
+				switch n := v.(type) {
+				case float64:
+					pct = n
+				case int:
+					pct = float64(n)
+				}
+			}
+			label := ""
+			if element.LabelDataKey != "" {
+				if v, ok := globalData.Load(element.LabelDataKey); ok && v != nil {
+					switch s := v.(type) {
+					case string:
+						label = s
+					default:
+						label = fmt.Sprintf("%v", s)
+					}
+				}
+			}
+			if label != "" && element.Units != "" {
+				label = label + element.Units
+			}
+			drawHBar(frame, element.Position.X, element.Position.Y, sz.Width, sz.Height, pct, label)
+
+		case "disk_bars":
+			// Onboard + optional NVMe usage bars, same height as mem, no text.
+			// Full-width single bar when NVMe is absent; left/right split when
+			// present. Size comes from the element (defaults match mem bar).
+			sz := Size{Width: 134, Height: 26}
+			if element.Size != nil {
+				sz = *element.Size
+			} else if element.Size2 != nil {
+				sz = *element.Size2
+			}
+			drawDiskBars(frame, element.Position.X, element.Position.Y, sz.Width, sz.Height)
+
 		default:
 			log.Printf("Unknown element type: %s", element.Type)
 		}
@@ -1586,15 +2614,84 @@ func drawRoundedBar(dst *image.RGBA, w, h, r int, clr color.RGBA) {
 	}
 }
 
+// showWelcome plays the "cat waking up" boot animation (welcomeAnim.go) for
+// the given duration. Rendering is pipelined: a goroutine rasterizes the next
+// frame into one of two buffers while the SPI push of the previous frame is
+// still in flight, so the effective rate is max(render, push) instead of
+// their sum. Everything is derived from wall-clock time, so a slow frame
+// never stretches the animation past its duration.
 func showWelcome(display gc9307.Device, width, height int, duration time.Duration) {
+	dur := duration.Seconds()
+	if dur <= 0 {
+		dur = welcomeAnimDur
+	}
+	timeScale := welcomeAnimDur / dur
+
+	// Prove the animation pipeline works before committing the boot screen
+	// to it; fall back to the static welcome otherwise.
+	first, err := welcomeAnimFrameInto(nil, 0, width, height)
+	if err != nil {
+		log.Printf("Welcome animation unavailable (%v); showing static welcome", err)
+		showWelcomeStatic(display, width, height)
+		return
+	}
+	sendFull(display, first)
+
+	const frameInterval = time.Second / 60 // pace renders; LCD tops out around 60 Hz anyway
+
+	frames := make(chan *image.RGBA) // unbuffered: hand-off keeps the two buffers race-free
+	go func() {
+		defer close(frames)
+		var bufs [2]*image.RGBA
+		start := time.Now()
+		for i := 0; ; i++ {
+			frameStart := time.Now()
+			t := frameStart.Sub(start).Seconds() * timeScale
+			if t >= welcomeAnimDur {
+				return
+			}
+			f, err := welcomeAnimFrameInto(bufs[i%2], t, width, height)
+			if err != nil {
+				log.Printf("Welcome animation frame failed: %v", err)
+				return
+			}
+			bufs[i%2] = f
+			frames <- f
+			if d := frameInterval - time.Since(frameStart); d > 0 {
+				time.Sleep(d)
+			}
+		}
+	}()
+
+	sent := 0
+	animStart := time.Now()
+	for f := range frames {
+		sendFull(display, f)
+		sent++
+	}
+	if el := time.Since(animStart); sent > 0 && el > 0 {
+		log.Printf("Welcome animation: %d frames in %.2fs (%.1f fps)", sent, el.Seconds(), float64(sent)/el.Seconds())
+	}
+
+	// Land exactly on the resting pose: the static logo plus the full bar.
+	if f, err := welcomeAnimFrameInto(nil, welcomeAnimDur, width, height); err == nil {
+		sendFull(display, f)
+	}
+}
+
+// showWelcomeStatic is the pre-animation welcome screen: static logo plus a
+// progress bar drawn directly in Go. Kept as the fallback path should the
+// animation ever fail to render, so it deliberately avoids the SVG rasterizer
+// and every error path that could abort it once the logo is already on screen.
+func showWelcomeStatic(display gc9307.Device, width, height int) {
 	radiusBarCorner := 5
 	spaceBetweenLogoAndBar := 28
 	barWidth := 82
 	barX := width/2 - barWidth/2
 	barHeight := 8
-	barTrackColor := color.RGBA{0x62, 0x74, 0x82, 255}   // #627482
-	barFillColor := color.RGBA{0xFD, 0xE0, 0x21, 255}    // #FDE021
-	sleepPerPixel := 15 * time.Millisecond               // ~1.2s total animation
+	barTrackColor := color.RGBA{0x62, 0x74, 0x82, 255} // #627482
+	barFillColor := color.RGBA{0xFD, 0xE0, 0x21, 255}  // #FDE021
+	sleepPerPixel := 15 * time.Millisecond             // ~1.2s total sweep
 
 	frame := image.NewRGBA(image.Rect(0, 0, width, height))
 	clearFrame(frame, width, height)
@@ -1609,8 +2706,9 @@ func showWelcome(display gc9307.Device, width, height int, duration time.Duratio
 	log.Printf("Welcome logo at: x0: %d, y0: %d, w: %d, h: %d", x0, y0, w, h)
 	copyImageToImageAt(frame, welcomeLogo, x0, y0)
 
-	// The bar is drawn directly in Go: no /tmp SVG files, no rasterizer, and
-	// no error path that can abort the animation once the logo is on screen.
+	// The bar is rasterized directly rather than through an SVG round-trip, so
+	// there is no error path left that can abort the sweep after the logo has
+	// already been pushed to the display.
 	bar := image.NewRGBA(image.Rect(0, 0, barWidth, barHeight))
 	drawRect(bar, 0, 0, barWidth, barHeight, color.RGBA{0, 0, 0, 255}) // opaque black corners
 	drawRoundedBar(bar, barWidth, barHeight, radiusBarCorner, barTrackColor)
@@ -1619,43 +2717,17 @@ func showWelcome(display gc9307.Device, width, height int, duration time.Duratio
 	sendFull(display, frame)
 
 	// Animate the yellow fill by pushing only the bar strip (barWidth x
-	// barHeight pixels) per step instead of a full frame, so the animation
-	// speed is set by sleepPerPixel rather than the SPI clock.
-	animStart := time.Now()
+	// barHeight pixels) per step instead of a full frame, so the sweep is paced
+	// by sleepPerPixel rather than by the SPI clock.
+	sweepStart := time.Now()
 	for i := 1; i <= barWidth; i++ {
 		drawRoundedBar(bar, i, barHeight, radiusBarCorner, barFillColor)
 		copyImageToImageAt(frame, bar, barX, barY)
 		display.FillRectangleWithImage(int16(barX), int16(barY), int16(barWidth), int16(barHeight), bar)
 		time.Sleep(sleepPerPixel)
 	}
-	// Keep the completed frame on disk so the boot animation can be verified
-	// over SSH (the display itself cannot be read back).
-	saveFrameToPng(frame, "/tmp/welcome_last_frame.png")
-	log.Printf("Welcome animation completed in %.0fms", durationToMs(time.Since(animStart)))
+	log.Printf("Welcome static bar completed in %.0fms", durationToMs(time.Since(sweepStart)))
 }
-
-func showWelcomeForced(display gc9307.Device, width, height int, duration time.Duration) {
-	frame := image.NewRGBA(image.Rect(0, 0, width, height))
-	clearFrame(frame, width, height)
-	
-	// Load and display welcome logo only
-	welcomeLogo, w, h, err := loadImage(assetsPrefix+"/assets/svg/welcome.svg")
-	if err != nil {
-		log.Printf("Error loading welcome logo from %s: %v", "assets/svg/welcome.svg", err)
-		return
-	}
-	
-	// Center the logo
-	x0 := width/2 - w/2
-	y0 := height/2 - h/2
-	copyImageToImageAt(frame, welcomeLogo, x0, y0)
-	
-	// Send to display and wait for specified duration
-	sendFull(display, frame)
-	time.Sleep(duration)
-}
-
-
 
 func showCiao(display gc9307.Device, width, height int, duration time.Duration) {
 	spaceBetweenLogoAndText := 28
