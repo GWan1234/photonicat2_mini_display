@@ -1854,11 +1854,12 @@ func drawBattery(w, h int, soc float64, isCharging bool, x0, y0 int) *image.RGBA
 	}
 	socBucket := int(soc) // 1% cache granularity matches the label
 
-	// "v4" after ink-bounds vertical centering (Orbitron optical center).
+	// "v5" after the body moved off the top edge and the digits started
+	// centering on their ink box instead of their advance width.
 	cacheKey := "gen:batt:aa" + strconv.Itoa(barFrameAAScale) + ":" +
 		strconv.Itoa(w) + "x" + strconv.Itoa(h) +
 		":s" + strconv.Itoa(socBucket) +
-		":c" + strconv.FormatBool(isCharging) + ":v4"
+		":c" + strconv.FormatBool(isCharging) + ":v5"
 	imageCacheMu.RLock()
 	if cached, ok := imageCache[cacheKey]; ok {
 		imageCacheMu.RUnlock()
@@ -1893,14 +1894,23 @@ func drawBattery(w, h int, soc float64, isCharging bool, x0, y0 int) *image.RGBA
 	}
 	mainHex := fmt.Sprintf("#%02X%02X%02X", colorMain.R, colorMain.G, colorMain.B)
 
+	// The body is a pixel shorter than the canvas so the AA edge of the curve
+	// isn't clipped. That spare row belongs above the body, not below: the
+	// glyph is blitted at the top bar's origin, so leaving it at the bottom
+	// hangs the battery a pixel over the clock and wifi icon beside it.
+	bodyTop := 1
+	if h < 3 {
+		bodyTop = 0
+	}
+	bodyH := h - bodyTop
+
 	// Supersampled rounded body + terminal nub (same AA path as chart frames).
 	var buf bytes.Buffer
 	canvas := svg.New(&buf)
 	canvas.Start(w, h)
-	// Body: slightly inset so the AA stroke of the curve isn't clipped.
-	canvas.Roundrect(0, 0, bodyW-1, h-1, r, r, "fill:"+mainHex)
+	canvas.Roundrect(0, bodyTop, bodyW-1, bodyH, r, r, "fill:"+mainHex)
 	if terminalWidth > 0 {
-		ty := (h - terminalH) / 2
+		ty := bodyTop + (bodyH-terminalH)/2
 		tr := 1
 		if tr > terminalH/2 {
 			tr = terminalH / 2
@@ -1960,26 +1970,36 @@ func drawBattery(w, h int, soc float64, isCharging bool, x0, y0 int) *image.RGBA
 	drawChargingBlot := isCharging && socBucket < 100
 
 	// Measure text + optional bolt, then center the whole group in the body
-	// (excluding the terminal nub). Vertical center uses *ink* bounds — Orbitron
-	// has a tall em-box so metric-only centering sits too low.
+	// (excluding the terminal nub). Both axes use *ink* bounds, not font
+	// metrics: Orbitron has a tall em-box so metric-only vertical centering
+	// sits too low, and its digits carry uneven side bearings, so centering by
+	// advance width leaves values like "70" about 2px left of centre.
 	d := &font.Drawer{Face: face}
 	textW := d.MeasureString(batteryText).Round()
 	metrics := face.Metrics()
 	ascent := metrics.Ascent.Round()
 	descent := metrics.Descent.Round()
 
-	// Ink box relative to baseline (Min.Y ≤ 0 above, Max.Y ≥ 0 below).
+	// Ink box of the whole string: X runs right from the pen origin and stays in
+	// 26.6 fixed point so centering rounds once, at the end; Y is relative to
+	// the baseline (Min.Y ≤ 0 above, Max.Y ≥ 0 below).
 	inkTop, inkBot := 0, 0 // pixels relative to baseline; top is ≤ 0
+	var inkLeft, inkRight fixed.Int26_6
 	inkSet := false
+	pen := fixed.Int26_6(0)
 	for _, r := range batteryText {
-		b, _, ok := face.GlyphBounds(r)
+		b, adv, ok := face.GlyphBounds(r)
 		if !ok {
 			continue
 		}
 		top := b.Min.Y.Ceil() // more negative = higher above baseline
 		bot := b.Max.Y.Ceil()
+		left := pen + b.Min.X
+		right := pen + b.Max.X
+		pen += adv
 		if !inkSet {
 			inkTop, inkBot = top, bot
+			inkLeft, inkRight = left, right
 			inkSet = true
 			continue
 		}
@@ -1989,11 +2009,18 @@ func drawBattery(w, h int, soc float64, isCharging bool, x0, y0 int) *image.RGBA
 		if bot > inkBot {
 			inkBot = bot
 		}
+		if left < inkLeft {
+			inkLeft = left
+		}
+		if right > inkRight {
+			inkRight = right
+		}
 	}
 	if !inkSet || inkBot <= inkTop {
-		// Fallback to em-box if bounds unavailable.
+		// Fallback to em-box / advance width if bounds are unavailable.
 		inkTop = -ascent
 		inkBot = descent
+		inkLeft, inkRight = 0, fixed.I(textW)
 	}
 	var chargingBolt *image.RGBA
 	boltW, boltH := 0, 0
@@ -2014,22 +2041,30 @@ func drawBattery(w, h int, soc float64, isCharging bool, x0, y0 int) *image.RGBA
 		}
 	}
 
-	totalW := textW
+	// Pen origin that leaves equal clearance either side of the ink (digits plus
+	// bolt and its gap): solving gapLeft == gapRight gives
+	// pen = (drawnBodyW - inkLeft - inkRight)/2. Centre on the body as *drawn*
+	// — the Roundrect above is bodyW-1 wide — or the label lands half a pixel
+	// right of the glyph it sits in.
+	drawnBodyW := bodyW - 1
+	if drawnBodyW < 1 {
+		drawnBodyW = bodyW
+	}
+	groupRight := inkRight
 	if drawChargingBlot {
-		totalW = textW + boltGap + boltW
+		groupRight += fixed.I(boltGap + boltW)
 	}
-	startX := (bodyW - totalW) / 2
-	if startX < 0 {
-		startX = 0
+	startX := ((fixed.I(drawnBodyW) - inkLeft - groupRight) / 2).Round()
+
+	// Place ink center on the body mid-line:
+	// baseY + (inkTop+inkBot)/2 = bodyTop + bodyH/2. Rounded rather than
+	// truncated, or an odd body height parks the digits half a pixel high.
+	baseY := int(math.Round(float64(bodyTop) + float64(bodyH)/2 - float64(inkTop+inkBot)/2))
+	if baseY+inkTop < bodyTop {
+		baseY = bodyTop - inkTop
 	}
-	// Place ink center at body mid-line: baseY + (inkTop+inkBot)/2 = h/2
-	// → baseY = h/2 - (inkTop+inkBot)/2
-	baseY := h/2 - (inkTop+inkBot)/2
-	if baseY+inkTop < 0 {
-		baseY = -inkTop
-	}
-	if baseY+inkBot > h {
-		baseY = h - inkBot
+	if baseY+inkBot > bodyTop+bodyH {
+		baseY = bodyTop + bodyH - inkBot
 	}
 
 	drawTextAtBaseline(img, batteryText, startX, baseY, face, textColor)
@@ -2040,7 +2075,7 @@ func drawBattery(w, h int, soc float64, isCharging bool, x0, y0 int) *image.RGBA
 		if boltY < 0 {
 			boltY = 0
 		}
-		copyImageToImageAt(img, chargingBolt, startX+textW+boltGap, boltY)
+		copyImageToImageAt(img, chargingBolt, startX+inkRight.Ceil()+boltGap, boltY)
 	}
 
 	imageCacheMu.Lock()
@@ -2168,12 +2203,15 @@ func drawTopBar(display gc9307.Device, frame *image.RGBA) {
 	if !ok {
 		chargingBool = false // Default value if assertion fails
 	}
+	// A pixel taller and a pixel narrower than the glyph used to be, starting a
+	// row higher; drawBattery centres the percent text in whatever body those
+	// dimensions leave.
 	if fiveGonTop {
-		img := drawBattery(50, 19, socFloat, chargingBool, x0, y0)
-		copyImageToImageAt(frame, img, x0+108, y0)
+		img := drawBattery(49, 20, socFloat, chargingBool, x0, y0)
+		copyImageToImageAt(frame, img, x0+108, y0-1)
 	}else{
-		img := drawBattery(45, 18, socFloat, chargingBool, x0, y0)
-		copyImageToImageAt(frame, img, x0+113, y0)
+		img := drawBattery(44, 19, socFloat, chargingBool, x0, y0)
+		copyImageToImageAt(frame, img, x0+113, y0-1)
 	}
 	cacheTopBar = frame
 	cacheTopBarStr = magicStr
