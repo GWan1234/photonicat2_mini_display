@@ -309,11 +309,10 @@
             ],
             "page2": [
                 {
-                    "type": "fixed_text",
-                    "label": "CPU:",
+                    "type": "icon",
+                    "icon_path": "assets/svg/cpu.svg",
                     "position": {"x": 10, "y": 5},
-                    "font": "unit",
-                    "color": [255, 229, 0],
+                    "size": {"width": 16, "height": 16},
                     "enable": 1
                 },
                 {
