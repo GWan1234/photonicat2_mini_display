@@ -56,7 +56,7 @@ func TestDisplayAsleepRequiresIdleState(t *testing.T) {
 	}
 }
 
-// Ping cadence is 3s only while awake on a page that shows Ping0/Ping1;
+// Ping cadence is 1s only while awake on a page that shows Ping0/Ping1;
 // every other case (idle, non-ping page, SMS) stays on the 1-minute interval.
 func TestCurrentPingInterval(t *testing.T) {
 	origState := idleState
@@ -103,9 +103,9 @@ func TestCurrentPingInterval(t *testing.T) {
 		t.Error("pageShowsPing(99) = true, want false for out-of-range")
 	}
 
-	// Sanity: the active interval really is ~3s and idle is 1m.
-	if INTERVAL_PING_ACTIVE != 3*time.Second {
-		t.Errorf("INTERVAL_PING_ACTIVE = %v, want 3s", INTERVAL_PING_ACTIVE)
+	// Sanity: the active interval really is 1s (1 Hz) and idle is 1m.
+	if INTERVAL_PING_ACTIVE != 1*time.Second {
+		t.Errorf("INTERVAL_PING_ACTIVE = %v, want 1s", INTERVAL_PING_ACTIVE)
 	}
 	if INTERVAL_PING_IDLE != time.Minute {
 		t.Errorf("INTERVAL_PING_IDLE = %v, want 1m", INTERVAL_PING_IDLE)
