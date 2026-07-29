@@ -376,16 +376,9 @@
                     "enable": 1
                 },
                 {
-                    "type": "icon",
-                    "icon_path": "assets/svg/disk.svg",
-                    "position": {"x": 10, "y": 94},
-                    "size": {"width": 16, "height": 16},
-                    "enable": 1
-                },
-                {
                     "type": "disk_bars",
-                    "position": {"x": 55, "y": 97},
-                    "size": {"width": 110, "height": 12},
+                    "position": {"x": 10, "y": 97},
+                    "size": {"width": 155, "height": 12},
                     "enable": 1
                 },
                 {

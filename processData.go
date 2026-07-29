@@ -2090,10 +2090,31 @@ func parseBlockMounts(content string) [][2]string {
 	return mounts
 }
 
+// sdCardDisks returns the removable SD cards currently in the slot as /dev base
+// paths (e.g. {"/dev/mmcblk1": true}), read from the MMC type sysfs attribute.
+// The soldered eMMC reports "MMC" there, so it never shows up as an SD card —
+// on OpenWrt the root filesystem is an overlay with no /dev device in
+// /proc/mounts, and without this check its eMMC /boot partition would look like
+// a card.
+func sdCardDisks() map[string]bool {
+	disks := map[string]bool{}
+	types, _ := filepath.Glob("/sys/block/mmcblk*/device/type")
+	for _, p := range types {
+		data, err := os.ReadFile(p)
+		if err != nil || strings.TrimSpace(string(data)) != "SD" {
+			continue
+		}
+		// /sys/block/mmcblk1/device/type -> /dev/mmcblk1
+		disks["/dev/"+filepath.Base(filepath.Dir(filepath.Dir(p)))] = true
+	}
+	return disks
+}
+
 // pickExtraDiskMounts classifies non-root physical disks and returns the first
-// mountpoint of the NVMe drive and of the SD card ("" when absent). Any mmcblk
-// disk other than the root disk counts as the SD card (root is on eMMC).
-func pickExtraDiskMounts(mounts [][2]string) (nvmeMp, sdMp string) {
+// mountpoint of the NVMe drive and of the SD card ("" when absent). An mmcblk
+// mount only counts as the SD card when its disk is in sdDisks (see
+// sdCardDisks), so eMMC partitions are never mistaken for a card.
+func pickExtraDiskMounts(mounts [][2]string, sdDisks map[string]bool) (nvmeMp, sdMp string) {
 	rootBase := ""
 	for _, m := range mounts {
 		if m[1] == "/" {
@@ -2108,7 +2129,7 @@ func pickExtraDiskMounts(mounts [][2]string) (nvmeMp, sdMp string) {
 		}
 		if nvmeMp == "" && strings.HasPrefix(base, "/dev/nvme") {
 			nvmeMp = m[1]
-		} else if sdMp == "" && strings.HasPrefix(base, "/dev/mmcblk") {
+		} else if sdMp == "" && sdDisks[base] {
 			sdMp = m[1]
 		}
 	}
@@ -2155,8 +2176,10 @@ func formatDiskUsageGB(mountpoint string) string {
 // values for the display:
 //   - DiskUsage / DiskUsagePercent — root (onboard) filesystem
 //   - DiskNvme / DiskNvmePercent / DiskNvmePresent — first mounted NVMe
-//   - DiskSD — first mounted non-root mmcblk (SD card when root is on eMMC)
-// Absent disks store "-" / 0 / false so the UI can hide the NVMe bar.
+//   - DiskSD / DiskSDPercent / DiskSDPresent — SD card in the slot
+// Absent disks store "-" / 0 / false so the UI can hide their bar. An SD card
+// counts as present as soon as it is in the slot: an unmounted card has no
+// usage to report, so it stores "-" / 0 and the UI draws an empty bar.
 func collectDiskUsage() {
 	globalData.Store("DiskUsage", formatDiskUsageGB("/"))
 	if _, _, pct, ok := diskStatfs("/"); ok {
@@ -2165,11 +2188,13 @@ func collectDiskUsage() {
 		globalData.Store("DiskUsagePercent", 0.0)
 	}
 
+	sdDisks := sdCardDisks()
 	nvme, sd := "-", "-"
 	nvmePresent := false
-	nvmePct := 0.0
+	nvmePct, sdPct := 0.0, 0.0
+	sdPresent := len(sdDisks) > 0
 	if data, err := os.ReadFile("/proc/mounts"); err == nil {
-		nvmeMp, sdMp := pickExtraDiskMounts(parseBlockMounts(string(data)))
+		nvmeMp, sdMp := pickExtraDiskMounts(parseBlockMounts(string(data)), sdDisks)
 		if nvmeMp != "" {
 			nvme = formatDiskUsageGB(nvmeMp)
 			if _, _, pct, ok := diskStatfs(nvmeMp); ok {
@@ -2179,12 +2204,18 @@ func collectDiskUsage() {
 		}
 		if sdMp != "" {
 			sd = formatDiskUsageGB(sdMp)
+			if _, _, pct, ok := diskStatfs(sdMp); ok {
+				sdPresent = true
+				sdPct = pct
+			}
 		}
 	}
 	globalData.Store("DiskNvme", nvme)
 	globalData.Store("DiskNvmePercent", nvmePct)
 	globalData.Store("DiskNvmePresent", nvmePresent)
 	globalData.Store("DiskSD", sd)
+	globalData.Store("DiskSDPercent", sdPct)
+	globalData.Store("DiskSDPresent", sdPresent)
 }
 
 // getCurrNetworkSpeedMbps returns current network speed in Mbps for all interfaces.

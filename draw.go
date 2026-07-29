@@ -1544,67 +1544,116 @@ func drawCpuBars(frame *image.RGBA, x0, y0, w, h int, usages []float64) {
 	copyImageToImageAt(frame, img, x0, y0)
 }
 
-// drawDiskBars renders onboard (root/eMMC) and optional NVMe usage as
-// horizontal bars. When NVMe is present the width is split left/right with a
-// small gap and tiny "eMMC"/"NVMe" labels are centered in each bar; when
-// absent a single full-width eMMC bar is shown. Height should match the mem
-// hbar. Works the same on OpenWrt and Debian.
+// diskBar is one labelled usage bar in the disk_bars slot.
+type diskBar struct {
+	label string
+	pct   float64
+}
+
+// diskBarLabelFonts lists candidate label faces, largest first. The face is
+// picked per layout so three bars shrink their text instead of overflowing.
+var diskBarLabelFonts = []string{"unit", "tiny", "micro"}
+
+// drawDiskBars renders onboard (root/eMMC) usage plus the NVMe drive and SD
+// card when they are present, as up to three horizontal bars sharing the slot
+// width with a small gap. Each bar carries its name ("eMMC"/"NVMe"/"SD")
+// centered on it. An SD card that is in the slot but not mounted has no usage
+// to report and draws as an empty bar. Height should match the mem hbar. Works
+// the same on OpenWrt and Debian.
 func drawDiskBars(frame *image.RGBA, x0, y0, w, h int) {
 	if w <= 0 || h <= 0 {
 		return
 	}
-	rootPct := 0.0
-	if v, ok := globalData.Load("DiskUsagePercent"); ok && v != nil {
-		switch n := v.(type) {
-		case float64:
-			rootPct = n
-		case int:
-			rootPct = float64(n)
-		}
+	bars := []diskBar{{"eMMC", diskBarPercent("DiskUsagePercent")}}
+	if diskBarPresent("DiskNvmePresent") {
+		bars = append(bars, diskBar{"NVMe", diskBarPercent("DiskNvmePercent")})
 	}
-	nvmePresent := false
-	if v, ok := globalData.Load("DiskNvmePresent"); ok {
-		if b, ok := v.(bool); ok {
-			nvmePresent = b
-		}
-	}
-	nvmePct := 0.0
-	if v, ok := globalData.Load("DiskNvmePercent"); ok && v != nil {
-		switch n := v.(type) {
-		case float64:
-			nvmePct = n
-		case int:
-			nvmePct = float64(n)
-		}
+	if diskBarPresent("DiskSDPresent") {
+		bars = append(bars, diskBar{"SD", diskBarPercent("DiskSDPercent")})
 	}
 
 	const gap = 4
-	if nvmePresent && w > gap+2 {
-		leftW := (w - gap) / 2
-		rightW := w - gap - leftW
-		drawHBar(frame, x0, y0, leftW, h, rootPct, "")
-		drawHBar(frame, x0+leftW+gap, y0, rightW, h, nvmePct, "")
-		drawTinyBarLabel(frame, x0+leftW/2, y0+h/2, "eMMC")
-		drawTinyBarLabel(frame, x0+leftW+gap+rightW/2, y0+h/2, "NVMe")
-		return
+	n := len(bars)
+	avail := w - gap*(n-1)
+	// Too narrow to split: fall back to the onboard bar alone at full width.
+	if avail < 2*n {
+		bars, n, avail = bars[:1], 1, w
 	}
-	// No NVMe: single onboard bar uses the full slot.
-	drawHBar(frame, x0, y0, w, h, rootPct, "")
-	drawTinyBarLabel(frame, x0+w/2, y0+h/2, "eMMC")
+
+	labels := make([]string, n)
+	widths := make([]int, n)
+	xs := make([]int, n)
+	for i := range bars {
+		start, end := i*avail/n, (i+1)*avail/n
+		labels[i] = bars[i].label
+		widths[i] = end - start
+		xs[i] = x0 + start + i*gap
+	}
+	face, haveFace := pickBarLabelFace(labels, widths, h)
+	for i := range bars {
+		drawHBar(frame, xs[i], y0, widths[i], h, bars[i].pct, "")
+		if haveFace {
+			drawTinyBarLabel(frame, xs[i]+widths[i]/2, y0+h/2, labels[i], face)
+		}
+	}
+}
+
+// diskBarPercent reads a 0-100 usage value from globalData, 0 when missing.
+func diskBarPercent(key string) float64 {
+	if v, ok := globalData.Load(key); ok && v != nil {
+		switch n := v.(type) {
+		case float64:
+			return n
+		case int:
+			return float64(n)
+		}
+	}
+	return 0
+}
+
+// diskBarPresent reads a disk presence flag from globalData.
+func diskBarPresent(key string) bool {
+	if v, ok := globalData.Load(key); ok {
+		if b, ok := v.(bool); ok {
+			return b
+		}
+	}
+	return false
+}
+
+// pickBarLabelFace returns the largest face from diskBarLabelFonts that stays
+// within barH tall and leaves labelSidePad px of clear track on both sides of
+// every label in its own bar, so the names always fit. Falls back to the
+// smallest candidate when even that is too big; ok is false when no face could
+// be loaded at all.
+func pickBarLabelFace(labels []string, widths []int, barH int) (face font.Face, ok bool) {
+	const labelSidePad = 3
+	for _, name := range diskBarLabelFonts {
+		f, fh, err := getFontFace(name)
+		if err != nil {
+			continue
+		}
+		face, ok = f, true
+		fits := fh <= barH
+		for i, l := range labels {
+			if !fits {
+				break
+			}
+			if font.MeasureString(f, l).Ceil()+2*labelSidePad > widths[i] {
+				fits = false
+			}
+		}
+		if fits {
+			return f, true
+		}
+	}
+	return face, ok
 }
 
 // drawTinyBarLabel centers a label with a 1px black aura so it stays readable
-// on yellow fill and empty track (disk bar names). Uses the same "unit" face
-// as the mem bar "3.2/16GB" overlay so eMMC/NVMe match RAM size text.
-func drawTinyBarLabel(frame *image.RGBA, cx, cy int, label string) {
-	if frame == nil || label == "" {
-		return
-	}
-	face, _, err := getFontFace("unit")
-	if err != nil {
-		face, _, err = getFontFace("tiny")
-	}
-	if err != nil {
+// on yellow fill and empty track (disk bar names).
+func drawTinyBarLabel(frame *image.RGBA, cx, cy int, label string, face font.Face) {
+	if frame == nil || label == "" || face == nil {
 		return
 	}
 	drawTextWithAura(frame, label, cx, cy, face, PCAT_WHITE, PCAT_BLACK)

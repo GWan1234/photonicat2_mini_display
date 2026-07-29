@@ -282,12 +282,8 @@ func getBoardTemperatureC() (int, bool) {
 
 // sdCardState reports "Yes" when a real SD card (not the eMMC) is present.
 func sdCardState() string {
-	types, _ := filepath.Glob("/sys/block/mmcblk*/device/type")
-	for _, p := range types {
-		if data, err := os.ReadFile(p); err == nil &&
-			strings.TrimSpace(string(data)) == "SD" {
-			return "Yes"
-		}
+	if len(sdCardDisks()) > 0 {
+		return "Yes"
 	}
 	return "No"
 }

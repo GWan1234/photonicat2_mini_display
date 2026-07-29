@@ -16,8 +16,12 @@ tmpfs /run tmpfs rw,nosuid,nodev 0 0
 overlay /var/lib/docker/overlay2/abc/merged overlay rw,relatime 0 0
 `
 
+// sdCard1 mimics sdCardDisks() on a board whose mmcblk1 is the card slot and
+// whose mmcblk0 is the soldered eMMC.
+var sdCard1 = map[string]bool{"/dev/mmcblk1": true}
+
 func TestPickExtraDiskMounts(t *testing.T) {
-	nvme, sd := pickExtraDiskMounts(parseBlockMounts(procMounts))
+	nvme, sd := pickExtraDiskMounts(parseBlockMounts(procMounts), sdCard1)
 	if nvme != "/mnt/nvme" {
 		t.Errorf("nvme mountpoint = %q, want /mnt/nvme", nvme)
 	}
@@ -32,24 +36,42 @@ func TestPickExtraDiskMountsIgnoresRootDisk(t *testing.T) {
 /dev/mmcblk0p6 /boot ext4 rw 0 0
 tmpfs /run tmpfs rw 0 0
 `)
-	nvme, sd := pickExtraDiskMounts(mounts)
+	nvme, sd := pickExtraDiskMounts(mounts, sdCard1)
 	if nvme != "" || sd != "" {
 		t.Errorf("got nvme=%q sd=%q, want both empty", nvme, sd)
 	}
 }
 
 func TestPickExtraDiskMountsRootOnNvme(t *testing.T) {
-	// Booted from NVMe: the eMMC then shows up in the SD slot, and the root
-	// NVMe disk itself must not be reported again.
+	// Booted from NVMe: the root NVMe disk must not be reported again, and the
+	// eMMC is not a card so it must not take the SD slot either.
 	mounts := parseBlockMounts(`/dev/nvme0n1p2 / ext4 rw 0 0
 /dev/mmcblk0p7 /mnt/emmc ext4 rw 0 0
 `)
-	nvme, sd := pickExtraDiskMounts(mounts)
+	nvme, sd := pickExtraDiskMounts(mounts, sdCard1)
 	if nvme != "" {
 		t.Errorf("nvme mountpoint = %q, want empty (root disk)", nvme)
 	}
-	if sd != "/mnt/emmc" {
-		t.Errorf("sd mountpoint = %q, want /mnt/emmc", sd)
+	if sd != "" {
+		t.Errorf("sd mountpoint = %q, want empty (mmcblk0 is eMMC, not a card)", sd)
+	}
+}
+
+// On OpenWrt the root filesystem is an overlay, so no mount line names the root
+// disk: the eMMC /boot partition must still not be taken for an SD card.
+func TestPickExtraDiskMountsOverlayRootIgnoresEmmcBoot(t *testing.T) {
+	mounts := parseBlockMounts(`/dev/root /rom squashfs ro 0 0
+/dev/loop0 /overlay f2fs rw 0 0
+overlayfs:/overlay / overlay rw 0 0
+/dev/nvme0n1p1 /mnt/nvme0n1p1 ext4 rw 0 0
+/dev/mmcblk0p1 /boot ext4 ro 0 0
+`)
+	nvme, sd := pickExtraDiskMounts(mounts, sdCard1)
+	if nvme != "/mnt/nvme0n1p1" {
+		t.Errorf("nvme mountpoint = %q, want /mnt/nvme0n1p1", nvme)
+	}
+	if sd != "" {
+		t.Errorf("sd mountpoint = %q, want empty (/boot is on the eMMC)", sd)
 	}
 }
 
@@ -81,6 +103,12 @@ func TestCollectDiskUsageStoresPercents(t *testing.T) {
 	}
 	if _, ok := globalData.Load("DiskNvmePresent"); !ok {
 		t.Error("DiskNvmePresent missing after collectDiskUsage")
+	}
+	if _, ok := globalData.Load("DiskSDPercent"); !ok {
+		t.Error("DiskSDPercent missing after collectDiskUsage")
+	}
+	if _, ok := globalData.Load("DiskSDPresent"); !ok {
+		t.Error("DiskSDPresent missing after collectDiskUsage")
 	}
 	if v, ok := globalData.Load("DiskUsagePercent"); ok {
 		pct, ok := v.(float64)
