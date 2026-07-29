@@ -9,12 +9,13 @@ package main
 // at t = welcomeAnimDur the composite is pixel-identical to the static logo
 // plus the finished boot bar.
 //
-// Timeline (5 s):
-//   0.0–1.8  asleep: dim grey box, slow breathing, Zzz drifting up
-//   1.8–2.2  stir: quick shake, Zzz pops, colour warms to yellow
-//   2.2–3.0  eyes pop open (overshoot), soft glow blooms, double blink
-//   3.0–4.2  glances left then right with a small head tilt, sparkles
-//   4.1–5.0  springs down to the resting pose with a squash-and-stretch
+// Timeline (7 s):
+//   0.0–2.0  asleep: dim grey box, slow breathing and a gentle sway
+//   2.0–2.4  stir: quick shake, colour warms to yellow
+//   2.4–3.2  eyes pop open (overshoot), soft glow blooms, double blink
+//   3.2–5.4  looks left, holds, sweeps right, holds, returns to centre with a
+//            small head tilt, sparkles and a blink on each hold
+//   5.9–7.0  springs down to the resting pose with a squash-and-stretch
 //            bounce and a final blink while the boot bar completes
 
 import (
@@ -27,7 +28,7 @@ import (
 	"github.com/srwiley/rasterx"
 )
 
-const welcomeAnimDur = 5.0 // seconds the timeline below is authored for
+const welcomeAnimDur = 7.0 // seconds the timeline below is authored for
 
 // Logo geometry in the 59x71 viewBox units of assets/svg/welcome.svg.
 const (
@@ -48,7 +49,6 @@ const (
 var (
 	waYellow    = [3]int{0xFD, 0xE0, 0x21} // brand yellow
 	waSleepGrey = [3]int{0x5E, 0x6A, 0x76} // dozing box tint
-	waZzzGrey   = [3]int{0x9A, 0xA9, 0xB7}
 	waWarmWhite = [3]int{0xFF, 0xF6, 0xAE} // sparkle / bar-pulse tint
 	waBarGrey   = [3]int{0x62, 0x74, 0x82} // bar background (matches old bar)
 )
@@ -183,7 +183,6 @@ type waPose struct {
 	eyeOpen            float64 // 0 closed .. 1 open (may overshoot)
 	gaze               float64 // horizontal eye offset, logo units
 	glow               float64 // halo opacity
-	zzz                float64 // Zzz-train envelope
 	barA               float64 // bar opacity
 	barFrac            float64 // bar fill fraction
 	barPulse           float64 // completion flash
@@ -192,34 +191,35 @@ type waPose struct {
 func waPoseAt(t float64) waPose {
 	var p waPose
 	p.fade = waSmooth(0, 0.35, t)
-	p.col = waMixColor(waSleepGrey, waYellow, waSmooth(2.05, 2.55, t))
+	p.col = waMixColor(waSleepGrey, waYellow, waSmooth(2.25, 2.75, t))
 
 	// Base scale: sleeps large (1.30), settles to 1.0 while landing.
-	breath := 0.022 * math.Sin(2*math.Pi*t/1.9-math.Pi/2) * (1 - waSmooth(1.75, 2.05, t))
-	pop := 0.035 * math.Sin(math.Pi*waClamp01((t-2.18)/0.30)) // accent as the eyes open
-	p.scale = (1.30 - 0.30*waEaseInOutCubic((t-4.08)/0.50)) * (1 + breath + pop)
+	breath := 0.028 * math.Sin(2*math.Pi*t/1.9-math.Pi/2) * (1 - waSmooth(1.95, 2.25, t))
+	pop := 0.035 * math.Sin(math.Pi*waClamp01((t-2.38)/0.30)) // accent as the eyes open
+	p.scale = (1.30 - 0.30*waEaseInOutCubic((t-5.86)/0.55)) * (1 + breath + pop)
 
-	// Rotation: stir shake, then a head tilt that follows the gaze.
-	if t > 1.80 && t < 2.30 {
-		u := t - 1.80
-		p.rot = 3.0 * math.Sin(2*math.Pi*3.4*u) * math.Exp(-6.5*u)
+	// Rotation: sleeping sway, stir shake, then a head tilt following the gaze.
+	p.rot = 1.1 * math.Sin(2*math.Pi*t/2.6) * (1 - waSmooth(1.90, 2.20, t))
+	if t > 2.00 && t < 2.50 {
+		u := t - 2.00
+		p.rot += 3.0 * math.Sin(2*math.Pi*3.4*u) * math.Exp(-6.5*u)
 	}
 
-	// Gaze: centre → left → right → centre.
+	// Gaze: centre → left → right → centre, holding at each end.
 	var pos float64
 	switch {
-	case t < 3.05:
+	case t < 3.35:
 		pos = 0
-	case t < 3.25:
-		pos = -waEaseInOutCubic((t - 3.05) / 0.20)
-	case t < 3.50:
-		pos = -1
-	case t < 3.78:
-		pos = -1 + 2*waEaseInOutCubic((t-3.50)/0.28)
-	case t < 4.00:
-		pos = 1
+	case t < 3.63:
+		pos = -waEaseInOutCubic((t - 3.35) / 0.28)
 	case t < 4.20:
-		pos = 1 - waEaseInOutCubic((t-4.00)/0.20)
+		pos = -1
+	case t < 4.58:
+		pos = -1 + 2*waEaseInOutCubic((t-4.20)/0.38)
+	case t < 5.15:
+		pos = 1
+	case t < 5.43:
+		pos = 1 - waEaseInOutCubic((t-5.15)/0.28)
 	default:
 		pos = 0
 	}
@@ -228,34 +228,34 @@ func waPoseAt(t float64) waPose {
 
 	// Eyes: closed slits while asleep, pop open with overshoot, then blinks.
 	open := 0.07
-	if t >= 2.18 {
-		open = 0.07 + 0.93*waEaseOutBack((t-2.18)/0.26)
+	if t >= 2.38 {
+		open = 0.07 + 0.93*waEaseOutBack((t-2.38)/0.26)
 	}
-	open *= waBlinkDip(t, 2.58, 2.76) * waBlinkDip(t, 2.80, 2.98) * waBlinkDip(t, 4.55, 4.72)
+	open *= waBlinkDip(t, 2.78, 2.96) * waBlinkDip(t, 3.00, 3.18) // waking double blink
+	open *= waBlinkDip(t, 3.86, 4.04) * waBlinkDip(t, 4.80, 4.98) // one per gaze hold
+	open *= waBlinkDip(t, 6.45, 6.62)                             // settled
 	p.eyeOpen = open
 
 	// Halo: blooms as the cat wakes, relaxes to a faint idle glow.
-	p.glow = 0.28*waSmooth(2.15, 2.55, t) - 0.18*waSmooth(2.90, 3.60, t)
-	p.glow -= 0.06 * waSmooth(4.55, 4.95, t)
+	p.glow = 0.28*waSmooth(2.35, 2.75, t) - 0.18*waSmooth(3.10, 3.80, t)
+	p.glow -= 0.06 * waSmooth(6.35, 6.85, t)
 	if p.glow < 0 {
 		p.glow = 0
 	}
 	p.glow *= p.fade
 
-	p.zzz = p.fade * (1 - waSmooth(1.70, 2.00, t))
-
 	// Squash & stretch landing bounce, fully decayed before the end.
 	p.stretchX, p.stretchY = 1, 1
-	if u := t - 4.32; u > 0 {
-		sy := 0.085 * math.Sin(2*math.Pi*1.7*u) * math.Exp(-4.0*u) * (1 - waSmooth(4.86, 4.98, t))
+	if u := t - 6.10; u > 0 {
+		sy := 0.085 * math.Sin(2*math.Pi*1.7*u) * math.Exp(-4.0*u) * (1 - waSmooth(6.80, 6.95, t))
 		p.stretchY = 1 + sy
 		p.stretchX = 1 - 0.55*sy
 	}
 
 	// Boot bar: fades in early, fills across the whole boot, flashes at 100%.
-	p.barA = waSmooth(0.40, 0.75, t) * p.fade
-	p.barFrac = waEaseInOutSine(waClamp01((t - 0.55) / (4.80 - 0.55)))
-	p.barPulse = math.Sin(math.Pi * waClamp01((t-4.82)/0.18))
+	p.barA = waSmooth(0.40, 0.80, t) * p.fade
+	p.barFrac = waEaseInOutSine(waClamp01((t - 0.60) / (6.72 - 0.60)))
+	p.barPulse = math.Sin(math.Pi * waClamp01((t-6.74)/0.20))
 	return p
 }
 
@@ -272,11 +272,11 @@ func waBlinkDip(t, a, b float64) float64 {
 
 // waSpark positions are relative to the logo centre.
 var waSparks = []struct{ dx, dy, r, t0 float64 }{
-	{0, -53.5, 4.6, 2.30},
-	{42.5, -29.5, 3.4, 2.50},
-	{-40.5, -24.5, 3.9, 2.68},
-	{37.5, 29.5, 3.2, 2.86},
-	{-33.5, 33.5, 3.6, 3.04},
+	{0, -53.5, 4.6, 2.50},
+	{42.5, -29.5, 3.4, 2.70},
+	{-40.5, -24.5, 3.9, 2.88},
+	{37.5, 29.5, 3.2, 3.06},
+	{-33.5, 33.5, 3.6, 3.24},
 }
 
 // welcomeAnimSVG builds the full-screen SVG document for time t (seconds).
@@ -315,24 +315,6 @@ func welcomeAnimSVG(t float64, width, height int) []byte {
 	eyeR := logoM.translate(p.gaze, 0).scaleAbout(1, p.eyeOpen, waEyeRCx, waEyeCy)
 	fmt.Fprintf(&b, `<path d="%s" fill="%s" fill-opacity="%.3f" %s/>`, waEyeLPath, p.col, p.fade, eyeL.attr())
 	fmt.Fprintf(&b, `<path d="%s" fill="#000000" fill-opacity="%.3f" %s/>`, waEyeRPath, p.fade, eyeR.attr())
-
-	// Zzz train drifting up from the box while asleep.
-	if p.zzz > 0.01 {
-		zc := waHex(waZzzGrey)
-		for i := 0; i < 3; i++ {
-			ph := math.Mod(t/1.25+float64(i)*0.36, 1)
-			size := 6.0 + 1.9*float64(i)
-			x := l.cx + 21 + 9*ph + 2.6*math.Sin(2*math.Pi*1.1*ph+float64(i)*2.0)
-			y := l.cy - 42 - 30*ph - 3*float64(i)
-			op := p.zzz * math.Sin(math.Pi*ph)
-			if op < 0.01 {
-				continue
-			}
-			m := waMatID().translate(x, y).rotateAbout(14*math.Sin(2*math.Pi*ph+float64(i)*1.7), 0, 0).scaleAbout(size/2, size/2, 0, 0)
-			fmt.Fprintf(&b, `<path d="M-1 -1 L1 -1 L-1 1 L1 1" fill="none" stroke="%s" stroke-opacity="%.3f" stroke-width="%.3f" stroke-linecap="round" stroke-linejoin="round" %s/>`,
-				zc, op, 3.4/size, m.attr())
-		}
-	}
 
 	// Sparkles popping around the box as it wakes.
 	for _, s := range waSparks {

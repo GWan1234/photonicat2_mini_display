@@ -856,7 +856,7 @@ func main() {
 
 		if shouldShowWelcome {
 			// Cold boot or --force-cold-boot: play the wake-up animation.
-			showWelcome(display, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT, 5*time.Second)
+			showWelcome(display, PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT, welcomeAnimDur*time.Second)
 		}
 	}()
 
