@@ -123,11 +123,24 @@ func classifyEgress(dev string) (egress, conn, label string) {
 	case strings.HasPrefix(dev, "wwan"), strings.HasPrefix(dev, "usb"),
 		strings.HasPrefix(dev, "ppp"), strings.HasPrefix(dev, "wwx"):
 		return "mobile", "mobile", "Cell"
-	case strings.HasPrefix(dev, "wl"):
+	// wl* is the Debian shape (wlan0/wlp1s0); phy*-sta* is the OpenWrt STA
+	// netdev (phy1-sta0). Missing the latter made the boot fallback call the
+	// WiFi uplink "wired", so the top bar flashed an ethernet icon until
+	// pcat-manager-web came up and corrected it.
+	case strings.HasPrefix(dev, "wl"),
+		strings.HasPrefix(dev, "phy") && strings.Contains(dev, "-sta"):
 		return "wifi", "wifi", "WiFi"
-	default:
-		return "wan", "wired", "Eth"
 	}
+	// The modem can present as a USB ethernet gadget (FM350: rndis_host on
+	// eth2) and interface numbering is not stable, so go by driver: a USB
+	// network driver is the modem, not a wired NIC.
+	if d, err := os.Readlink("/sys/class/net/" + dev + "/device/driver"); err == nil {
+		base := filepath.Base(d)
+		if strings.Contains(base, "rndis") || strings.Contains(base, "cdc") {
+			return "mobile", "mobile", "Cell"
+		}
+	}
+	return "wan", "wired", "Eth"
 }
 
 func getOSVersionFromOSRelease() string {
