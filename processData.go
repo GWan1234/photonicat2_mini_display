@@ -247,6 +247,12 @@ func collectBatteryData() {
 		idleTimeout = time.Duration(cfg.ScreenDimmerTimeOnBatterySeconds) * time.Second
 	}
 
+	// Battery/DC volts and wattage are drawn on page 0 too, so sample them at
+	// this collector's page-0 cadence (2 Hz visible, 1/min otherwise) instead
+	// of collectLinuxData's cpu-bars-page cadence, which left the page-0 row
+	// refreshing once a minute.
+	collectPowerData()
+
 	// Remaining time estimate for page0's 4th slot (clock icon + "H:MM").
 	// pcat-manager-web is the source of truth: when getInfoFromPcatWeb() has
 	// stored a value from dashboard.json, keep it so the LCD never disagrees
@@ -499,75 +505,64 @@ func formatSpeed(mbps float64) (string, string) {
 	return fmt.Sprintf("%.2f", mbps), "Mbps"
 }
 
+// getWANInterface returns the netdev carrying the lowest-metric IPv4 default
+// route, read from /proc/net/route - immune to which `ip` applet the PATH
+// serves and cheap enough to resolve every cycle. Falls back to br-lan on
+// OpenWrt so there is something to watch while no uplink is routed.
 func getWANInterface() (string, error) {
+	if data, err := os.ReadFile("/proc/net/route"); err == nil {
+		lines := strings.Split(string(data), "\n")
+		best, bestMetric := "", int64(-1)
+		for _, line := range lines[1:] {
+			f := strings.Fields(line)
+			if len(f) < 8 || f[1] != "00000000" {
+				continue
+			}
+			metric, _ := strconv.ParseInt(f[6], 10, 64)
+			if bestMetric == -1 || metric < bestMetric {
+				best, bestMetric = f[0], metric
+			}
+		}
+		if best != "" {
+			return best, nil
+		}
+	}
 	if isOpenWRT() {
 		return "br-lan", nil
 	}
-	out, err := secureExecCommand("ip", "route", "show", "default")
-	if err != nil {
-		return "", err
-	}
-
-	fields := strings.Fields(string(out))
-	for i, field := range fields {
-		if field == "dev" && (i+1) < len(fields) {
-			return fields[i+1], nil
-		}
-	}
-
 	return "", fmt.Errorf("WAN interface not found")
 }
 
 func collectWANNetworkSpeed() {
-	// 1-minute cadence including while dark (keeps WanUP/DOWN warm for wake).
-	var err error
-	// On OpenWrt the speeds come from pcat-manager-web; when it is down fall
-	// through to the direct /sys/class/net measurement used on Debian.
-	if isOpenWRT() && pcatWebUp.Load() {
-		upSpeed, ok1 := globalData.Load("UpSpeedBps")
-		downSpeed, ok2 := globalData.Load("DownSpeedBps")
-		if !ok1 || !ok2 {
-			log.Printf("Could not get WAN network speed data\n")
-			globalData.Store("WanUP", "-")
-			globalData.Store("WanDOWN", "-")
-			globalData.Store("WanUP_Unit", "")
-			globalData.Store("WanDOWN_Unit", "")
-		} else {
-			wanUPVal, wanUPUnit := formatSpeed(upSpeed.(float64) / 1024 / 1024 * 8)
-			wanDOWNVal, wanDOWNUnit := formatSpeed(downSpeed.(float64) / 1024 / 1024 * 8)
-
-			globalData.Store("WanUP", wanUPVal)
-			globalData.Store("WanDOWN", wanDOWNVal)
-			globalData.Store("WanUP_Unit", wanUPUnit)
-			globalData.Store("WanDOWN_Unit", wanDOWNUnit)
-		}
-	} else {
-		// Cache WAN interface to avoid repeated lookups
-		if wanInterface == "" || wanInterface == "null" {
-			wanInterface, err = getWANInterface()
-			if err != nil {
-				log.Printf("Could not get WAN interface: %v\n", err)
-				globalData.Store("WanUP", "0")
-				globalData.Store("WanDOWN", "0")
-				time.Sleep(5 * time.Second) // prevent infinite loop
-				return
-			}
-		}
-
-		netData, err := getNetworkSpeed(wanInterface)
-		if err != nil {
-			log.Printf("Could not get network speed: %v\n", err)
-			globalData.Store("WanUP", "0")
-			globalData.Store("WanDOWN", "0")
-			return
-		}
-		wanUPVal, wanUPUnit := formatSpeed(netData.UploadMbps)
-		wanDOWNVal, wanDOWNUnit := formatSpeed(netData.DownloadMbps)
-		globalData.Store("WanUP", wanUPVal)
-		globalData.Store("WanDOWN", wanDOWNVal)
-		globalData.Store("WanUP_Unit", wanUPUnit)
-		globalData.Store("WanDOWN_Unit", wanDOWNUnit)
+	// Always a direct two-point counter read (~1s window, getNetworkSpeed) on
+	// the default-route device. The pcat-web numbers used here before are
+	// sampled over the web's own window and cached on top of that, which
+	// pinned this row to a multi-second cadence no matter how often this
+	// collector ran; measuring locally gives ~1 Hz while page 0 is visible.
+	dev, err := getWANInterface()
+	if err != nil {
+		log.Printf("Could not get WAN interface: %v\n", err)
+		globalData.Store("WanUP", "0")
+		globalData.Store("WanDOWN", "0")
+		return
 	}
+	// Re-resolved every cycle so a failover moves the measurement to the new
+	// egress within a tick; also shared with the data-usage readers.
+	wanInterface = dev
+
+	netData, err := getNetworkSpeed(wanInterface)
+	if err != nil {
+		log.Printf("Could not get network speed: %v\n", err)
+		globalData.Store("WanUP", "0")
+		globalData.Store("WanDOWN", "0")
+		return
+	}
+	wanUPVal, wanUPUnit := formatSpeed(netData.UploadMbps)
+	wanDOWNVal, wanDOWNUnit := formatSpeed(netData.DownloadMbps)
+	globalData.Store("WanUP", wanUPVal)
+	globalData.Store("WanDOWN", wanDOWNVal)
+	globalData.Store("WanUP_Unit", wanUPUnit)
+	globalData.Store("WanDOWN_Unit", wanDOWNUnit)
 }
 
 // collectFixedData fills values that never change for the life of the process
@@ -586,15 +581,11 @@ func collectFixedData() {
 	}
 }
 
-// collectData gathers several pieces of system and network information and stores them in globalData.
-func collectLinuxData(cfg Config) {
-	if uptime, err := getUptime(); err != nil {
-		fmt.Printf("Could not get uptime: %v\n", err)
-		globalData.Store("Uptime", "N/A")
-	} else {
-		globalData.Store("Uptime", uptime)
-	}
-
+// collectPowerData samples the battery and DC rails. Split out of
+// collectLinuxData so collectBatteryData can refresh these at page 0's fast
+// cadence - the voltage/wattage row is drawn there, and the full Linux sweep
+// (CPU, memory, disks) is too heavy to drag along at 2 Hz.
+func collectPowerData() {
 	// Battery voltage.
 	voltageUV, err := getBatteryVoltageUV()
 	if err != nil {
@@ -634,6 +625,18 @@ func collectLinuxData(cfg Config) {
 	} else {
 		globalData.Store("DCVoltage", fmt.Sprintf("%0.1f", dcVoltageUV/1000/1000))
 	}
+}
+
+// collectData gathers several pieces of system and network information and stores them in globalData.
+func collectLinuxData(cfg Config) {
+	if uptime, err := getUptime(); err != nil {
+		fmt.Printf("Could not get uptime: %v\n", err)
+		globalData.Store("Uptime", "N/A")
+	} else {
+		globalData.Store("Uptime", uptime)
+	}
+
+	collectPowerData()
 
 	// CPU temperature.
 	if cpuTemp, err := getCpuTemp(); err != nil {
