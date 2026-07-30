@@ -676,6 +676,10 @@ func signalPage0Reschedule() {
 
 func main() {
 	var wg sync.WaitGroup
+	// Resolve the clock's timezone by hand from the first moment: time.Local
+	// would lock to UTC if we start before the boot has written the timezone
+	// files (see timezone.go).
+	startTimezoneKeeper()
 	all := flag.Bool("all", false, "if set, listen on all network interfaces (0.0.0.0)")
 	port := flag.Int("port", 8081, "TCP port to listen on")
 	forceColdBoot := flag.Bool("force-cold-boot", false, "force showing welcome screen even on warm boot")

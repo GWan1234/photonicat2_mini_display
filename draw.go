@@ -2099,9 +2099,11 @@ func drawTopBar(display gc9307.Device, frame *image.RGBA) {
 func renderTopBar(frame *image.RGBA) bool {
 	var timeStr string
 	var networkStr string
-	currDateTime := time.Now()
-
-	if currDateTime.Year() < 2025 {
+	// A placeholder until both the timezone is known (the daemon can start
+	// before the boot has produced /tmp/localtime - see timezone.go) and the
+	// clock has been set (year check): never show a wrong time.
+	currDateTime, tzKnown := displayNow()
+	if !tzKnown || currDateTime.Year() < 2025 {
 		timeStr = "--:--"
 	} else {
 		timeStr = fmt.Sprintf("%02d:%02d", currDateTime.Hour(), currDateTime.Minute())
