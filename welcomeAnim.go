@@ -225,10 +225,12 @@ func waPoseAt(t float64) waPose {
 	open *= waBlinkDip(t, 6.45, 6.62)                             // settled
 	p.eyeOpen = open
 
-	// Halo: blooms as the cat wakes, relaxes to a faint idle glow.
-	p.glow = 0.28*waSmooth(2.35, 2.75, t) - 0.18*waSmooth(3.10, 3.80, t)
-	p.glow -= 0.06 * waSmooth(6.35, 6.85, t)
-	if p.glow < 0 {
+	// Halo: blooms as the cat wakes, then dies out completely. The old
+	// envelope kept a faint idle glow (0.10 then 0.04) to the very end, and
+	// at that alpha the radial gradient quantizes into a visible circle edge
+	// on the LCD - an odd leftover ring once the bloom is over.
+	p.glow = 0.28 * waSmooth(2.35, 2.75, t) * (1 - waSmooth(3.10, 3.90, t))
+	if p.glow < 0.01 {
 		p.glow = 0
 	}
 	p.glow *= p.fade
