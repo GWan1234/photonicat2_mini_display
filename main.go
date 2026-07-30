@@ -518,11 +518,16 @@ func updateIntervals() {
 		desiredFPS = baseFPS
 	}
 
-	// Signal all goroutines to update their intervals
-	select {
-	case intervalUpdateChan <- struct{}{}:
-	default:
-		// Channel is full, skip
+	// Signal all goroutines to update their intervals. Six loops select on
+	// this channel and a single item only wakes one of them, which left the
+	// other five running on their idle-stretched tickers after wake - queue
+	// one item per listener (spares are drained as harmless no-op resets).
+	for i := 0; i < 8; i++ {
+		select {
+		case intervalUpdateChan <- struct{}{}:
+		default:
+			// Channel is full, skip
+		}
 	}
 }
 
@@ -778,6 +783,10 @@ func main() {
 	go func() {
 		ticker := time.NewTicker(basePcatWebInterval)
 		defer ticker.Stop()
+
+		// Fetch once right away: until this lands the top bar has no egress
+		// data and draws no network icon, so don't sit out a whole tick.
+		getInfoFromPcatWeb()
 
 		for {
 			select {
