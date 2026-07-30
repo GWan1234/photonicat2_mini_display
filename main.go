@@ -93,6 +93,10 @@ const (
 	ETC_USER_CONFIG_PATH   = "/etc/pcat2_mini_display-user_config.json"
 	ETC_CONFIG_PATH        = "/etc/pcat2_mini_display-config.json"
 	ETC_DEBIAN_CONFIG_PATH = "/etc/pcat2_mini_display-config_debian.json"
+
+	// Written on every start; /tmp is a tmpfs cleared at boot, so its absence
+	// means no instance has run since power-on (see the welcome gate below).
+	WELCOME_MARKER_PATH = "/tmp/pcat2_mini_display.welcomed"
 )
 
 var (
@@ -839,19 +843,30 @@ func main() {
 		shouldShowWelcome := *forceColdBoot // Always show if forced
 
 		if !shouldShowWelcome {
-			// Check system uptime - skip welcome if uptime > 1 minute (60 seconds)
+			// First start since power-on. The uptime heuristic alone misfired
+			// on photonicat2/OpenWrt, where the boot chain takes >60s before
+			// this daemon starts, so every real boot read as "warm" and the
+			// animation never played. The marker in tmpfs is authoritative
+			// (absent = nothing ran since power-on); uptime stays as a
+			// fallback for systems where /tmp survives a reboot.
+			_, markerErr := os.Stat(WELCOME_MARKER_PATH)
+			firstStartThisBoot := os.IsNotExist(markerErr)
 			if uptimeSeconds, err := getUptimeSeconds(); err != nil {
 				log.Printf("Failed to get uptime, showing welcome: %v", err)
 				shouldShowWelcome = true // Default to showing welcome on error
-			} else if uptimeSeconds <= 60 {
-				log.Printf("Cold boot detected (uptime: %.1fs), showing welcome screen", uptimeSeconds)
+			} else if firstStartThisBoot || uptimeSeconds <= 60 {
+				log.Printf("Cold boot detected (uptime: %.1fs, first start this boot: %v), showing welcome screen", uptimeSeconds, firstStartThisBoot)
 				shouldShowWelcome = true
 			} else {
 				log.Printf("Warm boot detected (uptime: %.1fs), skipping welcome screen", uptimeSeconds)
-				shouldShowWelcome = false
 			}
 		} else {
 			log.Println("Welcome screen forced by --force-cold-boot flag")
+		}
+
+		if err := os.WriteFile(WELCOME_MARKER_PATH,
+			[]byte(fmt.Sprintf("welcome=%v time=%s\n", shouldShowWelcome, time.Now().Format(time.RFC3339))), 0644); err != nil {
+			log.Printf("Could not write welcome marker: %v", err)
 		}
 
 		if shouldShowWelcome {
