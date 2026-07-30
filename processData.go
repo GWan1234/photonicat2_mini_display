@@ -110,6 +110,13 @@ type WiFiInterface struct {
 	Password   string `json:"password,omitempty"`
 	SSID       string `json:"ssid"`
 	Frequency  string `json:"frequency,omitempty"`
+	// WiFiWan is set when this radio is relaying an upstream hotspot as the WAN
+	// priority "wifi" slot (its own AP is parked). WiFiWanSSID is the upstream
+	// hotspot's SSID, reported only while WiFiWanAssociated is true — a relaying
+	// radio that has not (re)joined yet is on standby, not connected to a name.
+	WiFiWan           bool   `json:"wifi_wan,omitempty"`
+	WiFiWanSSID       string `json:"wifi_wan_ssid,omitempty"`
+	WiFiWanAssociated bool   `json:"wifi_wan_associated,omitempty"`
 }
 
 // DashboardInfo matches the top‐level keys in your sample JSON.
@@ -265,11 +272,8 @@ func applyRemainingTimeUnit() {
 }
 
 func getInfoFromPcatWeb() {
-	// All of this feeds the display; skip the HTTP calls and fallback execs
-	// while the backlight is off. displayWake() reruns it on wake-up.
-	if displayAsleep() {
-		return
-	}
+	// Runs on the shared 1-minute cadence (including while the screen is
+	// dark) so wake always has fresh dashboard values.
 	dashbarodURL := "http://localhost:80/api/v1/dashboard.json"
 	networkStatsURL := "http://localhost:80/api/v1/data_stats.json?network_type=mobile"
 	basicURL := "http://localhost:80/api/v1/modem/basic.json"
@@ -321,10 +325,17 @@ func getInfoFromPcatWeb() {
 					globalData.Store("WifiSignalPercent", -1)
 				}
 				globalData.Store("DHCPClientsCount", info.DHCPClientsCount)
-				globalData.Store("FirmwareVersion", info.FirmwareVersion)
+				// Firmware / model are fixed for a running process — set once.
+				if _, exists := globalData.Load("FirmwareVersion"); !exists {
+					globalData.Store("FirmwareVersion", info.FirmwareVersion)
+				}
 				globalData.Store("ISPName", info.ISPName)
-				globalData.Store("Model", info.Model)
-				globalData.Store("ModemModel", info.ModemModel)
+				if _, exists := globalData.Load("Model"); !exists {
+					globalData.Store("Model", info.Model)
+				}
+				if _, exists := globalData.Load("ModemModel"); !exists {
+					globalData.Store("ModemModel", info.ModemModel)
+				}
 				globalData.Store("ModemSignalStrength", info.ModemSignalStrength)
 				if info.SdState == 0 {
 					globalData.Store("SdState", "No")
@@ -345,24 +356,15 @@ func getInfoFromPcatWeb() {
 				globalData.Store("PublicIP", info.PublicIP)
 				globalData.Store("UpSpeedBps", info.UpSpeedBps)
 				globalData.Store("DownSpeedBps", info.DownSpeedBps)
-				theOS := ""
-				raw := info.OpenWRTVersion // e.g. "R25.02.0 / r7465-d1ccd1687"
-				parts := strings.SplitN(raw, "/", 2)
-				if len(parts) == 2 {
-					ver := strings.TrimSpace(parts[0])    // "R25.02.0"
-					commit := strings.TrimSpace(parts[1]) // "r7465-d1ccd1687"
-
-					// remove trailing ".0" from version
-					ver = strings.TrimSuffix(ver, ".0") // "R25.02"
-
-					// keep only up to the first dash in commit
-					commit = strings.SplitN(commit, "-", 2)[0] // "r7465"
-
-					theOS = fmt.Sprintf("%s / %s", ver, commit) // "R25.02 / r7465"
-				} else {
-					theOS = raw
+				// OS version from pcat-manager-web is authoritative on OpenWrt.
+				// Always apply it so an earlier os-release fallback
+				// ("photonicatWrt 26.04.1") does not stick for the process
+				// lifetime. Short form: "R26.04.1 / r7760" (no git hash).
+				if raw := info.OpenWRTVersion; raw != "" {
+					if theOS := formatOpenWrtVersionLabel(raw); theOS != "" {
+						globalData.Store("OSVersion", theOS)
+					}
 				}
-				globalData.Store("OSVersion", theOS)
 
 				// Build a slice of SSIDs for convenience
 				var ssids []string
@@ -370,6 +372,16 @@ func getInfoFromPcatWeb() {
 					ssids = append(ssids, iface.SSID)
 				}
 				globalData.Store("WiFiSSIDs", ssids)
+
+				// Page-3 SSID rows. pcat-manager-web classifies each radio by
+				// device path (Onboard/Builtin vs PCIE) and reports which one is
+				// relaying the upstream WiFi (its AP parked) — the WAN priority
+				// table lets either radio carry the STA, so we can't assume a
+				// fixed wifi-iface index here. Map by class and let the web be
+				// authoritative; collectNetworkData's uci fallback only runs when
+				// pcat-manager-web is unreachable.
+				globalData.Store("SSID", radioDisplaySSID(info.WiFiInterfaces, false))
+				globalData.Store("SSID2", radioDisplaySSID(info.WiFiInterfaces, true))
 			}
 		}
 	}
@@ -383,6 +395,7 @@ func getInfoFromPcatWeb() {
 		}
 		pcatWebStateKnown = true
 		pcatWebUp.Store(false)
+		pcatWebProbed.Store(true)
 		collectLinuxFallbackData()
 		return
 	}
@@ -391,6 +404,7 @@ func getInfoFromPcatWeb() {
 	}
 	pcatWebStateKnown = true
 	pcatWebUp.Store(true)
+	pcatWebProbed.Store(true)
 
 	// === 2) Fetch data_stats.json ===
 	resp2, err := localHTTPClient.Get(networkStatsURL)
@@ -433,8 +447,13 @@ func getInfoFromPcatWeb() {
 				fmt.Println("Could not unmarshal modem basic info:", err)
 			} else {
 				globalData.Store("CellCarrierInfo", mb.CellCarrierInfo)
-				globalData.Store("ModemFirmwareVer", mb.FirmwareVersion)
-				globalData.Store("IMEINum", mb.IMEINum)
+				// Firmware / IMEI don't change at runtime — set once.
+				if _, exists := globalData.Load("ModemFirmwareVer"); !exists {
+					globalData.Store("ModemFirmwareVer", mb.FirmwareVersion)
+				}
+				if _, exists := globalData.Load("IMEINum"); !exists {
+					globalData.Store("IMEINum", mb.IMEINum)
+				}
 				globalData.Store("ModemCellID", mb.ModemCellID)
 				globalData.Store("ModemCellInfo", mb.ModemCellInfo)
 				globalData.Store("ModemSignals", mb.ModemCellSignals)
@@ -500,9 +519,7 @@ func getWANInterface() (string, error) {
 }
 
 func collectWANNetworkSpeed() {
-	if displayAsleep() { // speed is display-only; skip the 1s sampling while dark
-		return
-	}
+	// 1-minute cadence including while dark (keeps WanUP/DOWN warm for wake).
 	var err error
 	// On OpenWrt the speeds come from pcat-manager-web; when it is down fall
 	// through to the direct /sys/class/net measurement used on Debian.
@@ -553,11 +570,20 @@ func collectWANNetworkSpeed() {
 	}
 }
 
+// collectFixedData fills values that never change for the life of the process
+// (kernel build date, serial number, device-tree model). OSVersion is filled
+// by collectLinuxFallbackData from /etc/os-release, then upgraded to the
+// short OpenWrt form ("R26.04.1 / r7760") once pcat-manager-web answers.
 func collectFixedData() {
 	kernelDate, _ := getKernelDate()
 	globalData.Store("Kernel", kernelDate)
 	sn, _ := getSN()
 	globalData.Store("SN", sn)
+	if _, exists := globalData.Load("Model"); !exists {
+		if model := getDeviceTreeModel(); model != "" {
+			globalData.Store("Model", model)
+		}
+	}
 }
 
 // collectData gathers several pieces of system and network information and stores them in globalData.
@@ -589,9 +615,16 @@ func collectLinuxData(cfg Config) {
 		globalData.Store("BatteryCurrent", current_2digit)
 	}
 
-	// Battery wattage.
+	// Battery wattage. Above 20 W there isn't room (and little value) in the
+	// decimal, so drop it; keep one decimal for the finer low-power range.
 	wattage := float64(voltageUV) * float64(currentUA) / 1000 / 1000 / 1000 / 1000
-	globalData.Store("BatteryWattage", fmt.Sprintf("%0.1f", wattage))
+	var wattageStr string
+	if wattage > 20 {
+		wattageStr = fmt.Sprintf("%0.0f", wattage)
+	} else {
+		wattageStr = fmt.Sprintf("%0.1f", wattage)
+	}
+	globalData.Store("BatteryWattage", wattageStr)
 
 	// DC voltage.
 	dcVoltageUV, err := getDCVoltageUV()
@@ -611,25 +644,44 @@ func collectLinuxData(cfg Config) {
 		globalData.Store("CpuTemp", cpuTemp_1digit)
 	}
 
-	// CPU usage.
-	cpuUsage, err := getCPUUsage()
-	if err != nil {
+	// CPU usage. Sample once via getCpuUsages() so we get the per-core slice
+	// (for the 8-bar chart) and the aggregate from the same measurement window
+	// — calling it twice would rotate the /proc/stat snapshot and halve each
+	// window.
+	if cpus, err := getCpuUsages(); err != nil {
 		fmt.Printf("Could not get CPU usage: %v\n", err)
 		globalData.Store("CpuUsage", 0)
+		globalData.Store("CpuUsages", nil)
 	} else {
-		cpuUsageInt := int(cpuUsage)
-		globalData.Store("CpuUsage", cpuUsageInt)
+		total := 0.0
+		for _, c := range cpus {
+			total += c
+		}
+		avg := 0.0
+		if len(cpus) > 0 {
+			avg = total / float64(len(cpus))
+		}
+		globalData.Store("CpuUsage", int(avg))
+		// Per-core usages (0-100) for the cpu_bars element.
+		globalData.Store("CpuUsages", cpus)
 	}
 
 	// Memory usage.
 	if memUsed, memTotal, err := getMemUsedAndTotalGB(); err != nil {
 		fmt.Printf("Could not get memory usage: %v\n", err)
 		globalData.Store("MemUsage", nil)
+		globalData.Store("MemUsagePercent", nil)
 	} else {
 		memUsed_1digit := fmt.Sprintf("%0.1f", memUsed)
 		memTotal_ceilInt := int(math.Ceil(memTotal))
 		memString := fmt.Sprintf("%s/%d", memUsed_1digit, memTotal_ceilInt)
 		globalData.Store("MemUsage", memString)
+		// Used fraction (0-100) for the memory hbar element.
+		memPct := 0.0
+		if memTotal > 0 {
+			memPct = memUsed / memTotal * 100
+		}
+		globalData.Store("MemUsagePercent", memPct)
 	}
 
 	// Disk usage.
@@ -689,13 +741,11 @@ func getFanSpeed() (int, error) {
 	return 0, fmt.Errorf("no valid fan1_input found under /sys/class/hwmon")
 }
 
+// collectNetworkData gathers IPs, SSIDs, clients, and data-usage counters.
+// Ping lives in collectPingData so it can run on a faster cadence when the
+// ping page is visible. This still runs every minute while the screen is
+// dark so wake does not show stale IPs/usage.
 func collectNetworkData(cfg Config) {
-	// Nothing here is visible with the backlight off; skipping saves the
-	// pings, exec spawns and any public-IP fetch that would otherwise keep
-	// the modem radio awake. displayWake() refreshes everything on wake-up.
-	if displayAsleep() {
-		return
-	}
 	if isOpenWRT() {
 		//we have aonther func to get data from pcat-manager-web
 	} else {
@@ -737,20 +787,29 @@ func collectNetworkData(cfg Config) {
 	// Public IPv4/IPv6 (cached; see updatePublicIPs).
 	updatePublicIPs(wanIP)
 
-	// SSID.
-	if ssid, err := getSSID(); err != nil {
-		//fmt.Printf("Could not get SSID: %v\n", err)
-		globalData.Store("SSID", "N/A")
-	} else {
-		globalData.Store("SSID", ssid)
-	}
+	// SSID rows (page 3). When pcat-manager-web is up it already populated
+	// SSID/SSID2 from its per-radio wifi_interfaces (which knows onboard vs PCIe
+	// and which radio relays the upstream WiFi), so don't clobber that with the
+	// coarser uci reads below — those can't tell which radio carries the STA and
+	// would show a stale name for a disconnected upstream. Only fall back to uci
+	// when the web is unavailable (Debian, or pcat-manager-web stopped). On
+	// OpenWrt, wait for the first dashboard.json poll before using the fallback
+	// so we don't briefly flash a coarse uci SSID at boot before the authoritative
+	// per-radio value arrives; on Debian there is no web, so run it immediately.
+	if !pcatWebUp.Load() && (pcatWebProbed.Load() || !isOpenWRT()) {
+		if ssid, err := getSSID(); err != nil {
+			//fmt.Printf("Could not get SSID: %v\n", err)
+			globalData.Store("SSID", "N/A")
+		} else {
+			globalData.Store("SSID", ssid)
+		}
 
-	// SSID.
-	if ssid2, err := getSSID2(); err != nil {
-		//fmt.Printf("Could not get SSID: %v\n", err)
-		globalData.Store("SSID2", "N/A")
-	} else {
-		globalData.Store("SSID2", ssid2)
+		if ssid2, err := getSSID2(); err != nil {
+			//fmt.Printf("Could not get SSID: %v\n", err)
+			globalData.Store("SSID2", "N/A")
+		} else {
+			globalData.Store("SSID2", ssid2)
+		}
 	}
 
 	// DHCP clients (OpenWrt).
@@ -768,77 +827,61 @@ func collectNetworkData(cfg Config) {
 	} else {
 		globalData.Store("WifiClients", wifiClients)
 	}
+}
 
-	// Ping Site0 using ICMP with statistics tracking
-	ping0Stats.mu.Lock()
-	ping0Stats.total++
-	if ping0, err := pingICMP(cfg.PingSite0); err != nil {
+// collectPingData ICMP-pings both configured sites and updates Ping0/Ping1
+// plus success rates. Cadence is controlled by the main ping goroutine:
+// 3s on the ping page while awake, 1 minute otherwise (including idle).
+func collectPingData(cfg Config) {
+	// Run both sites in parallel so a single slow host does not double the
+	// cycle time (important for the 3s active cadence).
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		updateOnePing("Ping0", "Ping0Rate", cfg.PingSite0, &ping0Stats)
+	}()
+	go func() {
+		defer wg.Done()
+		updateOnePing("Ping1", "Ping1Rate", cfg.PingSite1, &ping1Stats)
+	}()
+	wg.Wait()
+}
+
+func updateOnePing(valueKey, rateKey, site string, stats *struct {
+	total       int
+	successful  int
+	lastSuccess int64
+	mu          sync.RWMutex
+}) {
+	stats.mu.Lock()
+	defer stats.mu.Unlock()
+	stats.total++
+	if pingMs, err := pingICMP(site); err != nil {
 		// Keep showing last successful ping value, or -1 if never succeeded
-		if ping0Stats.lastSuccess > 0 {
-			globalData.Store("Ping0", ping0Stats.lastSuccess)
+		if stats.lastSuccess > 0 {
+			globalData.Store(valueKey, stats.lastSuccess)
 		} else {
-			globalData.Store("Ping0", int64(-1))
+			globalData.Store(valueKey, int64(-1))
 		}
-	} else if ping0 == -2 {
+	} else if pingMs == -2 {
 		// Timeout case - show red X
-		globalData.Store("Ping0", int64(-2))
-	} else if ping0 > 0 {
+		globalData.Store(valueKey, int64(-2))
+	} else if pingMs > 0 {
 		// Successful ping - update last success and display it
-		ping0Stats.successful++
-		ping0Stats.lastSuccess = ping0
-		globalData.Store("Ping0", ping0)
+		stats.successful++
+		stats.lastSuccess = pingMs
+		globalData.Store(valueKey, pingMs)
 	} else {
 		// Other error case
-		if ping0Stats.lastSuccess > 0 {
-			globalData.Store("Ping0", ping0Stats.lastSuccess)
+		if stats.lastSuccess > 0 {
+			globalData.Store(valueKey, stats.lastSuccess)
 		} else {
-			globalData.Store("Ping0", int64(-1))
+			globalData.Store(valueKey, int64(-1))
 		}
 	}
-	// Calculate and store success rate
-	successRate0 := float64(ping0Stats.successful) / float64(ping0Stats.total) * 100
-	globalData.Store("Ping0Rate", fmt.Sprintf("%.0f", successRate0))
-	ping0Stats.mu.Unlock()
-
-	// Ping Site1 using ICMP with statistics tracking
-	ping1Stats.mu.Lock()
-	ping1Stats.total++
-	if ping1, err := pingICMP(cfg.PingSite1); err != nil {
-		// Keep showing last successful ping value, or -1 if never succeeded
-		if ping1Stats.lastSuccess > 0 {
-			globalData.Store("Ping1", ping1Stats.lastSuccess)
-		} else {
-			globalData.Store("Ping1", int64(-1))
-		}
-	} else if ping1 == -2 {
-		// Timeout case - show red X
-		globalData.Store("Ping1", int64(-2))
-	} else if ping1 > 0 {
-		// Successful ping - update last success and display it
-		ping1Stats.successful++
-		ping1Stats.lastSuccess = ping1
-		globalData.Store("Ping1", ping1)
-	} else {
-		// Other error case
-		if ping1Stats.lastSuccess > 0 {
-			globalData.Store("Ping1", ping1Stats.lastSuccess)
-		} else {
-			globalData.Store("Ping1", int64(-1))
-		}
-	}
-	// Calculate and store success rate
-	successRate1 := float64(ping1Stats.successful) / float64(ping1Stats.total) * 100
-	globalData.Store("Ping1Rate", fmt.Sprintf("%.0f", successRate1))
-	ping1Stats.mu.Unlock()
-
-	/*
-		// Country based on public IP geolocation.
-		if country, err := getCountry(); err != nil {
-			fmt.Printf("Could not get country: %v\n", err)
-			globalData.Store("Country", "Unknown")
-		} else {
-			globalData.Store("Country", country)
-		}*/
+	successRate := float64(stats.successful) / float64(stats.total) * 100
+	globalData.Store(rateKey, fmt.Sprintf("%.0f", successRate))
 }
 
 // Public IPs only change when the upstream connection does, so they are
@@ -1054,15 +1097,46 @@ func isOpenWRT() bool {
 	return false
 }
 
-// getOpenWrtStaSSID returns the SSID of the first wifi-iface in station (sta)
-// mode — i.e. the upstream hotspot we are connected to in Smart WAN mode. Empty
-// string when no STA iface is configured. Matches lines like:
-//	wireless.cfg0a2b63.mode='sta'
-//	wireless.cfg0a2b63.ssid='Shanghai Novotech WiFi7_5G'
-func getOpenWrtStaSSID() string {
+// radioDisplaySSID picks the page-3 SSID string for one physical radio from the
+// pcat-manager-web wifi_interfaces list. wantPCIe selects the PCIe radio;
+// otherwise the onboard radio (device_type "Onboard"/"Builtin"). When the radio
+// is relaying the upstream WiFi (WAN priority "wifi" slot, AP parked) it shows
+// the upstream hotspot's SSID while associated, or "Standby" while it has not
+// (re)joined — never the stale configured name. A radio that isn't present
+// yields "N/A", matching the other page-3 rows.
+func radioDisplaySSID(ifaces []WiFiInterface, wantPCIe bool) string {
+	for _, iface := range ifaces {
+		isPCIe := iface.DeviceType == "PCIE"
+		if isPCIe != wantPCIe {
+			continue
+		}
+		if iface.WiFiWan {
+			// Relaying an upstream hotspot: show what we're actually joined to,
+			// or standby when the STA is enabled but not associated.
+			if iface.WiFiWanAssociated && iface.WiFiWanSSID != "" {
+				return iface.WiFiWanSSID
+			}
+			return "Standby"
+		}
+		return iface.SSID
+	}
+	return "N/A"
+}
+
+// getOpenWrtStaSSID reports the upstream STA (WiFi-as-WAN) link state read
+// directly from uci/iwinfo. This is the fallback used only when
+// pcat-manager-web is unreachable; when it is up, page-3 SSIDs come from its
+// per-radio wifi_interfaces instead (see radioDisplaySSID).
+//
+// Returns:
+//   - configured: a wifi-iface in mode=sta exists (the WAN priority wifi slot)
+//   - ssid:       the hotspot it is currently *associated* to, or "" when the
+//                 STA is enabled but not joined (standby). The stale configured
+//                 ssid is deliberately not returned in that case.
+func getOpenWrtStaSSID() (ssid string, configured bool) {
 	out, err := secureExecCommand("uci", "-q", "show", "wireless")
 	if err != nil {
-		return ""
+		return "", false
 	}
 	staSection := ""
 	reMode := regexp.MustCompile(`^wireless\.([^.]+)\.mode='?sta'?$`)
@@ -1074,25 +1148,62 @@ func getOpenWrtStaSSID() string {
 		}
 	}
 	if staSection == "" {
-		return ""
+		return "", false
 	}
-	ssidOut, err := secureExecCommand("uci", "-q", "get",
-		"wireless."+staSection+".ssid")
+	// The STA iface is configured. Its live SSID (only present while actually
+	// associated) comes from iwinfo on the sta netdev, not from the uci config
+	// value — which persists across disconnects and would be stale.
+	return liveStaSSID(), true
+}
+
+// liveStaSSID returns the SSID the station iface is currently associated to,
+// or "" when not associated. Resolves the sta netdev from `iwinfo`, then reads
+// its live ESSID. Empty on any error (treated as not-associated / standby).
+func liveStaSSID() string {
+	out, err := secureExecCommand("iwinfo")
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(string(ssidOut))
+	// `iwinfo` lists each iface then its fields; the sta netdev shows
+	// `Mode: Client` and `ESSID: "<hotspot>"` (or `ESSID: unknown` when idle).
+	reESSID := regexp.MustCompile(`ESSID:\s*"(.*?)"`)
+	reMode := regexp.MustCompile(`Mode:\s*(\S+)`)
+	var curMode, curESSID string
+	for _, line := range strings.Split(string(out), "\n") {
+		// A new iface block starts at a non-indented "phyX-staY  ESSID: ..." line.
+		if len(line) > 0 && line[0] != ' ' && line[0] != '\t' {
+			// Previous block ended; check if it was an associated client.
+			if curMode == "Client" && curESSID != "" {
+				return curESSID
+			}
+			curMode, curESSID = "", ""
+		}
+		if m := reESSID.FindStringSubmatch(line); m != nil {
+			curESSID = m[1]
+		}
+		if m := reMode.FindStringSubmatch(line); m != nil {
+			curMode = m[1]
+		}
+	}
+	if curMode == "Client" && curESSID != "" {
+		return curESSID
+	}
+	return ""
 }
 
 // getSSID returns connected SSID on Debian or broadcasting SSID on OpenWrt.
 func getSSID() (string, error) {
 	// OpenWrt detection
 	if isOpenWRT() {
-		// Smart WAN: when the onboard radio relays an upstream hotspot it runs
-		// a station (sta) iface. Show the SSID we are actually connected to
-		// rather than the parked AP's (often stale "OpenWrt") SSID.
-		if sta := getOpenWrtStaSSID(); sta != "" {
-			return sta, nil
+		// Smart WAN: when a radio relays an upstream hotspot it runs a station
+		// (sta) iface. Show the hotspot we are actually joined to rather than
+		// the parked AP's (often stale "OpenWrt") SSID; show "Standby" when the
+		// STA is configured but not currently associated.
+		if sta, configured := getOpenWrtStaSSID(); configured {
+			if sta != "" {
+				return sta, nil
+			}
+			return "Standby", nil
 		}
 		out, err := secureExecCommand("uci", "get", "wireless.@wifi-iface[0].ssid")
 		if err != nil {
@@ -1135,11 +1246,22 @@ func getSSID() (string, error) {
 	return "", fmt.Errorf("SSID could not be determined")
 }
 
-// getSSID returns connected SSID on Debian or broadcasting SSID on OpenWrt.
+// getSSID2 returns the second radio's SSID on OpenWrt (or the connected SSID on
+// Debian). Fallback for when pcat-manager-web is unreachable.
 func getSSID2() (string, error) {
 	// OpenWrt detection
-	if _, err := os.Stat("/etc/openwrt_release"); err == nil {
-		// OpenWrt: Use uci command
+	if isOpenWRT() {
+		// The second wifi-iface may itself be the upstream STA (the WAN priority
+		// wifi slot can sit on either radio). If so, report the live upstream /
+		// standby rather than the stale configured sta ssid.
+		if mode, err := secureExecCommand("uci", "-q", "get",
+			"wireless.@wifi-iface[1].mode"); err == nil &&
+			strings.TrimSpace(string(mode)) == "sta" {
+			if sta := liveStaSSID(); sta != "" {
+				return sta, nil
+			}
+			return "Standby", nil
+		}
 		out, err := secureExecCommand("uci", "get", "wireless.@wifi-iface[1].ssid")
 		if err != nil {
 			return "", fmt.Errorf("failed to get OpenWrt SSID: %v", err)
@@ -1637,6 +1759,10 @@ func normalizeRemainingTime(s string) string {
 	s = strings.TrimSpace(s)
 	s = strings.TrimPrefix(s, "<")
 	s = strings.TrimSpace(s)
+	// Web sometimes sends a bare "-" placeholder; treat like empty.
+	if s == "" || s == "-" {
+		return ""
+	}
 	if zeroTimeRe.MatchString(s) {
 		return ""
 	}
@@ -1964,10 +2090,31 @@ func parseBlockMounts(content string) [][2]string {
 	return mounts
 }
 
+// sdCardDisks returns the removable SD cards currently in the slot as /dev base
+// paths (e.g. {"/dev/mmcblk1": true}), read from the MMC type sysfs attribute.
+// The soldered eMMC reports "MMC" there, so it never shows up as an SD card —
+// on OpenWrt the root filesystem is an overlay with no /dev device in
+// /proc/mounts, and without this check its eMMC /boot partition would look like
+// a card.
+func sdCardDisks() map[string]bool {
+	disks := map[string]bool{}
+	types, _ := filepath.Glob("/sys/block/mmcblk*/device/type")
+	for _, p := range types {
+		data, err := os.ReadFile(p)
+		if err != nil || strings.TrimSpace(string(data)) != "SD" {
+			continue
+		}
+		// /sys/block/mmcblk1/device/type -> /dev/mmcblk1
+		disks["/dev/"+filepath.Base(filepath.Dir(filepath.Dir(p)))] = true
+	}
+	return disks
+}
+
 // pickExtraDiskMounts classifies non-root physical disks and returns the first
-// mountpoint of the NVMe drive and of the SD card ("" when absent). Any mmcblk
-// disk other than the root disk counts as the SD card (root is on eMMC).
-func pickExtraDiskMounts(mounts [][2]string) (nvmeMp, sdMp string) {
+// mountpoint of the NVMe drive and of the SD card ("" when absent). An mmcblk
+// mount only counts as the SD card when its disk is in sdDisks (see
+// sdCardDisks), so eMMC partitions are never mistaken for a card.
+func pickExtraDiskMounts(mounts [][2]string, sdDisks map[string]bool) (nvmeMp, sdMp string) {
 	rootBase := ""
 	for _, m := range mounts {
 		if m[1] == "/" {
@@ -1982,24 +2129,40 @@ func pickExtraDiskMounts(mounts [][2]string) (nvmeMp, sdMp string) {
 		}
 		if nvmeMp == "" && strings.HasPrefix(base, "/dev/nvme") {
 			nvmeMp = m[1]
-		} else if sdMp == "" && strings.HasPrefix(base, "/dev/mmcblk") {
+		} else if sdMp == "" && sdDisks[base] {
 			sdMp = m[1]
 		}
 	}
 	return nvmeMp, sdMp
 }
 
+// diskStatfs returns used/total GB and used percent (0-100) for mountpoint.
+// ok is false when the mount cannot be read or has no size.
+func diskStatfs(mountpoint string) (usedGB, totalGB, pct float64, ok bool) {
+	var stat syscall.Statfs_t
+	if err := syscall.Statfs(mountpoint, &stat); err != nil {
+		return 0, 0, 0, false
+	}
+	totalGB = float64(stat.Blocks) * float64(stat.Bsize) / (1 << 30)
+	usedGB = float64(stat.Blocks-stat.Bfree) * float64(stat.Bsize) / (1 << 30)
+	if totalGB <= 0 {
+		return 0, 0, 0, false
+	}
+	pct = usedGB / totalGB * 100
+	if pct < 0 {
+		pct = 0
+	} else if pct > 100 {
+		pct = 100
+	}
+	return usedGB, totalGB, pct, true
+}
+
 // formatDiskUsageGB returns "used/total" in GB (e.g. "3.1/29") for the
 // filesystem at mountpoint, or "-" if it cannot be read. Used space drops the
 // decimal at >=100 GB so large NVMe values still fit the display column.
 func formatDiskUsageGB(mountpoint string) string {
-	var stat syscall.Statfs_t
-	if err := syscall.Statfs(mountpoint, &stat); err != nil {
-		return "-"
-	}
-	totalGB := float64(stat.Blocks) * float64(stat.Bsize) / (1 << 30)
-	usedGB := float64(stat.Blocks-stat.Bfree) * float64(stat.Bsize) / (1 << 30)
-	if totalGB <= 0 {
+	usedGB, totalGB, _, ok := diskStatfs(mountpoint)
+	if !ok {
 		return "-"
 	}
 	used := fmt.Sprintf("%0.1f", usedGB)
@@ -2009,26 +2172,50 @@ func formatDiskUsageGB(mountpoint string) string {
 	return fmt.Sprintf("%s/%d", used, int(math.Ceil(totalGB)))
 }
 
-// collectDiskUsage stores per-disk "used/total" GB strings for the display:
-// DiskUsage for the root filesystem, DiskNvme for the first mounted NVMe
-// partition, and DiskSD for the first mounted partition of an mmcblk disk
-// other than the root disk (i.e. the SD card when root is on eMMC). Absent
-// disks store "-" so the display keeps its placeholder after hot-unplug.
+// collectDiskUsage stores per-disk "used/total" GB strings and 0-100 percent
+// values for the display:
+//   - DiskUsage / DiskUsagePercent — root (onboard) filesystem
+//   - DiskNvme / DiskNvmePercent / DiskNvmePresent — first mounted NVMe
+//   - DiskSD / DiskSDPercent / DiskSDPresent — SD card in the slot
+// Absent disks store "-" / 0 / false so the UI can hide their bar. An SD card
+// counts as present as soon as it is in the slot: an unmounted card has no
+// usage to report, so it stores "-" / 0 and the UI draws an empty bar.
 func collectDiskUsage() {
 	globalData.Store("DiskUsage", formatDiskUsageGB("/"))
+	if _, _, pct, ok := diskStatfs("/"); ok {
+		globalData.Store("DiskUsagePercent", pct)
+	} else {
+		globalData.Store("DiskUsagePercent", 0.0)
+	}
 
+	sdDisks := sdCardDisks()
 	nvme, sd := "-", "-"
+	nvmePresent := false
+	nvmePct, sdPct := 0.0, 0.0
+	sdPresent := len(sdDisks) > 0
 	if data, err := os.ReadFile("/proc/mounts"); err == nil {
-		nvmeMp, sdMp := pickExtraDiskMounts(parseBlockMounts(string(data)))
+		nvmeMp, sdMp := pickExtraDiskMounts(parseBlockMounts(string(data)), sdDisks)
 		if nvmeMp != "" {
 			nvme = formatDiskUsageGB(nvmeMp)
+			if _, _, pct, ok := diskStatfs(nvmeMp); ok {
+				nvmePresent = true
+				nvmePct = pct
+			}
 		}
 		if sdMp != "" {
 			sd = formatDiskUsageGB(sdMp)
+			if _, _, pct, ok := diskStatfs(sdMp); ok {
+				sdPresent = true
+				sdPct = pct
+			}
 		}
 	}
 	globalData.Store("DiskNvme", nvme)
+	globalData.Store("DiskNvmePercent", nvmePct)
+	globalData.Store("DiskNvmePresent", nvmePresent)
 	globalData.Store("DiskSD", sd)
+	globalData.Store("DiskSDPercent", sdPct)
+	globalData.Store("DiskSDPresent", sdPresent)
 }
 
 // getCurrNetworkSpeedMbps returns current network speed in Mbps for all interfaces.

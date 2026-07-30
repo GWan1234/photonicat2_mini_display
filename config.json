@@ -334,47 +334,45 @@
             ],
             "page2": [
                 {
-                    "type": "fixed_text",
-                    "label": "CPU",
-                    "position": {"x": 10, "y": 4},
-                    "font": "unit",
-                    "color": [255, 229, 0],
+                    "type": "icon",
+                    "icon_path": "assets/svg/cpu.svg",
+                    "position": {"x": 5, "y": 24},
+                    "size": {"width": 18, "height": 18},
                     "enable": 1
                 },
                 {
-                    "type": "text",
-                    "label": "CPU",
-                    "position": {"x": 10, "y": 18},
-                    "font": "huge",
-                    "color": [255, 229, 0],
-                    "units": "%",
-                    "data_key": "CpuUsage",
-                    "units_font": "unit",
+                    "type": "cpu_bars",
+                    "position": {"x": 28, "y": 9},
+                    "data_key": "CpuUsages",
+                    "size": {"width": 136, "height": 48},
                     "enable": 1
                 },
                 {
-                    "type": "fixed_text",
-                    "label": "Memory - GB",
-                    "position": {"x": 10, "y": 62},
-                    "font": "unit",
-                    "color": [255, 229, 0],
+                    "type": "icon",
+                    "icon_path": "assets/svg/mem.svg",
+                    "position": {"x": 5, "y": 70},
+                    "size": {"width": 18, "height": 18},
                     "enable": 1
                 },
                 {
-                    "type": "text",
-                    "label": "MemUsage",
-                    "position": {"x": 10, "y": 76},
-                    "font": "huge",
-                    "color": [255, 229, 0],
-                    "units": "",
-                    "data_key": "MemUsage",
-                    "units_font": "unit",
+                    "type": "hbar",
+                    "position": {"x": 28, "y": 66},
+                    "data_key": "MemUsagePercent",
+                    "label_data_key": "MemUsage",
+                    "units": "GB",
+                    "size": {"width": 136, "height": 24},
+                    "enable": 1
+                },
+                {
+                    "type": "disk_bars",
+                    "position": {"x": 5, "y": 104},
+                    "size": {"width": 159, "height": 24},
                     "enable": 1
                 },
                 {
                     "type": "fixed_text",
                     "label": "Uptime",
-                    "position": {"x": 10, "y": 120},
+                    "position": {"x": 10, "y": 140},
                     "font": "unit",
                     "color": [255, 229, 0],
                     "enable": 1
@@ -382,7 +380,7 @@
                 {
                     "type": "text",
                     "label": "lan",
-                    "position": {"x": 10, "y": 137},
+                    "position": {"x": 10, "y": 157},
                     "font": "thin",
                     "color": [255, 229, 255],
                     "data_key": "Uptime",
@@ -393,7 +391,7 @@
                 {
                     "type": "fixed_text",
                     "label": "OS Version",
-                    "position": {"x": 10, "y": 160},
+                    "position": {"x": 10, "y": 182},
                     "font": "unit",
                     "color": [255, 229, 0],
                     "enable": 1
@@ -401,7 +399,7 @@
                 {
                     "type": "text",
                     "label": "OS Version",
-                    "position": {"x": 10, "y": 178},
+                    "position": {"x": 10, "y": 200},
                     "font": "unit",
                     "color": [255, 229, 255],
                     "data_key": "OSVersion",
@@ -411,7 +409,7 @@
                 {
                     "type": "fixed_text",
                     "label": "SN",
-                    "position": {"x": 10, "y": 202},
+                    "position": {"x": 10, "y": 224},
                     "font": "unit",
                     "color": [255, 229, 0],
                     "enable": 1
@@ -419,7 +417,7 @@
                 {
                     "type": "text",
                     "label": "SN",
-                    "position": {"x": 10, "y": 220},
+                    "position": {"x": 10, "y": 242},
                     "font": "thin",
                     "color": [255, 229, 255],
                     "data_key": "SN",

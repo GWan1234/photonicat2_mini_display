@@ -1,0 +1,18 @@
+<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<!-- Bold CPU package — square body, pins on all four sides, black die.
+     Distinct from the wide RAM module in mem.svg at 16-20px. -->
+<path d="M3 3H13V13H3V3Z" fill="#FDE021"/>
+<path d="M6 6H10V10H6V6Z" fill="#000000"/>
+<path d="M4.4 1H5.9V3H4.4V1Z" fill="#FDE021"/>
+<path d="M7.25 1H8.75V3H7.25V1Z" fill="#FDE021"/>
+<path d="M10.1 1H11.6V3H10.1V1Z" fill="#FDE021"/>
+<path d="M4.4 13H5.9V15H4.4V13Z" fill="#FDE021"/>
+<path d="M7.25 13H8.75V15H7.25V13Z" fill="#FDE021"/>
+<path d="M10.1 13H11.6V15H10.1V13Z" fill="#FDE021"/>
+<path d="M1 4.4H3V5.9H1V4.4Z" fill="#FDE021"/>
+<path d="M1 7.25H3V8.75H1V7.25Z" fill="#FDE021"/>
+<path d="M1 10.1H3V11.6H1V10.1Z" fill="#FDE021"/>
+<path d="M13 4.4H15V5.9H13V4.4Z" fill="#FDE021"/>
+<path d="M13 7.25H15V8.75H13V7.25Z" fill="#FDE021"/>
+<path d="M13 10.1H15V11.6H13V10.1Z" fill="#FDE021"/>
+</svg>

@@ -309,22 +309,17 @@
             ],
             "page2": [
                 {
-                    "type": "fixed_text",
-                    "label": "CPU:",
+                    "type": "icon",
+                    "icon_path": "assets/svg/cpu.svg",
                     "position": {"x": 10, "y": 5},
-                    "font": "unit",
-                    "color": [255, 229, 0],
+                    "size": {"width": 16, "height": 16},
                     "enable": 1
                 },
                 {
-                    "type": "text",
-                    "label": "CPU",
-                    "position": {"x": 110, "y": 5},
-                    "font": "unit",
-                    "color": [255, 229, 255],
-                    "units": "%",
-                    "data_key": "CpuUsage",
-                    "units_font": "unit",
+                    "type": "cpu_bars",
+                    "position": {"x": 95, "y": 3},
+                    "data_key": "CpuUsages",
+                    "size": {"width": 70, "height": 21},
                     "enable": 1
                 },
                 {
@@ -347,22 +342,17 @@
                     "enable": 1
                 },
                 {
-                    "type": "fixed_text",
-                    "label": "Mem GB:",
+                    "type": "icon",
+                    "icon_path": "assets/svg/mem.svg",
                     "position": {"x": 10, "y": 51},
-                    "font": "unit",
-                    "color": [255, 229, 0],
+                    "size": {"width": 16, "height": 16},
                     "enable": 1
                 },
                 {
-                    "type": "text",
-                    "label": "Memory",
-                    "position": {"x": 110, "y": 51},
-                    "font": "unit",
-                    "color": [255, 229, 255],
-                    "units": "",
-                    "data_key": "MemUsage",
-                    "units_font": "unit",
+                    "type": "hbar",
+                    "position": {"x": 95, "y": 54},
+                    "data_key": "MemUsagePercent",
+                    "size": {"width": 70, "height": 12},
                     "enable": 1
                 },
                 {
@@ -385,27 +375,14 @@
                     "enable": 1
                 },
                 {
-                    "type": "fixed_text",
-                    "label": "Root GB:",
+                    "type": "disk_bars",
                     "position": {"x": 10, "y": 97},
-                    "font": "unit",
-                    "color": [255, 229, 0],
-                    "enable": 1
-                },
-                {
-                    "type": "text",
-                    "label": "Root Disk",
-                    "position": {"x": 90, "y": 100},
-                    "font": "tiny",
-                    "color": [255, 229, 255],
-                    "units": "",
-                    "data_key": "DiskUsage",
-                    "units_font": "unit",
+                    "size": {"width": 155, "height": 12},
                     "enable": 1
                 },
                 {
                     "type": "fixed_text",
-                    "label": "NVMe GB:",
+                    "label": "Uptime:",
                     "position": {"x": 10, "y": 120},
                     "font": "unit",
                     "color": [255, 229, 0],
@@ -413,46 +390,8 @@
                 },
                 {
                     "type": "text",
-                    "label": "NVMe Disk",
-                    "position": {"x": 90, "y": 123},
-                    "font": "tiny",
-                    "color": [255, 229, 255],
-                    "units": "",
-                    "data_key": "DiskNvme",
-                    "units_font": "unit",
-                    "enable": 1
-                },
-                {
-                    "type": "fixed_text",
-                    "label": "SD GB:",
-                    "position": {"x": 10, "y": 143},
-                    "font": "unit",
-                    "color": [255, 229, 0],
-                    "enable": 1
-                },
-                {
-                    "type": "text",
-                    "label": "SD Card",
-                    "position": {"x": 90, "y": 146},
-                    "font": "tiny",
-                    "color": [255, 229, 255],
-                    "units": "",
-                    "data_key": "DiskSD",
-                    "units_font": "unit",
-                    "enable": 1
-                },
-                {
-                    "type": "fixed_text",
-                    "label": "Uptime:",
-                    "position": {"x": 10, "y": 166},
-                    "font": "unit",
-                    "color": [255, 229, 0],
-                    "enable": 1
-                },
-                {
-                    "type": "text",
                     "label": "Uptime",
-                    "position": {"x": 10, "y": 183},
+                    "position": {"x": 10, "y": 137},
                     "font": "thin",
                     "color": [255, 229, 255],
                     "data_key": "Uptime",

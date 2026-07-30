@@ -127,10 +127,12 @@ func getFontFace(fontName string) (font.Face, int, error) {
 	}
 
 	// 4) Create the face
+	// HintingNone: softest glyph edges (max AA fringe). golang.org/x/image
+	// has no HintingSlight — only None / Vertical / Full.
 	face, err := opentype.NewFace(ttfFont, &opentype.FaceOptions{
 		Size:    cfg.FontSize,
 		DPI:     72,
-		Hinting: font.HintingFull,
+		Hinting: font.HintingNone,
 	})
 	if err != nil {
 		return nil, 0, err
@@ -279,7 +281,8 @@ func setBacklight(brightness int) {
 // displayAsleep reports whether the display is settled dark: idle state
 // reached AND the backlight physically at 0 (screen_min_brightness may keep
 // it visibly dim, in which case this stays false). While asleep the render
-// loop and the display-only collectors pause to save battery.
+// loop pauses SPI pushes to save battery; data collectors still run on their
+// 1-minute cadence so wake shows fresh values.
 func displayAsleep() bool {
 	if idleState != STATE_IDLE {
 		return false
@@ -289,13 +292,24 @@ func displayAsleep() bool {
 	return lastLogical == 0
 }
 
-// displayWake refreshes everything that was paused while the screen was dark,
-// so the data is current by the time the fade-in completes.
+// displayWake forces an immediate refresh of time-critical UI data so the
+// first frames after backlight-on already show the correct clock and battery
+// instead of waiting for the next 1-minute collector tick.
 func displayWake() {
-	go collectLinuxData(cfg)
+	// Battery SOC/charging feeds the top bar; do it synchronously so the
+	// forced top-bar redraw below has current numbers.
+	collectBatteryData()
+	// Invalidate top-bar cache and force a redraw on the next active frame.
+	cacheTopBarStr = ""
+	forceTopBarRedraw = true
+	// Kick the rest in the background (1-minute collectors already keep most
+	// keys warm; this just covers the case where we wake just before a tick).
 	go collectNetworkData(cfg)
 	go collectWANNetworkSpeed()
 	go getInfoFromPcatWeb()
+	// Page-sensitive collectors refresh immediately on reschedule.
+	signalPingReschedule()
+	signalLinuxReschedule()
 }
 
 func monitorKeyboard(changePageTriggered *bool) {
@@ -817,83 +831,93 @@ func hasShowSmsInUserConfig() bool {
 	return exists
 }
 
-func loadAllConfigsToVariables() {
-	var err error
-	localConfig := "config.json"
-	etcConfig := ETC_CONFIG_PATH
-	userConfig := "user_config.json"
-
-	// Debian has no pcat-manager-web, so it ships its own display template
-	// without the cellular/SMS pages. Prefer it when present.
+// embeddedDefaultConfigJSON returns the package-default layout baked into the
+// binary (OpenWrt vs Debian). This is the source of truth for every release.
+func embeddedDefaultConfigJSON() []byte {
 	if !isOpenWRT() {
-		if _, err := os.Stat("config_debian.json"); err == nil {
-			localConfig = "config_debian.json"
-		}
-		if _, err := os.Stat(ETC_DEBIAN_CONFIG_PATH); err == nil {
-			etcConfig = ETC_DEBIAN_CONFIG_PATH
-		}
+		return embeddedDebianConfigJSON
 	}
+	return embeddedOpenWrtConfigJSON
+}
 
-	if _, err = os.Stat(localConfig); err == nil {
-		localConfigExists = true
-		log.Println("Local config found at", localConfig)
-	} else {
-		log.Println("use", etcConfig)
+// defaultConfigDiskPath is where we mirror the embedded default so operators
+// (and older tools) can still read a file under /etc.
+func defaultConfigDiskPath() string {
+	if !isOpenWRT() {
+		return ETC_DEBIAN_CONFIG_PATH
 	}
+	return ETC_CONFIG_PATH
+}
 
-	if localConfigExists {
-		cfg, err = loadConfig(localConfig)
-		dftCfg, err = loadConfig(localConfig)
-	} else {
-		cfg, err = loadConfig(etcConfig)
-		dftCfg, err = loadConfig(etcConfig)
+// loadConfigFromBytes unmarshals a Config from raw JSON.
+func loadConfigFromBytes(data []byte) (Config, error) {
+	var c Config
+	if err := secureUnmarshal(data, &c); err != nil {
+		return Config{}, err
 	}
+	return c, nil
+}
 
+// loadAllConfigsToVariables loads the package default (embedded in the binary),
+// refreshes the on-disk default under /etc, then merges user overrides from
+// user_config.json (or /etc/...-user_config.json) on top.
+//
+// Order: embedded default → write /etc default → load user → merge → cfg.
+// Re-running this (e.g. after the web editor saves) always re-reads the
+// embedded default so a previous merge cannot pollute the next one.
+func loadAllConfigsToVariables() {
+	// 1) Package default always comes from the binary (version-locked).
+	defBytes := embeddedDefaultConfigJSON()
+	var err error
+	dftCfg, err = loadConfigFromBytes(defBytes)
 	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
-	} else {
-		log.Println("CFG, DFTCFG: READ SUCCESS")
+		log.Fatalf("Failed to parse embedded default config: %v", err)
 	}
+	log.Println("DEFAULT CFG: loaded from embedded package default")
 
-	userConfigExists := false
-	if _, err := os.Stat(userConfig); err == nil {
-		userConfigExists = true
-		log.Println("User config found at", userConfig)
+	// 2) Mirror default to /etc so the file on disk always matches this binary.
+	//    Never touches user_config — only the system default path.
+	diskPath := defaultConfigDiskPath()
+	if err := os.WriteFile(diskPath, defBytes, 0644); err != nil {
+		// Non-fatal: e.g. read-only root during unit tests / non-root dev runs.
+		log.Printf("could not refresh default config at %s: %v (using embedded only)", diskPath, err)
 	} else {
-		log.Println("No user config found, try to use", ETC_USER_CONFIG_PATH)
+		log.Printf("DEFAULT CFG: wrote package default to %s", diskPath)
 	}
+	localConfigExists = true // we always have a default now
 
-	if userConfigExists {
-		userCfg, err = loadConfig(userConfig)
+	// 3) User overrides: cwd user_config.json wins for local dev, else /etc.
+	userPath := ""
+	if _, err := os.Stat("user_config.json"); err == nil {
+		userPath = "user_config.json"
+		log.Println("User config found at", userPath)
+	} else if _, err := os.Stat(ETC_USER_CONFIG_PATH); err == nil {
+		userPath = ETC_USER_CONFIG_PATH
+		log.Println("User config found at", userPath)
 	} else {
-		userCfg, err = loadConfig(ETC_USER_CONFIG_PATH)
-	}
-
-	if err != nil {
-		//create a empty json file
-		content := "{}"
-		if err := os.WriteFile(ETC_USER_CONFIG_PATH, []byte(content), 0644); err != nil {
-			log.Printf("could not write temp user config: %v", err)
+		// Ensure an empty user config exists under /etc for the web editor.
+		if err := os.WriteFile(ETC_USER_CONFIG_PATH, []byte("{}\n"), 0644); err != nil {
+			log.Printf("could not create empty user config: %v", err)
+		} else {
+			log.Println("Created empty user config at", ETC_USER_CONFIG_PATH)
 		}
-		log.Println("Created empty user config file at", ETC_USER_CONFIG_PATH)
-		userCfg, err = loadConfig(ETC_USER_CONFIG_PATH)
+		userPath = ETC_USER_CONFIG_PATH
+	}
+
+	userCfg, err = loadConfig(userPath)
+	if err != nil {
+		log.Printf("USER CFG: read failed (%v), using empty overrides", err)
+		userCfg = Config{}
 	} else {
 		log.Println("USER CFG: READ SUCCESS")
 	}
 
-	if userConfigExists && localConfigExists {
-		err = mergeConfigs()
-		if err != nil {
-			log.Fatalf("Failed to merge configs: %v, using default config", err)
-			cfg = dftCfg
-		} else {
-			log.Println("MERGE CFG: SUCCESS")
-		}
-	} else {
+	// 4) cfg = deep-merge(default, user). display_template arrays in user
+	//    fully replace the matching pages (visual editor owns layout).
+	if err := mergeConfigs(); err != nil {
+		log.Printf("MERGE CFG failed: %v — falling back to package default only", err)
 		cfg = dftCfg
-		log.Println("NO USER CFG, Not Merging, using default config")
+	} else {
+		log.Println("MERGE CFG: SUCCESS (user overrides on top of package default)")
 	}
-
-	mergeConfigs()
-
 }
