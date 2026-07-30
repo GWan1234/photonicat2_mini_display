@@ -7,6 +7,8 @@ import (
 	"image"
 	"image/color"
 	"image/draw"
+
+	xdraw "golang.org/x/image/draw"
 	"image/png"
 	"image/jpeg"
 	"image/gif"
@@ -2086,6 +2088,15 @@ func drawBattery(w, h int, soc float64, isCharging bool, x0, y0 int) *image.RGBA
 
 
 func drawTopBar(display gc9307.Device, frame *image.RGBA) {
+	if renderTopBar(frame) {
+		sendTopBar(display, frame)
+	}
+}
+
+// renderTopBar draws the top bar into frame without touching the display.
+// Returns false when nothing was rendered (cache hit or a load error), in
+// which case the frame contents are not meaningful for sending.
+func renderTopBar(frame *image.RGBA) bool {
 	var timeStr string
 	var networkStr string
 	currDateTime := time.Now()
@@ -2135,7 +2146,7 @@ func drawTopBar(display gc9307.Device, frame *image.RGBA) {
 	magicStr := timeStr + " " + strconv.Itoa(int(signalStrength*100)) + " " + networkStr + " " + strconv.Itoa(int(battSOC)) + " " + strconv.FormatBool(battChargingStatus)
 
 	if cacheTopBarStr == magicStr {
-		return //no need to refresh
+		return false //no need to refresh
 	}
 
 	topBarFrameWidth := PCAT2_LCD_WIDTH
@@ -2147,7 +2158,7 @@ func drawTopBar(display gc9307.Device, frame *image.RGBA) {
 	faceTiny, _, err := getFontFace("tiny")
 	if err != nil {
 		fmt.Println("Error loading font:", err)
-		return
+		return false
 	}
 	fiveGonTop :=true
 
@@ -2163,7 +2174,7 @@ func drawTopBar(display gc9307.Device, frame *image.RGBA) {
 		eth, _, _, err := loadImage(assetsPrefix+"/assets/svg/eth.svg")
 		if err != nil {
 			fmt.Println("Error loading eth:", err)
-			return
+			return false
 		}
 		copyImageToImageAt(frame, eth, x0+80, y0+2)
 
@@ -2172,7 +2183,7 @@ func drawTopBar(display gc9307.Device, frame *image.RGBA) {
 		wifi, _, _, err := loadImage(assetsPrefix+"/assets/svg/wifi.svg")
 		if err != nil {
 			fmt.Println("Error loading wifi:", err)
-			return
+			return false
 		}
 		copyImageToImageAt(frame, wifi, x0+80, y0+2)
 	}else if networkStr == "4" || networkStr == "5" || networkStr == "3" {
@@ -2189,7 +2200,7 @@ func drawTopBar(display gc9307.Device, frame *image.RGBA) {
 		nolink, _, _, err := loadImage(assetsPrefix+"/assets/svg/nolink.svg")
 		if err != nil {
 			fmt.Println("Error loading nolink:", err)
-			return
+			return false
 		}
 		copyImageToImageAt(frame, nolink, x0+80, y0+2)
 	}
@@ -2215,7 +2226,7 @@ func drawTopBar(display gc9307.Device, frame *image.RGBA) {
 	}
 	cacheTopBar = frame
 	cacheTopBarStr = magicStr
-	sendTopBar(display, frame)
+	return true
 }
 
 func saveFrameToPng(frame *image.RGBA, filename string) {
@@ -2617,14 +2628,22 @@ func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
 }
 
 func drawFooter(display gc9307.Device, frame *image.RGBA, currPage int, numOfPages int, isSMS bool) {
+	if renderFooter(frame, currPage, numOfPages, isSMS) {
+		sendFooter(display, frame)
+	}
+}
+
+// renderFooter draws the footer into frame without touching the display.
+// Returns false on a cache hit or load error.
+func renderFooter(frame *image.RGBA, currPage int, numOfPages int, isSMS bool) bool {
 	magicStr:= strconv.Itoa(currPage) + " " + strconv.Itoa(numOfPages) + " " + strconv.FormatBool(isSMS)
 	if cacheFooterStr == magicStr {
-		return //no need to refresh
+		return false //no need to refresh
 	}
 	faceMicro, _, err := getFontFace("micro")
 	if err != nil {
 		log.Printf("Error getting font face for %s: %v", "tiny", err)
-		return
+		return false
 	}
 
 	footerFrameWidth := PCAT2_LCD_WIDTH
@@ -2639,12 +2658,12 @@ func drawFooter(display gc9307.Device, frame *image.RGBA, currPage int, numOfPag
 		cir, _, _, err := loadImage(assetsPrefix+"/assets/svg/dotCircle.svg")
 		if err != nil {
 			log.Printf("Error loading circle_dot from %s: %v", "assets/svg/dotCircle.svg", err)
-			return
+			return false
 		}
 		dot, _, _, err := loadImage(assetsPrefix+"/assets/svg/dotSolid.svg")
 		if err != nil {
 			log.Printf("Error loading dot from %s: %v", "assets/svg/dotSolid.svg", err)
-			return
+			return false
 		}
 
 		whiteDotRadius := 8
@@ -2664,7 +2683,7 @@ func drawFooter(display gc9307.Device, frame *image.RGBA, currPage int, numOfPag
 	//make a frame cache
 	cacheFooter = frame
 	cacheFooterStr = magicStr
-	sendFooter(display, frame)
+	return true
 }
 
 // drawRoundedBar fills a w x h rounded rectangle of the given color into dst
@@ -2760,10 +2779,84 @@ func showWelcome(display gc9307.Device, width, height int, duration time.Duratio
 		log.Printf("Welcome animation: %d frames in %.2fs (%.1f fps)", sent, el.Seconds(), float64(sent)/el.Seconds())
 	}
 
-	// Land exactly on the resting pose: the static logo plus the full bar.
+	// Land exactly on the resting pose, hold a beat, then hand over to the
+	// first page with a crossfade instead of a one-frame snap.
 	if f, err := welcomeAnimFrameInto(nil, welcomeAnimDur, width, height); err == nil {
 		sendFull(display, f)
+		time.Sleep(200 * time.Millisecond)
+		transitionWelcomeToPage(display, f)
 	}
+}
+
+// transitionWelcomeToPage dissolves the welcome animation's resting pose into
+// the first page: the cat grows a little while fading out, and page 0 zooms
+// in from slightly small to full size underneath it. The main render loop is
+// still parked on wg.Wait() while this runs, so composing page sections here
+// races nothing; the loop's first real frame repeats the same content, which
+// makes the hand-off seamless.
+func transitionWelcomeToPage(display gc9307.Device, catFrame *image.RGBA) {
+	const dur = 700 * time.Millisecond
+	W, H := PCAT2_LCD_WIDTH, PCAT2_LCD_HEIGHT
+
+	// Compose the full first-page frame with the same section renderers the
+	// loop uses. Caches are cleared before (so the sections really render
+	// into our buffers) and after (so the loop's first pass draws its own).
+	target := image.NewRGBA(image.Rect(0, 0, W, H))
+	cacheTopBarStr = ""
+	top := image.NewRGBA(image.Rect(0, 0, W, PCAT2_TOP_BAR_HEIGHT))
+	if renderTopBar(top) {
+		copyImageToImageAt(target, top, 0, 0)
+	}
+	mid := image.NewRGBA(image.Rect(0, 0, middleFrameWidth, middleFrameHeight))
+	clearFrame(mid, middleFrameWidth, middleFrameHeight)
+	renderMiddle(mid, &cfg, false, 0)
+	copyImageToImageAt(target, mid, 0, PCAT2_TOP_BAR_HEIGHT)
+	cacheFooterStr = ""
+	foot := image.NewRGBA(image.Rect(0, 0, W, PCAT2_FOOTER_HEIGHT))
+	if renderFooter(foot, 0, cfgNumPages, false) {
+		copyImageToImageAt(target, foot, 0, H-PCAT2_FOOTER_HEIGHT)
+	}
+	cacheTopBarStr = ""
+	cacheFooterStr = ""
+
+	frame := image.NewRGBA(image.Rect(0, 0, W, H))
+	pageLayer := image.NewRGBA(image.Rect(0, 0, W, H))
+	catLayer := image.NewRGBA(image.Rect(0, 0, W, H))
+
+	start := time.Now()
+	for {
+		t := float64(time.Since(start)) / float64(dur)
+		if t >= 1 {
+			break
+		}
+		e := t * t * (3 - 2*t) // smoothstep
+
+		// Page 0: zoom 74% -> 100% while fading in.
+		s := 0.74 + 0.26*e
+		w := int(float64(W) * s)
+		h := int(float64(H) * s)
+		pr := image.Rect((W-w)/2, (H-h)/2, (W-w)/2+w, (H-h)/2+h)
+		clearFrame(pageLayer, W, H)
+		xdraw.ApproxBiLinear.Scale(pageLayer, pr, target, target.Bounds(), xdraw.Src, nil)
+
+		// Cat: grow to 130% while dissolving.
+		cs := 1 + 0.30*e
+		cw := int(float64(W) * cs)
+		ch := int(float64(H) * cs)
+		cr := image.Rect((W-cw)/2, (H-ch)/2, (W-cw)/2+cw, (H-ch)/2+ch)
+		for i := range catLayer.Pix {
+			catLayer.Pix[i] = 0
+		}
+		xdraw.ApproxBiLinear.Scale(catLayer, cr, catFrame, catFrame.Bounds(), xdraw.Src, nil)
+
+		clearFrame(frame, W, H)
+		draw.DrawMask(frame, frame.Bounds(), pageLayer, image.Point{},
+			image.NewUniform(color.Alpha{A: uint8(255 * e)}), image.Point{}, draw.Over)
+		draw.DrawMask(frame, frame.Bounds(), catLayer, image.Point{},
+			image.NewUniform(color.Alpha{A: uint8(255 * (1 - e))}), image.Point{}, draw.Over)
+		sendFull(display, frame)
+	}
+	sendFull(display, target)
 }
 
 // showWelcomeStatic is the pre-animation welcome screen: static logo plus a

@@ -6,8 +6,7 @@ package main
 // geometry as assets/svg/welcome.svg and rasterized with the oksvg/rasterx
 // stack already used for the static assets. The eyes are separate subpaths of
 // the original logo, so they can blink and glance while the box stays exact;
-// at t = welcomeAnimDur the composite is pixel-identical to the static logo
-// plus the finished boot bar.
+// at t = welcomeAnimDur the composite is pixel-identical to the static logo.
 //
 // Timeline (7 s):
 //   0.0–2.0  asleep: dim grey box, slow breathing and a gentle sway
@@ -16,7 +15,7 @@ package main
 //   3.2–5.4  looks left, holds, sweeps right, holds, returns to centre with a
 //            small head tilt, sparkles and a blink on each hold
 //   5.9–7.0  springs down to the resting pose with a squash-and-stretch
-//            bounce and a final blink while the boot bar completes
+//            bounce and a final blink
 
 import (
 	"bytes"
@@ -49,8 +48,7 @@ const (
 var (
 	waYellow    = [3]int{0xFD, 0xE0, 0x21} // brand yellow
 	waSleepGrey = [3]int{0x5E, 0x6A, 0x76} // dozing box tint
-	waWarmWhite = [3]int{0xFF, 0xF6, 0xAE} // sparkle / bar-pulse tint
-	waBarGrey   = [3]int{0x62, 0x74, 0x82} // bar background (matches old bar)
+	waWarmWhite = [3]int{0xFF, 0xF6, 0xAE} // sparkle tint
 )
 
 // ---------------------------------------------------------------------------
@@ -152,25 +150,19 @@ func (m waMat) attr() string {
 // waLayout mirrors the static showWelcome layout so the animation lands
 // exactly where the old static screen used to be.
 type waLayout struct {
-	cx, cy                 float64 // resting logo centre
-	logoX, logoY           float64 // resting logo top-left
-	barX, barY, barW, barH float64
+	cx, cy       float64 // resting logo centre
+	logoX, logoY float64 // resting logo top-left
 }
 
 func waComputeLayout(width, height int) waLayout {
-	const spaceBetweenLogoAndBar = 28
-	const barW, barH = 82, 8
-	logoY := float64(height/2 - (int(waLogoH)+spaceBetweenLogoAndBar+barH)/2)
+	// No boot bar anymore: the logo rests dead centre.
+	logoY := float64(height/2 - int(waLogoH)/2)
 	logoX := float64(width/2 - int(waLogoW)/2)
 	return waLayout{
 		cx:    logoX + waLogoW/2,
 		cy:    logoY + waLogoH/2,
 		logoX: logoX,
 		logoY: logoY,
-		barX:  float64(width/2 - barW/2),
-		barY:  logoY + spaceBetweenLogoAndBar + waLogoH,
-		barW:  barW,
-		barH:  barH,
 	}
 }
 
@@ -183,9 +175,6 @@ type waPose struct {
 	eyeOpen            float64 // 0 closed .. 1 open (may overshoot)
 	gaze               float64 // horizontal eye offset, logo units
 	glow               float64 // halo opacity
-	barA               float64 // bar opacity
-	barFrac            float64 // bar fill fraction
-	barPulse           float64 // completion flash
 }
 
 func waPoseAt(t float64) waPose {
@@ -252,10 +241,6 @@ func waPoseAt(t float64) waPose {
 		p.stretchX = 1 - 0.55*sy
 	}
 
-	// Boot bar: fades in early, fills across the whole boot, flashes at 100%.
-	p.barA = waSmooth(0.40, 0.80, t) * p.fade
-	p.barFrac = waEaseInOutSine(waClamp01((t - 0.60) / (6.72 - 0.60)))
-	p.barPulse = math.Sin(math.Pi * waClamp01((t-6.74)/0.20))
 	return p
 }
 
@@ -331,21 +316,6 @@ func welcomeAnimSVG(t float64, width, height int) []byte {
 		fmt.Fprintf(&b, `<path d="M0 -1 L0.5 0 L0 1 L-0.5 0 Z" fill="%s" fill-opacity="%.3f" %s/>`, col, env, m2.attr())
 	}
 
-	// Boot bar.
-	if p.barA > 0.01 {
-		fmt.Fprintf(&b, `<rect x="%.2f" y="%.2f" width="%.2f" height="%.2f" rx="5" ry="5" fill="%s" fill-opacity="%.3f"/>`,
-			l.barX, l.barY, l.barW, l.barH, waHex(waBarGrey), p.barA)
-		fw := l.barW * p.barFrac
-		if fw >= 1 {
-			rx := 5.0
-			if fw < 2*rx {
-				rx = fw / 2
-			}
-			fillCol := waMixColor(waYellow, waWarmWhite, p.barPulse)
-			fmt.Fprintf(&b, `<rect x="%.2f" y="%.2f" width="%.2f" height="%.2f" rx="%.2f" ry="%.2f" fill="%s" fill-opacity="%.3f"/>`,
-				l.barX, l.barY, fw, l.barH, rx, rx, fillCol, p.barA)
-		}
-	}
 
 	b.WriteString(`</svg>`)
 	return b.Bytes()
