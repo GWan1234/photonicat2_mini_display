@@ -53,6 +53,75 @@ var (
 	smsFont     *truetype.Font
 )
 
+const (
+	// titleTimeLayout is how a message's timestamp is packed into the title line
+	// ("sender|2006-01-02 15:04") before it is rendered.
+	titleTimeLayout = "2006-01-02 15:04"
+	// senderGap is the blank space kept between the sender and the right-aligned
+	// timestamp, in pixels.
+	senderGap = 6
+)
+
+// smsTimeLabel dates a message: the clock alone for today, an age in days
+// ("1d ago" ... "6d ago") through the past week, and a numeric date beyond
+// that - month-day within this year, full ISO date for an older one. The clock
+// time stays on every label because this row is the only place a message's time
+// is shown.
+func smsTimeLabel(msgAt, now time.Time) string {
+	clock := msgAt.Format("15:04")
+	// Both days are rebuilt in UTC purely to count calendar days between them;
+	// subtracting local midnights would be 23h or 25h across a DST change and
+	// could date yesterday's message as today's.
+	day := time.Date(msgAt.Year(), msgAt.Month(), msgAt.Day(), 0, 0, 0, 0, time.UTC)
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	daysAgo := int(today.Sub(day).Hours() / 24)
+
+	switch {
+	case daysAgo <= 0:
+		// Today - and anything stamped ahead of us, which a modem clock that is
+		// briefly off can produce.
+		return clock
+	case daysAgo < 7:
+		return fmt.Sprintf("%dd ago %s", daysAgo, clock)
+	case msgAt.Year() == now.Year():
+		return msgAt.Format("01-02") + " " + clock
+	default:
+		return msgAt.Format("2006-01-02") + " " + clock
+	}
+}
+
+// fitSenderWidth shortens a sender to fit maxWidth pixels, keeping its head and
+// its last two characters ("+861380**00") so a phone number stays recognisable
+// at both ends. Trimming is per rune, so a CJK sender is never cut mid
+// character.
+func fitSenderWidth(sender string, drawer *font.Drawer, maxWidth int) string {
+	if maxWidth <= 0 {
+		return ""
+	}
+	textWidth := func(s string) int { return int(drawer.MeasureString(s) >> 6) }
+	if textWidth(sender) <= maxWidth {
+		return sender
+	}
+	runes := []rune(sender)
+	if len(runes) <= 4 {
+		// Too short to elide usefully; drop trailing runes until it fits.
+		for len(runes) > 0 && textWidth(string(runes)) > maxWidth {
+			runes = runes[:len(runes)-1]
+		}
+		return string(runes)
+	}
+	tail := string(runes[len(runes)-2:])
+	head := runes[:len(runes)-2]
+	for len(head) > 0 {
+		head = head[:len(head)-1]
+		candidate := string(head) + "**" + tail
+		if textWidth(candidate) <= maxWidth {
+			return candidate
+		}
+	}
+	return ""
+}
+
 // getSmsFont parses the SMS font once and reuses it for every SMS redraw.
 func getSmsFont() *truetype.Font {
 	smsFontOnce.Do(func() {
@@ -262,7 +331,7 @@ func drawSmsFrJson(jsonContent string, savePng bool, drawPageNum bool) (imgs []i
 
 	for _, msg := range smsData.Msg {
 		timestamp, _ := time.Parse(layout, msg.Timestamp)
-		formattedTime := timestamp.Format("2006-01-02 15:04")
+		formattedTime := timestamp.Format(titleTimeLayout)
 		
 		// Change display: show "> number" instead of "me" for sent messages
 		var displaySender string
@@ -341,42 +410,13 @@ func drawSmsFrJson(jsonContent string, savePng bool, drawPageNum bool) (imgs []i
 				continue
 			}
 			if line.IsTitle {
-				timePrefix := ""
 				lineTitle := strings.Split(line.Text, "|")
 				sender := lineTitle[0]
-				dateStr := strings.Split(lineTitle[1], " ")[0]
-				timeStr := strings.Split(lineTitle[1], " ")[1]
-				today := time.Now()
-				yesterday := today.AddDate(0, 0, -1)
+				timeDisplay := lineTitle[1]
+				if t, err := time.Parse(titleTimeLayout, lineTitle[1]); err == nil {
+					timeDisplay = smsTimeLabel(t, time.Now())
+				}
 
-				if dateStr == today.Format("2006-01-02") {
-					timePrefix = ""  // For today, show only time
-				} else if dateStr == yesterday.Format("2006-01-02") {
-					timePrefix = "Y-day"
-				} else {
-					// Parse the date string
-					t, err := time.Parse("2006-01-02", dateStr)
-					if err == nil {
-						if t.Year() == today.Year() {
-							timePrefix = t.Format("01-02") // MM DD
-						} else {
-							timePrefix = t.Format("2006-01-02")
-						}
-					} else {
-						// fallback: just use the original string
-						//timePrefix = dateStr
-					}
-				}
-				var timeDisplay string
-				if timePrefix == "" {
-					timeDisplay = timeStr  // For today, show only time
-				} else {
-					timeDisplay = timePrefix + " " + timeStr
-				}
-				if len(sender) > 15 {
-					sender = sender[:8] + "**" + sender[len(sender)-2:]
-				}
-				
 				// Set color for sender based on whether message is sent by me
 				if line.IsSentByMe {
 					// Light green color for sent messages
@@ -385,15 +425,11 @@ func drawSmsFrJson(jsonContent string, savePng bool, drawPageNum bool) (imgs []i
 					// Default white color for received messages
 					fcTitle.SetSrc(image.NewUniform(color.RGBA{255, 255, 255, 255}))
 				}
-				
-				// Draw sender left-aligned
-				ptSender := freetype.Pt(xStart, int(y+fontSizeTitle))
-				_, err := fcTitle.DrawString(sender, ptSender)
-				if err != nil {
-					fmt.Printf("Error drawing sender: %v\n", err)
-					return nil, err
-				}
-				// Draw timeDisplay right-aligned
+
+				// Place the timestamp first: it is right-aligned and its width
+				// varies with the label ("14:32" vs "Jan 2, 2025 14:32"), so the
+				// sender is fitted to whatever room is left rather than to a
+				// fixed character count.
 				faceTitle := truetype.NewFace(fnt, &truetype.Options{
 					Size:    fontSizeTitle,
 					DPI:     72,
@@ -404,6 +440,16 @@ func drawSmsFrJson(jsonContent string, savePng bool, drawPageNum bool) (imgs []i
 				timeWidth := int(adv >> 6)
 				rightMargin := width - xStart - 5
 				timeX := rightMargin - timeWidth
+
+				// Draw sender left-aligned, shortened so it never runs into the
+				// timestamp (senderGap keeps them visibly apart).
+				sender = fitSenderWidth(sender, drawer, timeX-xStart-senderGap)
+				ptSender := freetype.Pt(xStart, int(y+fontSizeTitle))
+				_, err := fcTitle.DrawString(sender, ptSender)
+				if err != nil {
+					fmt.Printf("Error drawing sender: %v\n", err)
+					return nil, err
+				}
 				ptTime := freetype.Pt(timeX, int(y+fontSizeTitle))
 				_, err = fcTitle.DrawString(timeDisplay, ptTime)
 				if err != nil {
