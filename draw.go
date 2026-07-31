@@ -2229,6 +2229,17 @@ func drawTopBar(display gc9307.Device, frame *image.RGBA) {
 	}
 }
 
+// isCellular reports whether a top-bar networkStr denotes a mobile uplink —
+// "5"/"4"/"3" for a known generation, "c" when the modem is the egress but its
+// generation is unknown. All of them draw signal bars.
+func isCellular(networkStr string) bool {
+	switch networkStr {
+	case "5", "4", "3", "c":
+		return true
+	}
+	return false
+}
+
 // renderTopBar draws the top bar into frame without touching the display.
 // Returns false when nothing was rendered (cache hit or a load error), in
 // which case the frame contents are not meaningful for sending.
@@ -2246,8 +2257,12 @@ func renderTopBar(frame *image.RGBA) bool {
 	}
 
 	gatewayDevice, _ := globalData.Load("GatewayDevice")
-	carrier, _ := globalData.Load("Carrier")
 	activeEgress, _ := globalData.Load("ActiveEgress")
+	// Radio generation as "5"/"4"/"3", already normalized from modem_mode with
+	// carrier as the fallback (see cellGeneration) — carrier alone reads
+	// "Other" on an RM500Q-GL, which used to leave the top bar with no icon.
+	cellGen, _ := globalData.Load("CellGeneration")
+	cellGenStr, _ := cellGen.(string)
 
 	// Prefer the precise active egress (which can also be "wifi" in Smart WAN
 	// mode) over the coarse wired/mobile gateway hint.
@@ -2258,10 +2273,12 @@ func renderTopBar(frame *image.RGBA) bool {
 	} else if activeEgress == "wan" || activeEgress == "lan" {
 		networkStr = "w"
 	} else if activeEgress == "mobile" || gatewayDevice == "mobile" {
-		if carrier == "5G"{
-			networkStr = "5"
-		}else if carrier == "4G"{
-			networkStr = "4"
+		// Mobile is carrying the traffic, so the bars are meaningful even when
+		// the modem won't say which generation it is on: fall back to "c" and
+		// draw the bars with no generation digit rather than nothing at all.
+		networkStr = cellGenStr
+		if networkStr == "" {
+			networkStr = "c"
 		}
 	}else if gatewayDevice == "wired"{
 		networkStr = "w"
@@ -2274,7 +2291,7 @@ func renderTopBar(frame *image.RGBA) bool {
 	signalStrength := 0.43
 	// Resolve the cellular signal level for the cache key so the bar refreshes
 	// when it changes. (WiFi-as-WAN draws a static icon, so it needs no level.)
-	if networkStr == "4" || networkStr == "5" || networkStr == "3" {
+	if isCellular(networkStr) {
 		if v, ok := globalData.Load("ModemSignalStrength"); ok {
 			if vi, ok := v.(int); ok {
 				signalStrength = float64(vi) / 100.0
@@ -2324,15 +2341,20 @@ func renderTopBar(frame *image.RGBA) bool {
 			return false
 		}
 		copyImageToImageAt(frame, wifi, x0+80, y0+2)
-	}else if networkStr == "4" || networkStr == "5" || networkStr == "3" {
+	}else if isCellular(networkStr) {
 		// signalStrength was already resolved above from ModemSignalStrength.
 		//draw signal strength
+		// "c" means cellular of unknown generation — draw the bars alone.
+		genStr := networkStr
+		if genStr == "c" {
+			genStr = ""
+		}
 		if fiveGonTop {
 			drawSignalStrength(frame, x0+80, y0, signalStrength)
-			drawText(frame, networkStr, x0+78, y0-6, faceTiny, PCAT_WHITE, false)
+			drawText(frame, genStr, x0+78, y0-6, faceTiny, PCAT_WHITE, false)
 		}else{
 			drawSignalStrength(frame, x0+70, y0, signalStrength)
-			drawText(frame, networkStr, x0+94, y0-3, faceTiny, PCAT_WHITE, false)
+			drawText(frame, genStr, x0+94, y0-3, faceTiny, PCAT_WHITE, false)
 		}
 	}else if networkStr == "u"{
 		nolink, _, _, err := loadImage(assetsPrefix+"/assets/svg/nolink.svg")

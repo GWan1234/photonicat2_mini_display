@@ -473,6 +473,9 @@ func collectModemInfoFromMMCLI() {
 	}
 	if carrier := accessTechsToGeneration(g.AccessTechnologies); carrier != "" {
 		globalData.Store("Carrier", carrier)
+		// mmcli reports the live access technology, so it needs no modem_mode
+		// cross-check — but the top bar reads CellGeneration, not Carrier.
+		globalData.Store("CellGeneration", cellGeneration(carrier, carrier))
 	}
 	if len(g.AccessTechnologies) > 0 {
 		globalData.Store("ModemNetworkInfo",

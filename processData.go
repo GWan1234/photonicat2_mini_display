@@ -131,6 +131,14 @@ type DashboardInfo struct {
 	BatteryRemainingTime string         `json:"battery_remaining_time"`
 	BoardTemperature    int             `json:"board_temperature"`
 	Carrier             string          `json:"carrier"`
+	// ModemMode is pcat-manager-web's "modem_mode": the PMU-reported radio
+	// generation ("5G"/"4G"/"3G"), falling back to the modem's own cell_tech.
+	// Carrier uses the reverse priority (cell_tech first), which makes it
+	// unreliable on modems whose AT+QNWINFO lies: the RM500Q-GL answers
+	// "CDMA","46001","CDMA BC0" while actually camped on NR/LTE, so cell_tech
+	// — and therefore Carrier — becomes "Other". The web dashboard shows the
+	// right generation because it reads modem_mode, so the LCD prefers it too.
+	ModemMode           string          `json:"modem_mode"`
 	ChargePercent       int             `json:"charge_percent"`
 	ChargeVoltage       int             `json:"charge_voltage"`
 	Connection          string          `json:"connection"`
@@ -278,6 +286,31 @@ func applyRemainingTimeUnit() {
 	globalData.Store("RemainingTime_Unit", "")
 }
 
+// cellGeneration reduces the two radio-generation fields the web dashboard
+// exposes to the single token the top bar draws: "5", "4", "3" or "" when the
+// modem isn't on a known cellular generation.
+//
+// modem_mode wins over carrier because the two are built from the same pair of
+// sources in opposite order (modem_mode = PMU mode or cell_tech; carrier =
+// cell_tech or PMU mode) and cell_tech is the untrustworthy half. The RM500Q-GL
+// reports "CDMA BC0" to AT+QNWINFO while camped on 5G/LTE, which pins cell_tech
+// — and so carrier — to "Other"; modem_mode still reads 5G from the PMU. Any
+// modem whose QNWINFO is honest agrees across both fields, so preferring
+// modem_mode costs nothing there.
+func cellGeneration(modemMode, carrier string) string {
+	for _, s := range []string{modemMode, carrier} {
+		switch strings.ToUpper(strings.TrimSpace(s)) {
+		case "5G", "NR", "NR5G":
+			return "5"
+		case "4G", "LTE":
+			return "4"
+		case "3G", "WCDMA", "HSPA", "UMTS":
+			return "3"
+		}
+	}
+	return ""
+}
+
 func getInfoFromPcatWeb() {
 	// Runs on the shared 1-minute cadence (including while the screen is
 	// dark) so wake always has fresh dashboard values.
@@ -322,6 +355,9 @@ func getInfoFromPcatWeb() {
 					globalData.Store("RemainingTimeFromWeb", false)
 				}
 				globalData.Store("Carrier", info.Carrier)
+				globalData.Store("ModemMode", info.ModemMode)
+				globalData.Store("CellGeneration",
+					cellGeneration(info.ModemMode, info.Carrier))
 				globalData.Store("GatewayDevice", info.Connection)
 				globalData.Store("ActiveEgress", info.ActiveEgress)
 				globalData.Store("NetworkMode", info.NetworkMode)
