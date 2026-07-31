@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -534,29 +535,41 @@ func getWANInterface() (string, error) {
 }
 
 func collectWANNetworkSpeed() {
-	// Delta counter read on the default-route device (getNetworkSpeed uses the
-	// previous sample as the window — no ~1s sleep). While page 0 is visible
-	// the collector runs at 2 Hz so rates track the live collect interval.
+	// Delta counter read on the default-route device: the sampler diffs against
+	// its previous samples, so there is no ~1s sleep here. While page 0 is
+	// visible the collector runs at 2 Hz, so the row tracks the live cadence.
 	dev, err := getWANInterface()
 	if err != nil {
 		log.Printf("Could not get WAN interface: %v\n", err)
-		globalData.Store("WanUP", "0")
-		globalData.Store("WanDOWN", "0")
+		storeWANSpeed(0, 0)
 		return
 	}
 	// Re-resolved every cycle so a failover moves the measurement to the new
 	// egress within a tick; also shared with the data-usage readers.
 	wanInterface = dev
 
-	netData, err := getNetworkSpeed(wanInterface)
+	netData, ok, err := wanSpeedSampler.sample(wanInterface)
 	if err != nil {
 		log.Printf("Could not get network speed: %v\n", err)
-		globalData.Store("WanUP", "0")
-		globalData.Store("WanDOWN", "0")
+		storeWANSpeed(0, 0)
 		return
 	}
-	wanUPVal, wanUPUnit := formatSpeed(netData.UploadMbps)
-	wanDOWNVal, wanDOWNUnit := formatSpeed(netData.DownloadMbps)
+	if !ok {
+		// No window to divide by yet (first tick, or just after a failover).
+		// Seed the row with zeros if it has never been filled, otherwise leave
+		// the previous number up until the next tick - 0.5s away on page 0.
+		if _, exists := globalData.Load("WanUP"); !exists {
+			storeWANSpeed(0, 0)
+		}
+		return
+	}
+	storeWANSpeed(netData.UploadMbps, netData.DownloadMbps)
+}
+
+// storeWANSpeed formats and publishes the page-0 speed row.
+func storeWANSpeed(upMbps, downMbps float64) {
+	wanUPVal, wanUPUnit := formatSpeed(upMbps)
+	wanDOWNVal, wanDOWNUnit := formatSpeed(downMbps)
 	globalData.Store("WanUP", wanUPVal)
 	globalData.Store("WanDOWN", wanDOWNVal)
 	globalData.Store("WanUP_Unit", wanUPUnit)
@@ -743,9 +756,9 @@ func getFanSpeed() (int, error) {
 }
 
 // collectNetworkData gathers IPs, SSIDs, clients, and data-usage counters.
-// Ping lives in collectPingData so it can run on a faster cadence when the
-// ping page is visible. This still runs every minute while the screen is
-// dark so wake does not show stale IPs/usage.
+// Ping lives in pingRow.collect (one goroutine per row) so it can run on a
+// faster cadence when the ping page is visible. This still runs every minute
+// while the screen is dark so wake does not show stale IPs/usage.
 func collectNetworkData(cfg Config) {
 	if isOpenWRT() {
 		//we have aonther func to get data from pcat-manager-web
@@ -830,59 +843,104 @@ func collectNetworkData(cfg Config) {
 	}
 }
 
-// collectPingData ICMP-pings both configured sites and updates Ping0/Ping1
-// plus success rates. Cadence is controlled by the main ping goroutine:
-// 3s on the ping page while awake, 1 minute otherwise (including idle).
-func collectPingData(cfg Config) {
-	// Run both sites in parallel so a single slow host does not double the
-	// cycle time (important for the 3s active cadence).
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		updateOnePing("Ping0", "Ping0Rate", cfg.PingSite0, &ping0Stats)
-	}()
-	go func() {
-		defer wg.Done()
-		updateOnePing("Ping1", "Ping1Rate", cfg.PingSite1, &ping1Stats)
-	}()
-	wg.Wait()
-}
+// pingProbeDeadline bounds how long a row waits for its own probe. pingICMP
+// gives up at pingTimeout, but ping.NewPinger resolves the hostname
+// synchronously first and a wedged resolver is not covered by that timeout -
+// without a deadline here a dead DNS server could park the row for tens of
+// seconds. The margin is just enough to let a probe that is about to time out
+// report itself rather than be pre-empted.
+// (var, not const, only so tests can shorten it.)
+var pingProbeDeadline = pingTimeout + 500*time.Millisecond
 
-func updateOnePing(valueKey, rateKey, site string, stats *struct {
+// pingProbe is the probe a row runs; a var so tests can substitute a slow or
+// hanging host without touching the network.
+var pingProbe = pingICMP
+
+// pingRow owns one ping row (Ping0/Ping1): its display keys, its success
+// counters and its single in-flight probe. Each row is polled by its own
+// collector goroutine, so a slow or unreachable host only stretches its own
+// row - the other row keeps its 1 Hz cadence. Before this, both rows shared one
+// goroutine that waited on both probes, so one 5s timeout stalled the healthy
+// row (and the whole next cycle) too.
+type pingRow struct {
+	valueKey string
+	rateKey  string
+
+	mu          sync.Mutex
 	total       int
 	successful  int
 	lastSuccess int64
-	mu          sync.RWMutex
-}) {
-	stats.mu.Lock()
-	defer stats.mu.Unlock()
-	stats.total++
-	if pingMs, err := pingICMP(site); err != nil {
-		// Keep showing last successful ping value, or -1 if never succeeded
-		if stats.lastSuccess > 0 {
-			globalData.Store(valueKey, stats.lastSuccess)
-		} else {
-			globalData.Store(valueKey, int64(-1))
-		}
-	} else if pingMs == -2 {
-		// Timeout case - show red X
-		globalData.Store(valueKey, int64(-2))
-	} else if pingMs > 0 {
-		// Successful ping - update last success and display it
-		stats.successful++
-		stats.lastSuccess = pingMs
-		globalData.Store(valueKey, pingMs)
-	} else {
-		// Other error case
-		if stats.lastSuccess > 0 {
-			globalData.Store(valueKey, stats.lastSuccess)
-		} else {
-			globalData.Store(valueKey, int64(-1))
-		}
+
+	// inFlight is held from the moment a probe starts until it returns, even if
+	// the collector already gave up waiting for it. It keeps a wedged probe from
+	// accumulating goroutines behind every subsequent tick.
+	inFlight atomic.Bool
+}
+
+var (
+	pingRow0 = &pingRow{valueKey: "Ping0", rateKey: "Ping0Rate", lastSuccess: -1}
+	pingRow1 = &pingRow{valueKey: "Ping1", rateKey: "Ping1Rate", lastSuccess: -1}
+)
+
+// collect runs one probe for this row and publishes the result. It returns as
+// soon as the probe answers, or at pingProbeDeadline - whichever comes first -
+// so the row's cadence never depends on how long a broken host takes to fail.
+func (r *pingRow) collect(site string) {
+	if !r.inFlight.CompareAndSwap(false, true) {
+		// The previous probe is still out there (wedged resolver, black-holed
+		// route). Don't queue another one behind it; the row already shows the
+		// timeout marker this tick's predecessor published.
+		return
 	}
-	successRate := float64(stats.successful) / float64(stats.total) * 100
-	globalData.Store(rateKey, fmt.Sprintf("%.0f", successRate))
+
+	// Buffered so an abandoned probe can deliver its result and exit instead of
+	// blocking forever on a receiver that has moved on.
+	done := make(chan int64, 1)
+	go func() {
+		pingMs, err := pingProbe(site)
+		if err != nil {
+			pingMs = -1
+		}
+		r.inFlight.Store(false)
+		done <- pingMs
+	}()
+
+	timer := time.NewTimer(pingProbeDeadline)
+	defer timer.Stop()
+	select {
+	case pingMs := <-done:
+		r.publish(pingMs)
+	case <-timer.C:
+		// Probe overran its own timeout: show the timeout marker now and let it
+		// finish in the background (its late result is dropped).
+		r.publish(-2)
+	}
+}
+
+// publish records one probe outcome and stores the row's display value and
+// success rate. pingMs is the round-trip in ms, -2 for a timeout (red X), or
+// -1/0 for any other failure - which keeps the last good value on screen so a
+// single dropped packet doesn't blank the row.
+func (r *pingRow) publish(pingMs int64) {
+	r.mu.Lock()
+	r.total++
+	value := pingMs
+	switch {
+	case pingMs > 0:
+		r.successful++
+		r.lastSuccess = pingMs
+	case pingMs == -2:
+		// Timeout: leave value at -2 so the row draws the red X.
+	case r.lastSuccess > 0:
+		value = r.lastSuccess
+	default:
+		value = -1
+	}
+	successRate := float64(r.successful) / float64(r.total) * 100
+	r.mu.Unlock()
+
+	globalData.Store(r.valueKey, value)
+	globalData.Store(r.rateKey, fmt.Sprintf("%.0f", successRate))
 }
 
 // Public IPs only change when the upstream connection does, so they are
@@ -1304,65 +1362,98 @@ func getSSID2() (string, error) {
 	return "", fmt.Errorf("SSID could not be determined")
 }
 
-// prevNetCounters holds the last per-iface byte counters so getNetworkSpeed can
-// compute a rate from the collect interval without sleeping ~1s each call.
-// Same idea as getCpuUsages / prevCPUStats — fewer blocked wakeups on battery.
-var (
-	prevNetMu     sync.Mutex
-	prevNetIface  string
-	prevNetRx     uint64
-	prevNetTx     uint64
-	prevNetAt     time.Time
+const (
+	// netSpeedWindow is the measurement window the sampler aims for: the delta
+	// is taken against the newest sample that is at least this old, so a 2 Hz
+	// collector still averages over ~1s instead of a jumpy half second.
+	netSpeedWindow = 1 * time.Second
+	// netSpeedMinWindow is the shortest window worth dividing by. Below it the
+	// counters' own granularity dominates, so the sampler reports "not ready"
+	// and the caller keeps the previous number.
+	netSpeedMinWindow = 200 * time.Millisecond
 )
 
-// getNetworkSpeed returns instant network speed for iface using a non-blocking
-// delta against the previous sample. The first call (or after an iface change)
-// primes counters with a short 200ms window; later calls use the wall time
-// between samples as the measurement window (typically the page-0 collect
-// interval of 500ms while visible).
-func getNetworkSpeed(iface string) (NetworkSpeed, error) {
-	rx2, tx2, err := getInterfaceBytes(iface)
+// netCounterSample is one reading of an interface's byte counters.
+type netCounterSample struct {
+	at time.Time
+	rx uint64
+	tx uint64
+}
+
+// netSpeedSampler derives speed from the deltas between collector ticks: every
+// call is two sysfs reads that return immediately, so the published rate
+// follows whatever cadence the collector runs at. Keeping a short history
+// (rather than just the previous sample) means a 2 Hz collector still measures
+// over ~1s instead of a jumpy half second, and it needs no priming sleep on the
+// first call after start or a WAN failover.
+type netSpeedSampler struct {
+	mu      sync.Mutex
+	iface   string
+	history []netCounterSample
+}
+
+// wanSpeedSampler tracks the default-route interface for the page-0 speed row.
+var wanSpeedSampler netSpeedSampler
+
+// sample reads iface's counters once and returns the speed over the newest
+// window of at least netSpeedWindow (or the whole history when it is shorter).
+// ok is false when there is nothing sane to divide by yet: the first call, the
+// first call after a WAN failover, or right after the counters reset - callers
+// should keep showing the previous value rather than a zero or a spike.
+//
+// While the screen is dark the collector runs once a minute, so the window then
+// spans a minute and the row shows that minute's average until the faster
+// cadence resumes.
+func (s *netSpeedSampler) sample(iface string) (NetworkSpeed, bool, error) {
+	rx, tx, err := getInterfaceBytes(iface)
 	if err != nil {
-		return NetworkSpeed{}, err
+		return NetworkSpeed{}, false, err
 	}
-	now := time.Now()
+	speed, ok := s.record(iface, rx, tx, time.Now())
+	return speed, ok, nil
+}
 
-	prevNetMu.Lock()
-	defer prevNetMu.Unlock()
+// record folds one counter reading into the history and returns the speed over
+// the resulting window. Split from sample so the windowing can be exercised
+// without sysfs or a real clock.
+func (s *netSpeedSampler) record(iface string, rx, tx uint64, now time.Time) (NetworkSpeed, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
-	if prevNetAt.IsZero() || prevNetIface != iface {
-		// Prime: short sample so the first visible number is not zero for a
-		// full collect interval. Subsequent calls are pure counter reads.
-		prevNetIface = iface
-		prevNetRx, prevNetTx = rx2, tx2
-		prevNetAt = now
-		time.Sleep(200 * time.Millisecond)
-		rx2, tx2, err = getInterfaceBytes(iface)
-		if err != nil {
-			return NetworkSpeed{}, err
+	if iface != s.iface {
+		// Failover moved the measurement to a different netdev; its counters are
+		// unrelated to the ones we have been tracking.
+		s.iface = iface
+		s.history = s.history[:0]
+	}
+	if n := len(s.history); n > 0 && (rx < s.history[n-1].rx || tx < s.history[n-1].tx) {
+		// Interface bounced and its counters restarted: drop the history rather
+		// than turn the negative delta into a huge speed.
+		s.history = s.history[:0]
+	}
+	s.history = append(s.history, netCounterSample{at: now, rx: rx, tx: tx})
+
+	// Keep the newest sample that is old enough to measure against, plus
+	// everything after it - a handful of entries at any cadence.
+	base := 0
+	for i, sample := range s.history {
+		if now.Sub(sample.at) >= netSpeedWindow {
+			base = i
 		}
-		now = time.Now()
 	}
+	s.history = s.history[base:]
+	first := s.history[0]
 
-	elapsed := now.Sub(prevNetAt).Seconds()
-	rx1, tx1 := prevNetRx, prevNetTx
-	prevNetRx, prevNetTx = rx2, tx2
-	prevNetAt = now
-	prevNetIface = iface
-
-	if elapsed <= 0 {
-		return NetworkSpeed{}, nil
+	elapsed := now.Sub(first.at)
+	if elapsed < netSpeedMinWindow {
+		return NetworkSpeed{}, false
 	}
-
 	// Bytes over elapsed seconds → Mbps (bytes * 8 / 1e6 / s).
-	// Equivalent to the old /1024/128 (= /131072 ≈ bits-to-Mbps for 1s).
-	downloadMbps := float64(rx2-rx1) * 8 / 1e6 / elapsed
-	uploadMbps := float64(tx2-tx1) * 8 / 1e6 / elapsed
-
+	secs := elapsed.Seconds()
 	return NetworkSpeed{
-		UploadMbps:   uploadMbps,
-		DownloadMbps: downloadMbps,
-	}, nil
+		DownloadMbps: float64(rx-first.rx) * 8 / 1e6 / secs,
+		UploadMbps:   float64(tx-first.tx) * 8 / 1e6 / secs,
+	}, true
 }
 
 func getSessionDataUsageGB(iface string) (float64, error) {
@@ -1575,6 +1666,11 @@ func getCpuUsages() ([]float64, error) {
 	return usages, nil
 }
 
+// pingTimeout is how long a single probe waits for its reply. Anything slower
+// than this is reported as a timeout anyway (see the avgRtt check below), so
+// waiting longer only delayed the row's next update.
+const pingTimeout = 3 * time.Second
+
 // pingICMP uses github.com/go-ping/ping to perform an ICMP ping.
 // Note: raw ICMP ping usually requires root privileges.
 // Returns -2 for timeouts >3 seconds, -1 for other errors, or ping time in ms.
@@ -1586,7 +1682,7 @@ func pingICMP(host string) (int64, error) {
 	// Set privileged mode if possible; otherwise, false will use UDP.
 	pinger.SetPrivileged(true)
 	pinger.Count = 1
-	pinger.Timeout = 5 * time.Second // Increased timeout to 5 seconds
+	pinger.Timeout = pingTimeout
 
 	// Run the ping (blocking).
 	err = pinger.Run()
@@ -2254,39 +2350,6 @@ func collectDiskUsage() {
 	globalData.Store("DiskSD", sd)
 	globalData.Store("DiskSDPercent", sdPct)
 	globalData.Store("DiskSDPresent", sdPresent)
-}
-
-// getCurrNetworkSpeedMbps returns current network speed in Mbps for all interfaces.
-func getCurrNetworkSpeedMbps() (map[string]interface{}, error) {
-	startStats, err := readNetworkStats()
-	if err != nil {
-		return nil, err
-	}
-
-	time.Sleep(1 * time.Second)
-
-	endStats, err := readNetworkStats()
-	if err != nil {
-		return nil, err
-	}
-
-	data := make(map[string]interface{})
-	for iface, end := range endStats {
-		if start, ok := startStats[iface]; ok {
-			rxBytes := end.rxBytes - start.rxBytes
-			txBytes := end.txBytes - start.txBytes
-
-			rxMbps := float64(rxBytes) * 8 / 1e6
-			txMbps := float64(txBytes) * 8 / 1e6
-
-			data[iface] = map[string]float64{
-				"download": rxMbps,
-				"upload":   txMbps,
-			}
-		}
-	}
-
-	return data, nil
 }
 
 // networkStats holds RX and TX bytes for an interface.

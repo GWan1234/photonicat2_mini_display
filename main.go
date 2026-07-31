@@ -182,7 +182,12 @@ var (
 	// matching page switches cadence without waiting out a leftover 1m sleep.
 	// Page 0's fast cadence drives several collectors at once, so its wake is a
 	// slice of channels — one per collector — signalled together.
-	pingReschedule  = make(chan struct{}, 1)
+	// Ping has one channel per row (Ping0/Ping1) because each row is collected
+	// by its own goroutine; they are signalled together.
+	pingReschedule = []chan struct{}{
+		make(chan struct{}, 1), // Ping0
+		make(chan struct{}, 1), // Ping1
+	}
 	linuxReschedule = make(chan struct{}, 1)
 	page0Reschedule = []chan struct{}{
 		make(chan struct{}, 1), // battery
@@ -278,20 +283,7 @@ var (
 
 	cfgNumPages = 0
 
-	// Ping statistics tracking
-	ping0Stats = struct {
-		total       int
-		successful  int
-		lastSuccess int64
-		mu          sync.RWMutex
-	}{lastSuccess: -1}
-
-	ping1Stats = struct {
-		total       int
-		successful  int
-		lastSuccess int64
-		mu          sync.RWMutex
-	}{lastSuccess: -1}
+	// Ping rows and their success counters live in processData.go (pingRow).
 )
 
 // ImageBuffer holds a 1D slice of pixels for the display area.
@@ -650,9 +642,11 @@ func pageHasMatch(pageIdx int, match func(DisplayElement) bool) bool {
 }
 
 func signalPingReschedule() {
-	select {
-	case pingReschedule <- struct{}{}:
-	default:
+	for _, ch := range pingReschedule {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
 	}
 }
 
@@ -922,9 +916,16 @@ func main() {
 		}()
 	}
 
-	// Ping: 1 Hz on the ping page while awake, otherwise 1 minute.
-	startPageSensitiveCollector(currentPingInterval, pingReschedule, &pingGatherInterval, func() {
-		collectPingData(cfg)
+	// Ping: 1 Hz on the ping page while awake, otherwise 1 minute. Each row runs
+	// on its own collector goroutine with its own reschedule channel, so a host
+	// that is slow, dead or stuck in DNS only stretches its own row's cadence -
+	// the other row keeps ticking. Only the first mirrors the live cadence into
+	// pingGatherInterval (both share currentPingInterval).
+	startPageSensitiveCollector(currentPingInterval, pingReschedule[0], &pingGatherInterval, func() {
+		pingRow0.collect(cfg.PingSite0)
+	})
+	startPageSensitiveCollector(currentPingInterval, pingReschedule[1], nil, func() {
+		pingRow1.collect(cfg.PingSite1)
 	})
 	// Linux/CPU: 0.5s (2 Hz) on the cpu_bars page while awake, otherwise 1 minute.
 	startPageSensitiveCollector(currentLinuxInterval, linuxReschedule, &dataGatherInterval, func() {

@@ -221,39 +221,30 @@ func TestAbsProcessData(t *testing.T) {
 	}
 }
 
-func TestGetNetworkSpeed(t *testing.T) {
+func TestNetSpeedSample(t *testing.T) {
 	// Test with loopback interface
 	iface := "lo"
 
 	defer func() {
 		if r := recover(); r != nil {
-			t.Errorf("getNetworkSpeed() panicked: %v", r)
+			t.Errorf("netSpeedSampler.sample() panicked: %v", r)
 		}
 	}()
 
-	// First call primes counters with a short (~200ms) window; later calls are
-	// non-blocking deltas against the previous sample.
+	// Sampling never sleeps: it reads the counters and diffs them against the
+	// previous call, so the first call has no window and reports ok == false.
+	var sampler netSpeedSampler
 	start := time.Now()
-	speed, err := getNetworkSpeed(iface)
-	elapsed := time.Since(start)
-
-	if err == nil && elapsed < 100*time.Millisecond {
-		t.Error("first getNetworkSpeed should take at least ~200ms to prime")
+	if _, ok, err := sampler.sample(iface); err == nil && ok {
+		t.Error("first sample should have no window to measure over")
 	}
-	if err == nil && elapsed > 800*time.Millisecond {
-		t.Errorf("first getNetworkSpeed took %v, want ~200ms prime (not a 1s sleep)", elapsed)
+	speed, ok, err := sampler.sample(iface)
+	if elapsed := time.Since(start); elapsed > 100*time.Millisecond {
+		t.Errorf("sampling took %v; it must not block", elapsed)
 	}
 
-	// Second call should return quickly (no sleep).
-	start = time.Now()
-	speed, err = getNetworkSpeed(iface)
-	elapsed = time.Since(start)
-	if err == nil && elapsed > 100*time.Millisecond {
-		t.Errorf("subsequent getNetworkSpeed took %v, want non-blocking", elapsed)
-	}
-
-	// If successful, speeds should be non-negative
-	if err == nil {
+	// If a speed was produced, it should be non-negative
+	if err == nil && ok {
 		if speed.UploadMbps < 0 || speed.DownloadMbps < 0 {
 			t.Error("Network speeds should be non-negative")
 		}
