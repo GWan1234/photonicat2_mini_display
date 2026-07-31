@@ -2,6 +2,22 @@
 
 A Go-based display driver for the Photonicat2 mini display, providing real-time system information, network status, and device metrics on a small LCD screen.
 
+This system ships preinstalled as a stock package on the
+[Photonicat 2](https://photonicat.com) mobile router.
+
+## Sample Screens
+
+Captured live over `GET /api/v1/go_frame.png` from a photonicat2 running
+photonicatWrt 26.04.1, at the panel's native 172×320.
+
+| 1 — Traffic | 2 — Connectivity | 3 — System | 4 — Modem |
+|:---:|:---:|:---:|:---:|
+| ![WAN speed, daily and monthly data usage, battery](docs/screens/page1-wan.webp) | ![Ping latency, LAN/WAN/public IP, both SSIDs](docs/screens/page2-network.webp) | ![CPU, RAM and per-disk usage bars](docs/screens/page3-system.webp) | ![Carrier, SIM, client counts and sensors](docs/screens/page4-modem.webp) |
+
+Page 3 splits storage across eMMC / NVMe / SD and shows only the disks that are
+actually present, so the row is one, two, or three bars wide. The public IP and
+phone number are blurred out of the samples.
+
 ## 🚀 Quick Start
 
 ### Build and Test
@@ -18,19 +34,6 @@ A Go-based display driver for the Photonicat2 mini display, providing real-time 
 # After building with compile.sh cross compile on X86
 ./pcat2_mini_display_openwrt #on openwrt
 ```
-
-## Sample Screens
-
-Captured live over `GET /api/v1/go_frame.png` from a photonicat2 running
-photonicatWrt 26.04.1, at the panel's native 172×320.
-
-| 1 — Traffic | 2 — Connectivity | 3 — System | 4 — Modem |
-|:---:|:---:|:---:|:---:|
-| ![WAN speed, daily and monthly data usage, battery](docs/screens/page1-wan.webp) | ![Ping latency, LAN/WAN/public IP, both SSIDs](docs/screens/page2-network.webp) | ![CPU, RAM and per-disk usage bars](docs/screens/page3-system.webp) | ![Carrier, SIM, client counts and sensors](docs/screens/page4-modem.webp) |
-
-Page 3 splits storage across eMMC / NVMe / SD and shows only the disks that are
-actually present, so the row is one, two, or three bars wide. The public IP and
-phone number are blurred out of the samples.
 
 
 ## Update Frequencies & Intervals
