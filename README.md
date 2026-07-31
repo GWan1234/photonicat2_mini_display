@@ -3,7 +3,8 @@
 A Go-based display driver for the Photonicat2 mini display, providing real-time system information, network status, and device metrics on a small LCD screen.
 
 This system ships preinstalled as a stock package on the
-[Photonicat 2](https://photonicat.com) mobile router.
+[Photonicat 2](https://photonicat.com) mobile router, and runs on both
+OpenWrt and Debian.
 
 ## Sample Screens
 
