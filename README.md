@@ -23,11 +23,12 @@ phone number are blurred out of the samples.
 
 ### Build and Test
 ```bash
-# Build everything (host + cross-compilation + verify tests)
+# Build host + OpenWrt/Debian binaries and cross-compiled test runners
 ./compile.sh
 
-# Run comprehensive test suite (155+ unit tests)
-./run_tests.sh
+# Run the unit tests (on Linux; compile.sh also emits test_runner_openwrt /
+# test_runner_debian binaries you can scp to a device and run there)
+go test .
 ```
 
 ### Run Application
@@ -37,39 +38,46 @@ phone number are blurred out of the samples.
 ```
 
 
-## Update Frequencies & Intervals
+## Dynamic Refresh (Hz)
 
-### Display Rendering
-| Component | Update Frequency | Frame Rate | Notes |
-|-----------|-----------------|------------|--------|
-| **Main Display** | 5 FPS target | 200ms per frame | `desiredFPS = 5` |
-| **Top Bar** | Every 10 frames | ~2 seconds | Time, battery, connection status |
-| **Footer** | Every 5 frames | ~1 second | Page indicators, SMS status |
-| **Middle Content** | Every frame | ~200ms | Main data display area |
-| **Page Animation** | 16 intermediate frames | Smooth transitions | During page changes |
+Both the renderer and the data collectors scale their rates to what is
+actually on screen: the display is lively while you look at it and nearly
+free when you don't.
 
-### Data Collection Intervals
+### Frame Rate
+| State | Frame Rate | Notes |
+|-------|-----------|-------|
+| **Awake** | 3 FPS | `DEFAULT_FPS`, enough for numbers and the clock |
+| **Text ticker scrolling** | 30 FPS | `SCROLL_FPS`, only while a long value scrolls; reverts the moment it stops |
+| **Page change** | 15 intermediate frames | Pre-rendered slide with easing; frame sleep is interrupted instantly |
+| **Idle (dimmed)** | ~0.1 FPS | 1 FPS with a 10× idle sleep multiplier |
+| **Backlight off** | 0 | Middle/footer rendering skipped entirely |
 
-#### System Data
-| Data Source | Collection Interval | Data Includes | Function |
-|-------------|-------------------|---------------|----------|
-| **Linux System** | 2 seconds | CPU, memory, uptime, disk, temp | `collectLinuxData()` |
-| **Battery** | 1 second | SOC, voltage, current, charging status | `collectBatteryData()` |
-| **Network Basic** | 2 seconds | Local IP, WAN IP, public IP, SSID | `collectNetworkData()` |
-| **Network Speed** | 3 seconds | WAN upload/download speeds | `collectWANNetworkSpeed()` |
+### Per-Page Data Collection
+Every collector idles at once per minute. It speeds up only while the screen
+is awake **and** the page that displays its data is visible; page changes and
+idle/wake transitions reschedule the collectors immediately.
 
-#### External APIs
-| API Source | Collection Interval | Data Includes | Function |
-|------------|-------------------|---------------|----------|
-| **PCAT Manager Web** | 10 seconds | ISP, signal strength, connection type, data usage | `getInfoFromPcatWeb()` |
-| **SMS Collection** | 60 seconds | SMS messages for display | `getSmsPages()` |
+| Data Source | Idle | When its page is visible |
+|-------------|------|--------------------------|
+| **Battery / WAN speed / pcat-manager-web** (page 0) | 60 s | 2 Hz (500 ms) |
+| **CPU / RAM / disk bars** (system page) | 60 s | 2 Hz (500 ms) |
+| **Ping** (connectivity page) | 60 s | 1 Hz |
+| **SMS** | 60 s | 60 s |
 
-#### Network Connectivity
-| Test Type | Collection Interval | Timeout | Special Handling |
-|-----------|-------------------|---------|------------------|
-| **Ping Site 0** | 2 seconds | 5 seconds | Red "X" for >3s timeout |
-| **Ping Site 1** | 2 seconds | 5 seconds | Keep last successful value |
-| **Success Rate** | Calculated per ping | - | Tracks ping reliability |
+### Redraw Cadence
+| Component | Cadence |
+|-----------|---------|
+| **Top bar** | Double-buffered, redrawn only when its content changes |
+| **Middle content** | Every frame |
+| **Footer** | Every 10th frame (every 3rd on SMS pages) |
+
+### Ping Handling
+| Test Type | Timeout | Special Handling |
+|-----------|---------|------------------|
+| **Ping Site 0** | 5 seconds | Red "X" for >3s timeout |
+| **Ping Site 1** | 5 seconds | Keep last successful value |
+| **Success Rate** | - | Tracked per ping site |
 
 ### Screen Management
 
@@ -100,14 +108,16 @@ phone number are blurred out of the samples.
 ### Performance Metrics
 | Metric | Target/Actual | Notes |
 |--------|---------------|-------|
-| **Target FPS** | 5 FPS | Main rendering loop |
+| **Target FPS** | 3 FPS awake, 0.1–30 FPS dynamic | See Dynamic Refresh above |
 | **Page Change FPS** | Variable | Depends on animation complexity |
-| **Frame Sleep** | ~200ms | Maintains stable FPS |
+| **Frame Sleep** | ~333ms | Maintains stable FPS |
 | **Background Sleep** | 50ms | When main loop disabled |
 
 ## Configuration Files
 
 ### Main Config: `config.json`
+Embedded in the binary as the package default; the user config is always
+merged on top of it.
 - **Ping targets**: `ping_site0`, `ping_site1`
 - **Display templates**: Page layouts and elements
 - **Screen settings**: Brightness, timeout values
@@ -131,8 +141,8 @@ phone number are blurred out of the samples.
 Multiple pages with rotating content:
 - **Page 0**: WAN speeds, data usage, battery details
 - **Page 1**: Ping results with success rates, IP addresses, SSIDs
-- **Page 2**: CPU, memory, uptime, OS version, serial number
-- **Page 3**: ISP info, cell bands, SIM status, client counts, temps
+- **Page 2**: CPU graph, RAM bar, eMMC/NVMe/SD disk bars, uptime, OS version, serial number
+- **Page 3**: Carrier/ISP, modem model, SIM/SD state, WiFi & DHCP client counts, fan RPM, temps
 - **SMS Pages**: When SMS display enabled
 
 ### Footer (22px height)
@@ -172,6 +182,21 @@ Comprehensive stdout logging shows:
 - **Backlight**: PWM controlled
 
 ## HTTP API Endpoints
+
+The built-in HTTP server listens on localhost port 8081 by default
+(`-port` flag).
+
+### Overview
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/v1/go_frame.png` | GET | PNG snapshot of the current LCD frame |
+| `/api/v1/go_data.json` | GET/POST | Dump or inject display data |
+| `/api/v1/go_changePage` | GET | Advance to the next page |
+| `/api/v1/go_display_text.json` | GET | Draw arbitrary text on the display |
+| `/api/v1/go_get_status.json` | GET | Service status |
+| `/api/v1/go_get_config.json`, `go_get_user_config.json`, `go_set_user_config.json`, `go_reset_config` | GET/POST | Read, write and reset configuration |
+| `/api/v1/go_set_ping_sites`, `go_set_screen_dimmer_time`, `go_set_show_sms` | POST | Runtime settings |
+| `/api/v1/go_poweroff?confirm=yes` | POST | Shut the device down via the PMU |
 
 ### Backlight Control
 
@@ -218,13 +243,13 @@ max_brightness=75
 **Example Usage:**
 ```bash
 # Get current max backlight
-curl http://localhost:8080/api/v1/go_get_max_backlight
+curl http://localhost:8081/api/v1/go_get_max_backlight
 
 # Set max backlight to 80%
-curl -X POST -d "max_brightness=80" http://localhost:8080/api/v1/go_set_max_backlight
+curl -X POST -d "max_brightness=80" http://localhost:8081/api/v1/go_set_max_backlight
 
 # Set max backlight to minimum (1%)
-curl -X POST -d "max_brightness=1" http://localhost:8080/api/v1/go_set_max_backlight
+curl -X POST -d "max_brightness=1" http://localhost:8081/api/v1/go_set_max_backlight
 ```
 
 ## Software Architecture
@@ -253,6 +278,11 @@ curl -X POST -d "max_brightness=1" http://localhost:8080/api/v1/go_set_max_backl
 ├── processData.go       # Data collection and processing
 ├── processSms.go        # SMS handling
 ├── httpServer.go        # HTTP API server
+├── welcomeAnim.go       # Boot/wake-up animation
+├── powerGraph.go        # Battery power history graph
+├── linuxFallback.go     # Direct sysfs/netlink fallbacks when pcat-web is absent
+├── customMetrics.go     # User-defined metrics (stocks, weather, ...)
+├── pcatPmu.go           # PMU serial protocol (battery, poweroff)
 ├── utils.go             # Utility functions
 ├── config.json          # Main configuration
 └── assets/              # Fonts and SVG icons
@@ -263,7 +293,7 @@ curl -X POST -d "max_brightness=1" http://localhost:8080/api/v1/go_set_max_backl
 ## Getting Started
 
 ### Prerequisites
-- Go 1.16 or higher
+- Go 1.25 or higher
 - Proper hardware setup for the Photonicat 2 mobile router and LCD display
 
 ```bash
@@ -274,13 +304,20 @@ sudo tar -C /usr/local -xzf aarch64-linux-musl-cross.tgz
 
 ### Build & Run
 ```bash
-git clone https://github.com/yourusername/photonicat2_display_go.git
-cd photonicat2_display_go
+git clone https://github.com/photonicat/photonicat2_mini_display.git
+cd photonicat2_mini_display
 go mod tidy
 go run .
 ```
 
 ### Service Installation
+On photonicatWrt/OpenWrt the display ships preinstalled and is managed by
+its init script:
+```bash
+/etc/init.d/pcat2-display-mini restart
+```
+
+On Debian, install it as a systemd service:
 ```bash
 sudo ./install_service.sh
 sudo systemctl enable pcat2_mini_display
