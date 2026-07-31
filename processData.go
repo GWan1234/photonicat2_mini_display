@@ -534,11 +534,9 @@ func getWANInterface() (string, error) {
 }
 
 func collectWANNetworkSpeed() {
-	// Always a direct two-point counter read (~1s window, getNetworkSpeed) on
-	// the default-route device. The pcat-web numbers used here before are
-	// sampled over the web's own window and cached on top of that, which
-	// pinned this row to a multi-second cadence no matter how often this
-	// collector ran; measuring locally gives ~1 Hz while page 0 is visible.
+	// Delta counter read on the default-route device (getNetworkSpeed uses the
+	// previous sample as the window — no ~1s sleep). While page 0 is visible
+	// the collector runs at 2 Hz so rates track the live collect interval.
 	dev, err := getWANInterface()
 	if err != nil {
 		log.Printf("Could not get WAN interface: %v\n", err)
@@ -1306,23 +1304,60 @@ func getSSID2() (string, error) {
 	return "", fmt.Errorf("SSID could not be determined")
 }
 
-// getNetworkSpeed calculates instant network speed for the specified interface.
+// prevNetCounters holds the last per-iface byte counters so getNetworkSpeed can
+// compute a rate from the collect interval without sleeping ~1s each call.
+// Same idea as getCpuUsages / prevCPUStats — fewer blocked wakeups on battery.
+var (
+	prevNetMu     sync.Mutex
+	prevNetIface  string
+	prevNetRx     uint64
+	prevNetTx     uint64
+	prevNetAt     time.Time
+)
+
+// getNetworkSpeed returns instant network speed for iface using a non-blocking
+// delta against the previous sample. The first call (or after an iface change)
+// primes counters with a short 200ms window; later calls use the wall time
+// between samples as the measurement window (typically the page-0 collect
+// interval of 500ms while visible).
 func getNetworkSpeed(iface string) (NetworkSpeed, error) {
-	rx1, tx1, err := getInterfaceBytes(iface)
-	if err != nil {
-		return NetworkSpeed{}, err
-	}
-
-	// Reduced sampling interval for better responsiveness
-	time.Sleep(999 * time.Millisecond) // Reduced from 1999ms to 999ms
-
 	rx2, tx2, err := getInterfaceBytes(iface)
 	if err != nil {
 		return NetworkSpeed{}, err
 	}
+	now := time.Now()
 
-	downloadMbps := float64(rx2-rx1) / 1024 / 128 / 1 // Adjusted for 1 second
-	uploadMbps := float64(tx2-tx1) / 1024 / 128 / 1   // Adjusted for 1 second
+	prevNetMu.Lock()
+	defer prevNetMu.Unlock()
+
+	if prevNetAt.IsZero() || prevNetIface != iface {
+		// Prime: short sample so the first visible number is not zero for a
+		// full collect interval. Subsequent calls are pure counter reads.
+		prevNetIface = iface
+		prevNetRx, prevNetTx = rx2, tx2
+		prevNetAt = now
+		time.Sleep(200 * time.Millisecond)
+		rx2, tx2, err = getInterfaceBytes(iface)
+		if err != nil {
+			return NetworkSpeed{}, err
+		}
+		now = time.Now()
+	}
+
+	elapsed := now.Sub(prevNetAt).Seconds()
+	rx1, tx1 := prevNetRx, prevNetTx
+	prevNetRx, prevNetTx = rx2, tx2
+	prevNetAt = now
+	prevNetIface = iface
+
+	if elapsed <= 0 {
+		return NetworkSpeed{}, nil
+	}
+
+	// Bytes over elapsed seconds → Mbps (bytes * 8 / 1e6 / s).
+	// Equivalent to the old /1024/128 (= /131072 ≈ bits-to-Mbps for 1s).
+	downloadMbps := float64(rx2-rx1) * 8 / 1e6 / elapsed
+	uploadMbps := float64(tx2-tx1) * 8 / 1e6 / elapsed
 
 	return NetworkSpeed{
 		UploadMbps:   uploadMbps,

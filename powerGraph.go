@@ -44,17 +44,22 @@ var (
 func initPowerDataRecording() {
 	// Load existing data if available
 	loadPowerData()
-	
-	// Start recording goroutine
+
+	// 1 Hz while the screen is awake (live graph); 10 s while fully dark so
+	// we keep a sparse trail without waking every second for pixels nobody
+	// can see. Battery collectors already slow to 1/min when idle.
 	go func() {
-		ticker := time.NewTicker(1 * time.Second)
-		defer ticker.Stop()
-		
 		for weAreRunning {
-			select {
-			case <-ticker.C:
-				recordPowerSample()
+			interval := 1 * time.Second
+			if displayAsleep() {
+				interval = 10 * time.Second
 			}
+			timer := time.NewTimer(interval)
+			<-timer.C
+			if !weAreRunning {
+				return
+			}
+			recordPowerSample()
 		}
 	}()
 }

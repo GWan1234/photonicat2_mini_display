@@ -3,6 +3,7 @@ package main
 import (
 	"math"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
@@ -109,6 +110,43 @@ func TestCurrentPingInterval(t *testing.T) {
 	}
 	if INTERVAL_PING_IDLE != time.Minute {
 		t.Errorf("INTERVAL_PING_IDLE = %v, want 1m", INTERVAL_PING_IDLE)
+	}
+}
+
+// middlePageFingerprint must change when a displayed data key changes, and stay
+// stable when unrelated keys move — the main loop relies on this to skip SPI.
+func TestMiddlePageFingerprint(t *testing.T) {
+	origCfg := cfg
+	defer func() { cfg = origCfg }()
+
+	cfg.DisplayTemplate.Elements = map[string][]DisplayElement{
+		"page0": {
+			{Type: "text", DataKey: "WanUP", Enable: 1, Position: Position{X: 10, Y: 10}},
+			{Type: "text", DataKey: "WanDOWN", Enable: 1, Position: Position{X: 10, Y: 40}},
+		},
+	}
+	globalData.Store("WanUP", "1.0")
+	globalData.Store("WanDOWN", "2.0")
+	fp1 := middlePageFingerprint(&cfg, false, 0)
+	fp2 := middlePageFingerprint(&cfg, false, 0)
+	if fp1 != fp2 {
+		t.Fatalf("identical data produced different fingerprints: %q vs %q", fp1, fp2)
+	}
+	globalData.Store("WanUP", "1.1")
+	fp3 := middlePageFingerprint(&cfg, false, 0)
+	if fp1 == fp3 {
+		t.Fatal("fingerprint did not change after WanUP update")
+	}
+	// Unrelated key must not affect the fingerprint.
+	globalData.Store("UnrelatedKey", "xyz")
+	fp4 := middlePageFingerprint(&cfg, false, 0)
+	if fp3 != fp4 {
+		t.Fatalf("unrelated key changed fingerprint: %q vs %q", fp3, fp4)
+	}
+	// SMS pages use page index + count only.
+	smsFP := middlePageFingerprint(&cfg, true, 0)
+	if !strings.HasPrefix(smsFP, "sms:") {
+		t.Fatalf("SMS fingerprint = %q, want sms: prefix", smsFP)
 	}
 }
 

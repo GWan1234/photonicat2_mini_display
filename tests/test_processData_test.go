@@ -224,23 +224,34 @@ func TestAbsProcessData(t *testing.T) {
 func TestGetNetworkSpeed(t *testing.T) {
 	// Test with loopback interface
 	iface := "lo"
-	
+
 	defer func() {
 		if r := recover(); r != nil {
 			t.Errorf("getNetworkSpeed() panicked: %v", r)
 		}
 	}()
-	
-	// This function sleeps for ~1 second, so we test it briefly
+
+	// First call primes counters with a short (~200ms) window; later calls are
+	// non-blocking deltas against the previous sample.
 	start := time.Now()
 	speed, err := getNetworkSpeed(iface)
 	elapsed := time.Since(start)
-	
-	// Should take approximately 1 second
-	if err == nil && elapsed < 500*time.Millisecond {
-		t.Error("getNetworkSpeed should take at least 500ms")
+
+	if err == nil && elapsed < 100*time.Millisecond {
+		t.Error("first getNetworkSpeed should take at least ~200ms to prime")
 	}
-	
+	if err == nil && elapsed > 800*time.Millisecond {
+		t.Errorf("first getNetworkSpeed took %v, want ~200ms prime (not a 1s sleep)", elapsed)
+	}
+
+	// Second call should return quickly (no sleep).
+	start = time.Now()
+	speed, err = getNetworkSpeed(iface)
+	elapsed = time.Since(start)
+	if err == nil && elapsed > 100*time.Millisecond {
+		t.Errorf("subsequent getNetworkSpeed took %v, want non-blocking", elapsed)
+	}
+
 	// If successful, speeds should be non-negative
 	if err == nil {
 		if speed.UploadMbps < 0 || speed.DownloadMbps < 0 {

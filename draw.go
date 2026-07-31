@@ -162,6 +162,131 @@ var scrollEpoch time.Time
 // goroutine, so no locking is required.
 var anyTextScrolling bool
 
+// scrollScratch is a reused clip buffer for drawScrollingText so 30 FPS ticker
+// motion does not allocate a fresh image every frame.
+var scrollScratch *image.RGBA
+
+// lastMiddleFingerprint / forceMiddleRedraw drive skip-unchanged middle
+// rendering: when the page's data keys have not changed and nothing is
+// scrolling, the main loop skips clear+render+SPI to save CPU and bus power.
+var (
+	lastMiddleFingerprint string
+	forceMiddleRedraw     bool
+)
+
+// appendDataKeyFingerprint writes "|key=value" for a globalData key into b.
+func appendDataKeyFingerprint(b *strings.Builder, key string) {
+	if key == "" {
+		return
+	}
+	b.WriteByte('|')
+	b.WriteString(key)
+	b.WriteByte('=')
+	if v, ok := globalData.Load(key); ok && v != nil {
+		fmt.Fprint(b, v)
+	}
+}
+
+// middlePageFingerprint builds a compact signature of everything that can
+// affect the middle-area pixels for the current page. Equal fingerprints mean
+// a full re-render would produce the same image (aside from ticker animation).
+func middlePageFingerprint(cfg *Config, isSMS bool, pageIdx int) string {
+	if isSMS {
+		return "sms:" + strconv.Itoa(pageIdx) + ":" + strconv.Itoa(len(smsPagesImages))
+	}
+	if cfg == nil {
+		return "nil"
+	}
+	var b strings.Builder
+	b.Grow(256)
+	b.WriteString("p")
+	b.WriteString(strconv.Itoa(pageIdx))
+	page := cfg.DisplayTemplate.Elements["page"+strconv.Itoa(pageIdx)]
+	for _, el := range page {
+		if el.Enable == 0 {
+			continue
+		}
+		switch el.Type {
+		case "text", "cpu_bars", "hbar":
+			appendDataKeyFingerprint(&b, el.DataKey)
+			appendDataKeyFingerprint(&b, el.LabelDataKey)
+			if el.DataKey != "" {
+				appendDataKeyFingerprint(&b, el.DataKey+"_Unit")
+			}
+			appendDataKeyFingerprint(&b, el.AnchorAfterDataKey)
+		case "icon":
+			appendDataKeyFingerprint(&b, el.AnchorAfterDataKey)
+			b.WriteString("|i:")
+			b.WriteString(el.IconPath)
+		case "disk_bars":
+			appendDataKeyFingerprint(&b, "DiskUsagePercent")
+			appendDataKeyFingerprint(&b, "DiskNvmePercent")
+			appendDataKeyFingerprint(&b, "DiskNvmePresent")
+			appendDataKeyFingerprint(&b, "DiskSDPercent")
+			appendDataKeyFingerprint(&b, "DiskSDPresent")
+		case "graph":
+			// Graph pixels move when a new sample is recorded.
+			powerData.mu.RLock()
+			n := len(powerData.Samples)
+			var last float64
+			if n > 0 {
+				last = powerData.Samples[n-1].Wattage
+			}
+			powerData.mu.RUnlock()
+			fmt.Fprintf(&b, "|g:%d:%.3f", n, last)
+		case "fixed_text", "vtext":
+			// Static labels — layout only, no data.
+		}
+	}
+	return b.String()
+}
+
+// pageHasOverflowText reports whether any text element on the page is wider
+// than its available slot and would therefore run as a ticker. Used to keep
+// re-rendering (and bump FPS) even when the underlying string is unchanged.
+func pageHasOverflowText(cfg *Config, pageIdx int) bool {
+	if cfg == nil {
+		return false
+	}
+	page := cfg.DisplayTemplate.Elements["page"+strconv.Itoa(pageIdx)]
+	for _, el := range page {
+		if el.Enable == 0 || el.Type != "text" || el.DataKey == "" {
+			continue
+		}
+		v, ok := globalData.Load(el.DataKey)
+		if !ok || v == nil {
+			continue
+		}
+		text := strings.TrimSpace(fmt.Sprintf("%v", v))
+		if text == "" || text == "-" || isErrorSentinel(text) {
+			continue
+		}
+		// Ping timeout "X" never scrolls.
+		if el.DataKey == "Ping0" || el.DataKey == "Ping1" {
+			if iv, ok := v.(int64); ok && iv < 0 {
+				continue
+			}
+			if iv, ok := v.(int); ok && iv < 0 {
+				continue
+			}
+		}
+		face, _, err := getFontFaceForText(el.Font, text)
+		if err != nil {
+			continue
+		}
+		availWidth := PCAT2_LCD_WIDTH - el.Position.X - PCAT2_R_MARGIN
+		if el.Size != nil && el.Size.Width > 0 {
+			availWidth = el.Size.Width
+		} else if el.Size2 != nil && el.Size2.Width > 0 {
+			availWidth = el.Size2.Width
+		}
+		if font.MeasureString(face, text).Round() > availWidth {
+			return true
+		}
+	}
+	return false
+}
+
 // drawScrollingText draws text at (x, y). availWidth is the horizontal space
 // the text may occupy (from x to the clip edge). If the text fits, it is drawn
 // normally and false is returned. If it overflows, it is drawn as a clipped,
@@ -213,10 +338,21 @@ func drawScrollingText(frame *image.RGBA, text string, x, y, availWidth int, fac
 		offset = offset % loopW
 	}
 
-	// Render into a region-sized scratch image so the text is clipped to
-	// [x, x+availWidth) and never paints over neighbouring elements. Draw two
-	// copies (loopW apart) so the wrap is seamless.
-	region := image.NewRGBA(image.Rect(0, 0, availWidth, regionH))
+	// Reuse a clip scratch buffer so smooth ticker FPS does not allocate.
+	if scrollScratch == nil || scrollScratch.Bounds().Dx() < availWidth || scrollScratch.Bounds().Dy() < regionH {
+		scrollScratch = image.NewRGBA(image.Rect(0, 0, availWidth, regionH))
+	} else {
+		// Clear only the used region (transparent black).
+		pix := scrollScratch.Pix
+		rowBytes := availWidth * 4
+		for row := 0; row < regionH; row++ {
+			off := row * scrollScratch.Stride
+			for i := 0; i < rowBytes; i++ {
+				pix[off+i] = 0
+			}
+		}
+	}
+	region := scrollScratch
 	src := image.NewUniform(clr)
 	rd := &font.Drawer{Dst: region, Src: src, Face: face}
 	baseline := ascent

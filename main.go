@@ -1064,6 +1064,12 @@ func mainLoop() {
 	copyTimings := make([]int, numIntermediatePages)
 	sendTimings := make([]int, numIntermediatePages)
 
+	// Reused across frames so the FPS sleep does not allocate a timer each time.
+	frameSleepTimer := time.NewTimer(time.Hour)
+	if !frameSleepTimer.Stop() {
+		<-frameSleepTimer.C
+	}
+
 	if err != nil {
 		log.Fatalf("Failed to load font: %v", err)
 	}
@@ -1090,6 +1096,10 @@ func mainLoop() {
 				lastActivityMu.Lock()
 				lastActivity = now
 				lastActivityMu.Unlock()
+				// New page → always re-render middle (fingerprint would still
+				// match if two pages share the same keys with equal values).
+				forceMiddleRedraw = true
+				lastMiddleFingerprint = ""
 
 				// Optimize page calculations - calculate once and reuse
 				currPageIdx = currPageIdx % totalNumPages
@@ -1390,51 +1400,85 @@ func mainLoop() {
 					drawFooter(display, footerFramebuffers[middleFrames%2], localIdx, cfgNumPages, isSMS)
 				}
 
-				//draw middle
-				clearFrame(middleFramebuffers[middleFrames%2], middleFrameWidth, middleFrameHeight)
-				// renderMiddle sets anyTextScrolling if any value overflowed and
-				// is animating; reset it first so the flag reflects this pass only.
-				anyTextScrolling = false
-				renderMiddle(middleFramebuffers[middleFrames%2], &cfg, isSMS, localIdx)
+				// Middle: skip clear+render+SPI when the page's data has not
+				// changed and nothing is ticker-scrolling. Saves CPU and the
+				// SPI bus (largest active-screen power cost after backlight).
+				fp := middlePageFingerprint(&cfg, isSMS, localIdx)
+				overflowScroll := !isSMS && pageHasOverflowText(&cfg, localIdx)
+				needMiddle := forceMiddleRedraw || overflowScroll || fp != lastMiddleFingerprint || showFPS
+				if needMiddle {
+					forceMiddleRedraw = false
+					clearFrame(middleFramebuffers[middleFrames%2], middleFrameWidth, middleFrameHeight)
+					// renderMiddle sets anyTextScrolling if any value overflowed
+					// and is animating; reset first so the flag is this pass only.
+					anyTextScrolling = false
+					renderMiddle(middleFramebuffers[middleFrames%2], &cfg, isSMS, localIdx)
 
-				//draw fps - use cached text for better performance
-				if showFPS {
-					// Update cached FPS text periodically
-					if time.Since(lastFPSUpdate) > 100*time.Millisecond {
-						lastFPSUpdate = time.Now()
-						cachedFPSText = "FPS:" + strconv.Itoa(int(fps)) + ", " + strconv.Itoa(middleFrames)
+					//draw fps - use cached text for better performance
+					if showFPS {
+						// Update cached FPS text periodically
+						if time.Since(lastFPSUpdate) > 100*time.Millisecond {
+							lastFPSUpdate = time.Now()
+							cachedFPSText = "FPS:" + strconv.Itoa(int(fps)) + ", " + strconv.Itoa(middleFrames)
+						}
+						if cachedFPSText != "" {
+							drawText(middleFramebuffers[middleFrames%2], cachedFPSText, 10, 240, faceTiny, PCAT_RED, false)
+						}
 					}
-					if cachedFPSText != "" {
-						drawText(middleFramebuffers[middleFrames%2], cachedFPSText, 10, 240, faceTiny, PCAT_RED, false)
-					}
+					sendMiddle(display, middleFramebuffers[middleFrames%2])
+					lastMiddleFingerprint = fp
+					middleFrames++
+				} else {
+					// Keep frame counter moving slowly so %N footer/top cadence
+					// and FPS logs still advance while content is static.
+					middleFrames++
 				}
-				sendMiddle(display, middleFramebuffers[middleFrames%2])
-				middleFrames++
 
 				// stable‐FPS sleep with signal-based interruption for page changes
 				// Apply idle multiplier to FPS during idle state (effectively 0.1 FPS)
 				effectiveFPS := desiredFPS
 				if idleState == STATE_IDLE {
-					effectiveFPS = 1  // This gives us 1 FPS, but we'll multiply the sleep time by 10
-				} else if anyTextScrolling && SCROLL_FPS > effectiveFPS {
+					effectiveFPS = 1 // This gives us 1 FPS, but we'll multiply the sleep time by 10
+				} else if (anyTextScrolling || overflowScroll) && SCROLL_FPS > effectiveFPS {
 					// A ticker is mid-scroll and the screen is awake: render fast
 					// enough for smooth motion. Reverts to desiredFPS automatically
 					// once the text stops overflowing.
 					effectiveFPS = SCROLL_FPS
+				} else if !needMiddle {
+					// Content static: poll for data changes less often. Collectors
+					// still update globalData; we just check the fingerprint at
+					// ~2 Hz instead of burning 3 full redraws/s for nothing.
+					if effectiveFPS > 2 {
+						effectiveFPS = 2
+					}
 				}
 				baseSleep := time.Second / time.Duration(effectiveFPS)
 				if idleState == STATE_IDLE {
-					baseSleep = baseSleep * time.Duration(idleMultiplier)  // 1 FPS * 10 = 0.1 FPS
+					baseSleep = baseSleep * time.Duration(idleMultiplier) // 1 FPS * 10 = 0.1 FPS
 				}
 				if delta := (baseSleep - time.Since(start)); delta > 0 {
 					sleepDuration := time.Duration(float64(delta) * 0.99)
+					// Reuse one timer to avoid time.After heap churn every frame.
+					if !frameSleepTimer.Stop() {
+						select {
+						case <-frameSleepTimer.C:
+						default:
+						}
+					}
+					frameSleepTimer.Reset(sleepDuration)
 					select {
 					case <-pageChangeSignal:
+						if !frameSleepTimer.Stop() {
+							select {
+							case <-frameSleepTimer.C:
+							default:
+							}
+						}
 						// Page change triggered, exit sleep immediately
 						if showDetailedTiming {
 							log.Printf("⚡ FPS sleep interrupted for immediate page change")
 						}
-					case <-time.After(sleepDuration):
+					case <-frameSleepTimer.C:
 						// Normal sleep completion
 					}
 				}

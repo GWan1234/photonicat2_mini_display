@@ -302,6 +302,9 @@ func displayWake() {
 	// Invalidate top-bar cache and force a redraw on the next active frame.
 	cacheTopBarStr = ""
 	forceTopBarRedraw = true
+	// Middle may still hold the last pre-sleep pixels; force a full redraw so
+	// wake never shows a stale fingerprint match.
+	forceMiddleRedraw = true
 	// Kick the rest in the background (1-minute collectors already keep most
 	// keys warm; this just covers the case where we wake just before a tick).
 	go collectNetworkData(cfg)
