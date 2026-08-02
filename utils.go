@@ -310,9 +310,11 @@ func displayWake() {
 	go collectNetworkData(cfg)
 	go collectWANNetworkSpeed()
 	go getInfoFromPcatWeb()
+	go collectLinkStatus()
 	// Page-sensitive collectors refresh immediately on reschedule.
 	signalPingReschedule()
 	signalLinuxReschedule()
+	signalLinkReschedule()
 }
 
 func monitorKeyboard(changePageTriggered *bool) {

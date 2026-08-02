@@ -173,6 +173,14 @@ type DashboardInfo struct {
 	SimNumber           string          `json:"sim_number"`
 	Uptime              string          `json:"uptime"`
 	Voltage             int             `json:"voltage"`
+	// Public IP (IPv4) as resolved by pcat-manager-web. Field name on the wire
+	// is wan_ip (historical); empty when offline or still probing.
+	WanIP               string          `json:"wan_ip"`
+	WanIPv6             string          `json:"wan_ipv6"`
+	// LocalWanIP is the address on the active uplink interface.
+	LocalWanIP          string          `json:"local_wan_ip"`
+	WanCarrier          bool            `json:"wan_carrier"`
+	// PublicIP is a legacy/alias key some older builds exposed; prefer WanIP.
 	PublicIP            string          `json:"public_ip"`
 	WiFiClientsCount    int             `json:"wifi_clients_count"`
 	WiFiInterfaces      []WiFiInterface `json:"wifi_interfaces"`
@@ -396,7 +404,14 @@ func getInfoFromPcatWeb() {
 
 				globalData.Store("WiFiClientsCount", info.WiFiClientsCount)
 				globalData.Store("WiFiInterfaces", info.WiFiInterfaces)
-				globalData.Store("PublicIP", info.PublicIP)
+				// Public / local WAN IPs: prefer the web's live fields (pcat-manager-web
+				// now flushes wan_ip the moment there is no usable uplink and
+				// re-probes on cable plug). Fall back to legacy public_ip key.
+				pubIP := info.WanIP
+				if pubIP == "" {
+					pubIP = info.PublicIP
+				}
+				applyWebPublicIP(pubIP, info.WanIPv6, info.LocalWanIP, info.ActiveEgress)
 				globalData.Store("UpSpeedBps", info.UpSpeedBps)
 				globalData.Store("DownSpeedBps", info.DownSpeedBps)
 				// OS version from pcat-manager-web is authoritative on OpenWrt.
@@ -824,18 +839,11 @@ func collectNetworkData(cfg Config) {
 		globalData.Store("LAN_IP", localIP)
 	}
 
-	// WAN IP address (local WAN interface IP)
-	wanIP, err := getWanIPv4()
-	if err != nil {
-		fmt.Printf("Could not get WAN IP: %v\n", err)
-		globalData.Store("WAN_IP", "N/A")
-		wanIP = "N/A"
-	} else {
-		globalData.Store("WAN_IP", wanIP)
-	}
-
-	// Public IPv4/IPv6 (cached; see updatePublicIPs).
-	updatePublicIPs(wanIP)
+	// WAN IP + public IP: collectLinkStatus owns the fast path when the
+	// screen is awake; this minute-cadence pass is the backstop (and the
+	// only path while dark) so wake never shows a 15-minute-old public IP
+	// from a previous uplink.
+	applyLocalNetworkIPs()
 
 	// SSID rows (page 3). When pcat-manager-web is up it already populated
 	// SSID/SSID2 from its per-radio wifi_interfaces (which knows onboard vs PCIe
@@ -980,30 +988,127 @@ func (r *pingRow) publish(pingMs int64) {
 }
 
 // Public IPs only change when the upstream connection does, so they are
-// cached: refreshed at startup, when the local WAN IP changes, or after
-// publicIPRefreshInterval — not on every collect cycle. Fetching them every
-// cycle kept the modem radio out of its low-power state around the clock and
-// was the single largest battery cost of the app.
+// cached: refreshed at startup, when the local WAN IP / egress class changes,
+// or after publicIPRefreshInterval — not on every collect cycle. Fetching
+// them every cycle kept the modem radio out of its low-power state around the
+// clock and was the single largest battery cost of the app.
+//
+// Offline (no usable default route) explicitly flushes the displayed value so
+// a yanked cable does not leave the previous public IP on the LCD. Coming
+// back online forces a re-probe instead of waiting out the 15-minute cache.
 const publicIPRefreshInterval = 15 * time.Minute
 
 var (
-	publicIPMu        sync.Mutex
-	publicIPLastFetch time.Time
-	publicIPWanBasis  string
+	publicIPMu         sync.Mutex
+	publicIPLastFetch  time.Time
+	publicIPWanBasis   string
+	publicIPEgress     string
+	publicIPFetching   bool
+	publicIPHadOnline  bool
 )
 
-// updatePublicIPs stores PUBLIC_IP and PublicIPv6, hitting the network only
-// when the cache is stale or the WAN IP it was fetched behind has changed.
-// After a failed IPv4 fetch the next retry is allowed in 30s instead of a
-// full interval, so a WAN that just came up doesn't show N/A for 15 minutes.
-func updatePublicIPs(wanIP string) {
+// flushPublicIPs clears the displayed public addresses and the cache basis so
+// the next online transition re-probes immediately.
+func flushPublicIPs() {
 	publicIPMu.Lock()
+	publicIPWanBasis = ""
+	publicIPEgress = ""
+	publicIPLastFetch = time.Time{}
+	publicIPHadOnline = false
+	publicIPMu.Unlock()
+	globalData.Store("PUBLIC_IP", "N/A")
+	globalData.Store("PublicIP", "N/A")
+	globalData.Store("PublicIPv6", "0.0.0.0")
+}
+
+// applyWebPublicIP mirrors pcat-manager-web's live wan_ip into the LCD keys.
+// Empty + no egress means offline (flush); empty with egress means "still
+// probing" — leave the local cache alone so a concurrent local fetch can fill
+// it. Non-empty adopts the web value and freezes the local cache timer.
+func applyWebPublicIP(wanIP, wanIPv6, localWanIP, egress string) {
+	if egress == "" || (wanIP == "" && localWanIP == "") {
+		// Offline (or web has not resolved anything and reports no path):
+		// clear so the LCD does not keep a previous uplink's address.
+		if egress == "" {
+			flushPublicIPs()
+			if localWanIP == "" {
+				globalData.Store("WAN_IP", "N/A")
+			}
+		}
+		return
+	}
+	if localWanIP != "" {
+		globalData.Store("WAN_IP", localWanIP)
+	}
+	if wanIP != "" {
+		globalData.Store("PUBLIC_IP", wanIP)
+		globalData.Store("PublicIP", wanIP)
+		publicIPMu.Lock()
+		publicIPLastFetch = time.Now()
+		publicIPWanBasis = localWanIP
+		publicIPEgress = egress
+		publicIPHadOnline = true
+		publicIPMu.Unlock()
+	}
+	if wanIPv6 != "" {
+		globalData.Store("PublicIPv6", wanIPv6)
+	}
+}
+
+// applyLocalNetworkIPs refreshes WAN_IP / PUBLIC_IP from the kernel (used when
+// pcat-manager-web is down, and as a fast path from collectLinkStatus).
+func applyLocalNetworkIPs() {
+	dev := getDefaultRouteDev()
+	egress, conn, _ := classifyEgress(dev)
+	// Keep the top-bar icon honest even when the web dashboard poll is on a
+	// 60s cadence (any page other than page 0, or screen dark).
+	globalData.Store("ActiveEgress", egress)
+	globalData.Store("GatewayDevice", conn)
+
+	wanIP, err := getWanIPv4()
+	if err != nil || wanIP == "" || wanIP == "N/A" || egress == "" {
+		globalData.Store("WAN_IP", "N/A")
+		flushPublicIPs()
+		return
+	}
+	globalData.Store("WAN_IP", wanIP)
+	updatePublicIPs(wanIP, egress)
+}
+
+// collectLinkStatus is the cheap, always-on link watcher: carrier-aware
+// default route + public-IP flush/reprobe. Runs every few seconds while the
+// screen is awake so unplug/plug is visible on the top bar and PUBLIC IP row
+// without waiting for the page-0 / 60s collectors.
+func collectLinkStatus() {
+	applyLocalNetworkIPs()
+}
+
+// updatePublicIPs stores PUBLIC_IP and PublicIPv6, hitting the network only
+// when the cache is stale, the WAN IP / egress class it was fetched behind has
+// changed, or we just came back online. After a failed IPv4 fetch the next
+// retry is allowed in 30s instead of a full interval, so a WAN that just came
+// up doesn't show N/A for 15 minutes.
+func updatePublicIPs(wanIP, egress string) {
+	if wanIP == "" || wanIP == "N/A" || egress == "" {
+		flushPublicIPs()
+		return
+	}
+
+	publicIPMu.Lock()
+	cameOnline := !publicIPHadOnline
 	needFetch := publicIPLastFetch.IsZero() ||
 		time.Since(publicIPLastFetch) >= publicIPRefreshInterval ||
-		wanIP != publicIPWanBasis
-	if needFetch {
+		wanIP != publicIPWanBasis ||
+		egress != publicIPEgress ||
+		cameOnline
+	if needFetch && !publicIPFetching {
+		publicIPFetching = true
 		publicIPLastFetch = time.Now()
 		publicIPWanBasis = wanIP
+		publicIPEgress = egress
+		publicIPHadOnline = true
+	} else {
+		needFetch = false
 	}
 	publicIPMu.Unlock()
 	if !needFetch {
@@ -1014,8 +1119,10 @@ func updatePublicIPs(wanIP string) {
 	if publicIP, err := getPublicIPv4(); err != nil {
 		fmt.Printf("Could not get public IP: %v\n", err)
 		globalData.Store("PUBLIC_IP", "N/A")
+		globalData.Store("PublicIP", "N/A")
 	} else {
 		globalData.Store("PUBLIC_IP", publicIP)
+		globalData.Store("PublicIP", publicIP)
 		fetchedV4 = true
 	}
 
@@ -1026,11 +1133,13 @@ func updatePublicIPs(wanIP string) {
 		globalData.Store("PublicIPv6", ipv6)
 	}
 
+	publicIPMu.Lock()
+	publicIPFetching = false
 	if !fetchedV4 {
-		publicIPMu.Lock()
+		// Retry in 30s: set lastFetch so (now - lastFetch) >= interval - 30s.
 		publicIPLastFetch = time.Now().Add(30 * time.Second).Add(-publicIPRefreshInterval)
-		publicIPMu.Unlock()
 	}
+	publicIPMu.Unlock()
 }
 
 func getSN() (string, error) {
@@ -1986,71 +2095,44 @@ func getLocalIPv4() (string, error) {
 	return "LINK DOWN", nil
 }
 
-// getWanIPv4 returns WAN interface IP from OpenWrt or default route IP on Debian.
+// getWanIPv4 returns the IPv4 address of the interface that currently carries
+// a *usable* default route. Does not fall back to UCI network.wan.ipaddr —
+// that value is a configured leftover and kept the LCD WAN/public-IP rows
+// populated after the cable was unplugged.
 func getWanIPv4() (string, error) {
-	if isOpenWRT() {
-		// Try to get WAN IP from uci network.wan.ipaddr first
-		out, err := secureExecCommand("uci", "get", "network.wan.ipaddr")
+	dev := getDefaultRouteDev()
+	if dev == "" {
+		return "N/A", fmt.Errorf("no usable default route")
+	}
+	iface, err := net.InterfaceByName(dev)
+	if err == nil {
+		addrs, err := iface.Addrs()
 		if err == nil {
-			wanIP := strings.TrimSpace(string(out))
-			if net.ParseIP(wanIP) != nil && net.ParseIP(wanIP).To4() != nil {
-				return wanIP, nil
-			}
-		}
-
-		// Fallback: try to get IP from wan interface
-		candidates := []string{"wan", "eth0", "wwan0"}
-		for _, name := range candidates {
-			iface, err := net.InterfaceByName(name)
-			if err != nil {
-				continue
-			}
-			if iface.Flags&net.FlagUp == 0 {
-				continue
-			}
-			addrs, err := iface.Addrs()
-			if err != nil {
-				continue
-			}
 			for _, addr := range addrs {
 				if ipnet, ok := addr.(*net.IPNet); ok {
-					if ip4 := ipnet.IP.To4(); ip4 != nil {
+					if ip4 := ipnet.IP.To4(); ip4 != nil && !ip4.IsLoopback() {
 						return ip4.String(), nil
 					}
 				}
 			}
 		}
-
-		// Final fallback: use ip route to find WAN IP
-		out, err = secureExecCommand("ip", "route", "get", "1.1.1.1")
-		if err == nil {
-			lines := strings.Split(string(out), "\n")
-			for _, line := range lines {
-				fields := strings.Fields(line)
-				for i, field := range fields {
-					if field == "src" && i+1 < len(fields) {
-						return fields[i+1], nil
-					}
-				}
-			}
-		}
-	} else {
-		// Debian/Ubuntu: get source IP for default route
-		out, err := secureExecCommand("ip", "route", "get", "1.1.1.1")
-		if err != nil {
-			return "", err
-		}
-		lines := strings.Split(string(out), "\n")
-		for _, line := range lines {
-			fields := strings.Fields(line)
-			for i, field := range fields {
-				if field == "src" && i+1 < len(fields) {
+	}
+	// Fallback: ask the kernel for the src it would use to a public host.
+	// Only trust it when we already have a usable default route (above).
+	out, err := secureExecCommand("ip", "route", "get", "1.1.1.1")
+	if err != nil {
+		return "N/A", err
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		for i, field := range fields {
+			if field == "src" && i+1 < len(fields) {
+				if ip := net.ParseIP(fields[i+1]); ip != nil && ip.To4() != nil {
 					return fields[i+1], nil
 				}
 			}
 		}
 	}
-
 	return "N/A", fmt.Errorf("WAN IP not found")
 }
 

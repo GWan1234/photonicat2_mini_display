@@ -8,9 +8,13 @@ func TestClassifyEgress(t *testing.T) {
 	}{
 		{"wwan0", "mobile", "mobile", "Cell"},
 		{"usb0", "mobile", "mobile", "Cell"},
-		{"ppp0", "mobile", "mobile", "Cell"},
+		// PPPoE over the wired WAN is still the WAN slot (matches
+		// pcat-manager-web get_active_egress), not cellular.
+		{"ppp0", "wan", "wired", "Eth"},
+		{"pppoe-wan", "wan", "wired", "Eth"},
 		{"wlan0", "wifi", "wifi", "WiFi"},
 		{"wlp3s0", "wifi", "wifi", "WiFi"},
+		{"phy0-sta0", "wifi", "wifi", "WiFi"},
 		{"eth0", "wan", "wired", "Eth"},
 		{"end1", "wan", "wired", "Eth"},
 		{"br-lan", "wan", "wired", "Eth"},

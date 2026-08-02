@@ -97,20 +97,80 @@ func collectLinuxFallbackData() {
 	collectVnstatUsage(dev)
 }
 
-// getDefaultRouteDev returns the interface carrying the default route ("" when
-// there is none).
+// netdevHasCarrier reports whether a physical ethernet-style netdev currently
+// has link. Returns true for non-eth/unknown devices (we cannot tell) so
+// cellular/wifi routes are never filtered out by this check.
+func netdevHasCarrier(dev string) bool {
+	if dev == "" {
+		return false
+	}
+	// Only eth* has a meaningful carrier file for our purposes. ppp* is the
+	// PPPoE WAN path and depends on eth0 underneath.
+	check := dev
+	if strings.HasPrefix(dev, "ppp") {
+		check = "eth0"
+	}
+	if !strings.HasPrefix(check, "eth") {
+		return true
+	}
+	b, err := os.ReadFile("/sys/class/net/" + check + "/carrier")
+	if err != nil {
+		// Interface admin-down or missing: treat as no link.
+		return false
+	}
+	return strings.TrimSpace(string(b)) == "1"
+}
+
+// getDefaultRouteDev returns the interface carrying the best *usable* default
+// route ("" when none). Skips eth routes without carrier so a yanked cable
+// whose demoted default route still lingers does not keep the top bar on
+// ethernet / leave a stale public-IP basis.
 func getDefaultRouteDev() string {
 	out, err := secureExecCommand("ip", "route", "show", "default")
 	if err != nil {
 		return ""
 	}
-	fields := strings.Fields(string(out))
-	for i, f := range fields {
-		if f == "dev" && i+1 < len(fields) {
-			return fields[i+1]
+	type cand struct {
+		metric int
+		dev    string
+	}
+	var cands []cand
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		// "default via … dev eth0 metric 10" or "default dev eth0"
+		if fields[0] != "default" {
+			continue
+		}
+		dev := ""
+		metric := 0
+		for i, f := range fields {
+			if f == "dev" && i+1 < len(fields) {
+				dev = fields[i+1]
+			}
+			if f == "metric" && i+1 < len(fields) {
+				if m, err := strconv.Atoi(fields[i+1]); err == nil {
+					metric = m
+				}
+			}
+		}
+		if dev == "" || !netdevHasCarrier(dev) {
+			continue
+		}
+		cands = append(cands, cand{metric: metric, dev: dev})
+	}
+	if len(cands) == 0 {
+		return ""
+	}
+	best := cands[0]
+	for _, c := range cands[1:] {
+		if c.metric < best.metric {
+			best = c
 		}
 	}
-	return ""
+	return best.dev
 }
 
 // classifyEgress maps a default-route interface name onto the egress/
@@ -122,6 +182,11 @@ func classifyEgress(dev string) (egress, conn, label string) {
 		return "", "", "-"
 	case strings.HasPrefix(dev, "wwan"), strings.HasPrefix(dev, "usb"),
 		strings.HasPrefix(dev, "ppp"), strings.HasPrefix(dev, "wwx"):
+		// ppp without eth carrier is already filtered by getDefaultRouteDev;
+		// remaining ppp is still the wired WAN slot (PPPoE), not cellular.
+		if strings.HasPrefix(dev, "ppp") {
+			return "wan", "wired", "Eth"
+		}
 		return "mobile", "mobile", "Cell"
 	// wl* is the Debian shape (wlan0/wlp1s0); phy*-sta* is the OpenWrt STA
 	// netdev (phy1-sta0). Missing the latter made the boot fallback call the

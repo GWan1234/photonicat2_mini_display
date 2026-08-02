@@ -89,6 +89,11 @@ const (
 	INTERVAL_PAGE0_ACTIVE = 500 * time.Millisecond
 	INTERVAL_PAGE0_IDLE   = INTERVAL_DATA_COLLECT
 	INTERVAL_SMS_COLLECT  = INTERVAL_DATA_COLLECT
+	// Link status (carrier-aware egress + public-IP flush/reprobe): fast while
+	// the screen is awake so unplug/plug updates the top-bar icon and PUBLIC
+	// IP row within a couple of seconds on any page; relaxed when dark.
+	INTERVAL_LINK_ACTIVE = 2 * time.Second
+	INTERVAL_LINK_IDLE   = 30 * time.Second
 
 	ETC_USER_CONFIG_PATH   = "/etc/pcat2_mini_display-user_config.json"
 	ETC_CONFIG_PATH        = "/etc/pcat2_mini_display-config.json"
@@ -195,6 +200,7 @@ var (
 		make(chan struct{}, 1), // pcat-web
 		make(chan struct{}, 1), // WAN speed
 	}
+	linkReschedule = make(chan struct{}, 1)
 
 	baseFPS    = DEFAULT_FPS
 	desiredFPS = DEFAULT_FPS
@@ -573,6 +579,8 @@ func updateIntervals() {
 	// Idle<->active flips page 0's cadence between 2 Hz and 1 minute; wake the
 	// page-0 collectors so the change takes effect immediately.
 	signalPage0Reschedule()
+	// Link watcher also accelerates on wake so the top-bar icon is current.
+	signalLinkReschedule()
 }
 
 // currentPingInterval returns 1s (1 Hz) when the screen is awake and the
@@ -603,6 +611,15 @@ func currentPage0Interval() time.Duration {
 		return INTERVAL_PAGE0_ACTIVE
 	}
 	return INTERVAL_PAGE0_IDLE
+}
+
+// currentLinkInterval is 2s while the screen is awake (any page) so cable
+// plug/unplug updates ActiveEgress + PUBLIC_IP promptly; 30s while dark.
+func currentLinkInterval() time.Duration {
+	if idleState != STATE_IDLE {
+		return INTERVAL_LINK_ACTIVE
+	}
+	return INTERVAL_LINK_IDLE
 }
 
 // isPage0 reports whether the given combined page index is cfg page 0.
@@ -665,6 +682,13 @@ func signalPage0Reschedule() {
 		case ch <- struct{}{}:
 		default:
 		}
+	}
+}
+
+func signalLinkReschedule() {
+	select {
+	case linkReschedule <- struct{}{}:
+	default:
 	}
 }
 
@@ -941,6 +965,10 @@ func main() {
 	})
 	startPageSensitiveCollector(currentPage0Interval, page0Reschedule[2], nil, getInfoFromPcatWeb)
 	startPageSensitiveCollector(currentPage0Interval, page0Reschedule[3], nil, collectWANNetworkSpeed)
+	// Carrier-aware egress + public-IP flush/reprobe: every 2s while awake on
+	// any page (not only page 0), so unplug drops the eth icon / PUBLIC IP
+	// promptly and plug-in re-probes without waiting for the 60s web poll.
+	startPageSensitiveCollector(currentLinkInterval, linkReschedule, nil, collectLinkStatus)
 
 	go collectFixedData()
 	go getSmsPages()
