@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>photonicat2 mini display — theme preview</title>
+<style>
+  body { background: #14161a; color: #ccc; font-family: -apple-system, "Segoe UI", sans-serif;
+         display: flex; flex-wrap: wrap; gap: 28px; justify-content: center; padding: 32px; }
+  .panel { width: 172px; background: #000; border-radius: 14px; padding: 16px 12px;
+           box-shadow: 0 0 0 4px #2a2d33, 0 8px 30px rgba(0,0,0,.6);
+           font-family: "SF Mono", Menlo, monospace; }
+  .panel h2 { color: #888; font-family: inherit; font-size: 12px; font-weight: 600;
+              text-align: center; margin: 0 0 12px; letter-spacing: .5px; }
+  .lab { font-size: 9px; margin: 10px 0 1px; letter-spacing: .5px; }
+  .val { font-size: 26px; font-weight: 700; line-height: 1.05; }
+  .val small { font-size: 10px; font-weight: 400; }
+  .info { font-size: 10px; }
+  .sub { font-size: 8px; text-align: right; }
+  hr { border: 0; border-top: 1px solid #333; margin: 10px 0; }
+</style>
+</head>
+<body>
+<script>
+const themes = {
+  mono_classic: { primary: [255,229,0],  accent: [255,229,0],  data: [255,229,255], subtle: [255,255,255] },
+  neon_cyber:   { primary: [0,229,255],  accent: [255,64,160], data: [225,242,255], subtle: [160,190,215] },
+  aurora:       { primary: [70,235,145], accent: [80,170,255], data: [215,255,235], subtle: [150,210,185] },
+  sunset_synth: { primary: [255,160,40], accent: [185,115,255], data: [255,235,215], subtle: [230,195,165] },
+};
+const rgb = c => `rgb(${c.join(",")})`;
+for (const [name, p] of Object.entries(themes)) {
+  const el = document.createElement("div");
+  el.className = "panel";
+  el.innerHTML = `
+    <h2>${name}</h2>
+    <div class="lab" style="color:${rgb(p.accent)}">WAN SPEED UP</div>
+    <div class="val" style="color:${rgb(p.primary)}">42.7<small> Mbps</small></div>
+    <div class="lab" style="color:${rgb(p.accent)}">WAN SPEED DOWN</div>
+    <div class="val" style="color:${rgb(p.primary)}">128.3<small> Mbps</small></div>
+    <div class="sub" style="color:${rgb(p.subtle)}">100%</div>
+    <hr>
+    <div class="lab" style="color:${rgb(p.accent)}">PUBLIC IP</div>
+    <div class="info" style="color:${rgb(p.data)}">203.0.113.57</div>
+    <div class="lab" style="color:${rgb(p.accent)}">SSID — ONBOARD</div>
+    <div class="info" style="color:${rgb(p.data)}">photonicat-5G</div>
+    <hr>
+    <div class="lab" style="color:${rgb(p.accent)}">PING 1.1.1.1</div>
+    <div class="val" style="color:${rgb(p.primary)}">12<small> ms</small></div>`;
+  document.body.appendChild(el);
+}
+</script>
+</body>
+</html>

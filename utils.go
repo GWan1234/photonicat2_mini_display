@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"image"
+	"image/color"
 	"log"
 	"math"
 	"os"
@@ -176,20 +177,43 @@ func getFontFaceForText(baseFontName string, text string) (font.Face, int, error
 
 // Pre-allocated clear buffer for efficient frame clearing
 var clearBuffer []uint8
+var clearBufferColor color.RGBA = PCAT_BLACK
+
+// screenBgColor is the background frames are cleared to. Defaults to black;
+// set from display_template.bg_color on every config (re)merge.
+var screenBgColor color.RGBA = PCAT_BLACK
+
+// setScreenBgColor updates the clear color used by clearFrame. Accepts an
+// [R,G,B] slice from the config; anything else resets to black. A change
+// invalidates the top bar / footer frame caches — their content strings don't
+// cover the background, so without this they would keep their old-color
+// frames until the clock or page happened to change.
+func setScreenBgColor(rgb []int) {
+	c := PCAT_BLACK
+	if len(rgb) >= 3 {
+		c = color.RGBA{uint8(rgb[0]), uint8(rgb[1]), uint8(rgb[2]), 255}
+	}
+	if c != screenBgColor {
+		screenBgColor = c
+		cacheTopBarStr = ""
+		cacheFooterStr = ""
+	}
+}
 
 func clearFrame(frame *image.RGBA, width int, height int) {
 	pixelsNeeded := width * height * 4
 
-	// Initialize clear buffer once with optimal size
-	if len(clearBuffer) < pixelsNeeded {
+	// (Re)initialize the clear buffer when it is too small or the background
+	// color changed since it was filled.
+	if len(clearBuffer) < pixelsNeeded || clearBufferColor != screenBgColor {
 		// Allocate larger buffer to handle future larger frames
 		bufferSize := max(pixelsNeeded, PCAT2_LCD_WIDTH*PCAT2_LCD_HEIGHT*4)
 		clearBuffer = make([]uint8, bufferSize)
-		// Pre-fill with opaque black pixels using efficient pattern
-		pattern := []uint8{0, 0, 0, 255} // R, G, B, A
+		pattern := []uint8{screenBgColor.R, screenBgColor.G, screenBgColor.B, 255}
 		for i := 0; i < len(clearBuffer); i += 4 {
 			copy(clearBuffer[i:i+4], pattern)
 		}
+		clearBufferColor = screenBgColor
 	}
 
 	// Ensure frame buffer is correct size
@@ -796,6 +820,14 @@ func mergeConfigs() error {
 	   }*/
 
 	cfgNumPages = len(cfg.DisplayTemplate.Elements)
+
+	// Apply the (possibly user-themed) background color to the frame clearers.
+	setScreenBgColor(cfg.DisplayTemplate.BgColor)
+
+	// Bump the config version so middle-page fingerprints from before this
+	// merge never match: element colors are not part of the fingerprint, so a
+	// pure recolor (theme change) on a static page would otherwise be skipped.
+	configVersion++
 
 	// Initialize totalNumPages based on ShowSms setting
 	if cfg.ShowSms {

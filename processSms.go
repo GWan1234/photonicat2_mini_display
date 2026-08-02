@@ -396,7 +396,7 @@ func drawSmsFrJson(jsonContent string, savePng bool, drawPageNum bool) (imgs []i
 		// Use pooled image buffer
 		img := smsImagePool.Get().(*image.RGBA)
 		// Clear the image before use
-		draw.Draw(img, img.Bounds(), &image.Uniform{color.Black}, image.Point{}, draw.Src)
+		draw.Draw(img, img.Bounds(), &image.Uniform{screenBgColor}, image.Point{}, draw.Src)
 
 		fc.SetDst(img)
 		fc.SetClip(img.Bounds())

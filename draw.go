@@ -40,6 +40,9 @@ var (
 	cacheTopBar *image.RGBA
 	cacheFooterStr string
 	cacheFooter *image.RGBA
+	// configVersion increments on every config (re)merge; it is part of the
+	// middle-page fingerprint so recolors (themes) invalidate skip caches.
+	configVersion int
 )
 
 //---------------- Drawing Functions ----------------
@@ -199,6 +202,8 @@ func middlePageFingerprint(cfg *Config, isSMS bool, pageIdx int) string {
 	}
 	var b strings.Builder
 	b.Grow(256)
+	b.WriteString("v")
+	b.WriteString(strconv.Itoa(configVersion))
 	b.WriteString("p")
 	b.WriteString(strconv.Itoa(pageIdx))
 	page := cfg.DisplayTemplate.Elements["page"+strconv.Itoa(pageIdx)]
@@ -861,7 +866,35 @@ func rasterizeIconAA(icon *oksvg.SvgIcon, destW, destH, aaScale int) *image.RGBA
 	return downscaleBox(rgba, destW, destH)
 }
 
-func drawSVG(frame *image.RGBA, svgPath string, x0, y0, targetWidth, targetHeight int) error {
+// tintIconImage recolors a rasterized icon to clr. Brightness is scaled
+// against the asset yellow (#FDE021, luma ≈211): full-yellow pixels become
+// exactly clr, black detail (cpu/mem pin fills) stays black, and antialiased
+// edges keep their ramp. Pixels are premultiplied RGBA, so scaling by the
+// premultiplied luma also carries the alpha ramp through correctly.
+func tintIconImage(src *image.RGBA, clr color.RGBA) *image.RGBA {
+	const refLuma = 211.0
+	dst := image.NewRGBA(src.Bounds())
+	for i := 0; i+3 < len(src.Pix); i += 4 {
+		a := src.Pix[i+3]
+		if a == 0 {
+			continue
+		}
+		luma := 0.299*float64(src.Pix[i]) + 0.587*float64(src.Pix[i+1]) + 0.114*float64(src.Pix[i+2])
+		f := luma / refLuma
+		if f > 1 {
+			f = 1
+		}
+		dst.Pix[i] = uint8(float64(clr.R)*f + 0.5)
+		dst.Pix[i+1] = uint8(float64(clr.G)*f + 0.5)
+		dst.Pix[i+2] = uint8(float64(clr.B)*f + 0.5)
+		dst.Pix[i+3] = a
+	}
+	return dst
+}
+
+// drawSVGTinted is drawSVG with an optional recolor: a nil tint draws the
+// SVG's own colors. Tinted rasters are cached alongside the plain ones.
+func drawSVGTinted(frame *image.RGBA, svgPath string, x0, y0, targetWidth, targetHeight int, tint *color.RGBA) error {
 	// Resolve intrinsic size when the caller leaves a dimension at 0.
 	svgFile, err := os.Open(svgPath)
 	if err != nil {
@@ -890,15 +923,25 @@ func drawSVG(frame *image.RGBA, svgPath string, x0, y0, targetWidth, targetHeigh
 
 	// Cache key includes AA scale so old 1:1 bitmaps are not reused.
 	cacheKey := fmt.Sprintf("%s_%d_%d_aa%d", svgPath, targetWidth, targetHeight, barFrameAAScale)
+	if tint != nil {
+		cacheKey += fmt.Sprintf("_t%02x%02x%02x", tint.R, tint.G, tint.B)
+	}
 	if cachedImg, ok := svgCache[cacheKey]; ok {
 		copyImageToImageAt(frame, cachedImg, x0, y0)
 		return nil
 	}
 
 	img := rasterizeIconAA(icon, targetWidth, targetHeight, barFrameAAScale)
+	if tint != nil {
+		img = tintIconImage(img, *tint)
+	}
 	svgCache[cacheKey] = img
 	copyImageToImageAt(frame, img, x0, y0)
 	return nil
+}
+
+func drawSVG(frame *image.RGBA, svgPath string, x0, y0, targetWidth, targetHeight int) error {
+	return drawSVGTinted(frame, svgPath, x0, y0, targetWidth, targetHeight, nil)
 }
 
 // renderSvgBytes rasterizes in-memory SVG data at its intrinsic size, so
@@ -1609,11 +1652,20 @@ const (
 	hbarRadius = 5 // also used by drawCpuBars outer frame
 )
 
+// elementFillColor resolves a bar chart's fill from the element's optional
+// [R,G,B] color (set by web color themes), defaulting to the classic yellow.
+func elementFillColor(element DisplayElement) color.RGBA {
+	if len(element.Color) >= 3 {
+		return color.RGBA{uint8(element.Color[0]), uint8(element.Color[1]), uint8(element.Color[2]), 255}
+	}
+	return PCAT_YELLOW
+}
+
 // drawCpuBars renders a framed box of vertical bars — one per CPU core — at
 // (x0, y0) with total size w×h. Fills are clipped to the rounded interior and
 // the grey stroke is drawn last so nothing sits outside the frame; full
 // height fills follow the top inner corner curve via the clip mask.
-func drawCpuBars(frame *image.RGBA, x0, y0, w, h int, usages []float64) {
+func drawCpuBars(frame *image.RGBA, x0, y0, w, h int, usages []float64, fill color.RGBA) {
 	numCores := len(usages)
 	if numCores == 0 || w <= 0 || h <= 0 {
 		return
@@ -1622,6 +1674,7 @@ func drawCpuBars(frame *image.RGBA, x0, y0, w, h int, usages []float64) {
 	// "v5": inner clip mask + stroke-on-top (no fill outside rounded frame).
 	var keyBuf strings.Builder
 	keyBuf.WriteString("gen:cpubars:v5:")
+	fmt.Fprintf(&keyBuf, "c%02x%02x%02x:", fill.R, fill.G, fill.B)
 	keyBuf.WriteString(strconv.Itoa(w))
 	keyBuf.WriteByte('x')
 	keyBuf.WriteString(strconv.Itoa(h))
@@ -1670,7 +1723,7 @@ func drawCpuBars(frame *image.RGBA, x0, y0, w, h int, usages []float64) {
 					// From bottom of the inner box; top edge is clipped to the
 					// rounded mask so full bars match the frame's top corners.
 					fy := inset + (innerH - fillH)
-					fillRect(layer, bx, fy, barW, fillH, PCAT_YELLOW)
+					fillRect(layer, bx, fy, barW, fillH, fill)
 				}
 			}
 		})
@@ -1698,7 +1751,7 @@ var diskBarLabelFonts = []string{"unit", "tiny", "micro"}
 // centered on it. An SD card that is in the slot but not mounted has no usage
 // to report and draws as an empty bar. Height should match the mem hbar. Works
 // the same on OpenWrt and Debian.
-func drawDiskBars(frame *image.RGBA, x0, y0, w, h int) {
+func drawDiskBars(frame *image.RGBA, x0, y0, w, h int, fill color.RGBA) {
 	if w <= 0 || h <= 0 {
 		return
 	}
@@ -1729,7 +1782,7 @@ func drawDiskBars(frame *image.RGBA, x0, y0, w, h int) {
 	}
 	face, haveFace := pickBarLabelFace(labels, widths, h)
 	for i := range bars {
-		drawHBar(frame, xs[i], y0, widths[i], h, bars[i].pct, "")
+		drawHBar(frame, xs[i], y0, widths[i], h, bars[i].pct, "", fill)
 		if haveFace {
 			drawTinyBarLabel(frame, xs[i]+widths[i]/2, y0+h/2, labels[i], face)
 		}
@@ -1797,10 +1850,10 @@ func drawTinyBarLabel(frame *image.RGBA, cx, cy int, label string, face font.Fac
 	drawTextWithAura(frame, label, cx, cy, face, PCAT_WHITE, PCAT_BLACK)
 }
 
-// hbarFillSVG builds a yellow fill for the horizontal bar.
+// hbarFillSVG builds the fill for the horizontal bar in the given hex color.
 // full=true → all corners use radius fr (seats into the rounded frame at 100%).
 // full=false → left corners rounded to match the track; right edge is sharp.
-func hbarFillSVG(canvasW, canvasH, x, y, fillW, fillH, fr int, full bool) []byte {
+func hbarFillSVG(canvasW, canvasH, x, y, fillW, fillH, fr int, full bool, fillHex string) []byte {
 	var buf bytes.Buffer
 	canvas := svg.New(&buf)
 	canvas.Start(canvasW, canvasH)
@@ -1809,7 +1862,7 @@ func hbarFillSVG(canvasW, canvasH, x, y, fillW, fillH, fr int, full bool) []byte
 		return buf.Bytes()
 	}
 	if full || fr <= 0 {
-		canvas.Roundrect(x, y, fillW, fillH, fr, fr, "fill:"+barFillHex)
+		canvas.Roundrect(x, y, fillW, fillH, fr, fr, "fill:"+fillHex)
 		canvas.End()
 		return buf.Bytes()
 	}
@@ -1827,16 +1880,17 @@ func hbarFillSVG(canvasW, canvasH, x, y, fillW, fillH, fr int, full bool) []byte
 		y0+r,
 		r, r, x0+r, y0,
 	)
-	canvas.Path(d, "fill:"+barFillHex)
+	canvas.Path(d, "fill:"+fillHex)
 	canvas.End()
 	return buf.Bytes()
 }
 
 // drawHBar renders a framed horizontal progress bar at (x0, y0) of size w×h.
-// Yellow fill is rounded to the inner corner radius (right edge matches the
-// frame when full), clipped to the interior, with the grey stroke drawn last.
-// Optional label is centered with a 1px black aura (e.g. "3.2/16GB").
-func drawHBar(frame *image.RGBA, x0, y0, w, h int, pct float64, label string) {
+// The fill (classic yellow, or a theme color) is rounded to the inner corner
+// radius (right edge matches the frame when full), clipped to the interior,
+// with the grey stroke drawn last. Optional label is centered with a 1px
+// black aura (e.g. "3.2/16GB").
+func drawHBar(frame *image.RGBA, x0, y0, w, h int, pct float64, label string, fill color.RGBA) {
 	if w <= 0 || h <= 0 {
 		return
 	}
@@ -1846,9 +1900,10 @@ func drawHBar(frame *image.RGBA, x0, y0, w, h int, pct float64, label string) {
 		pct = 100
 	}
 
+	fillHex := fmt.Sprintf("#%02X%02X%02X", fill.R, fill.G, fill.B)
 	bucket := int(pct)
 	// "v3": inner mask clip + stroke-on-top + matching inner fill radius.
-	cacheKey := "gen:hbar:v3:" + strconv.Itoa(w) + "x" + strconv.Itoa(h) + ":" + strconv.Itoa(bucket)
+	cacheKey := "gen:hbar:v3:c" + fillHex + ":" + strconv.Itoa(w) + "x" + strconv.Itoa(h) + ":" + strconv.Itoa(bucket)
 
 	imageCacheMu.RLock()
 	img, cached := imageCache[cacheKey]
@@ -1880,18 +1935,18 @@ func drawHBar(frame *image.RGBA, x0, y0, w, h int, pct float64, label string) {
 				fr = innerH / 2
 			}
 
-			svgData := hbarFillSVG(w, h, inset, inset, fillW, innerH, fr, full)
+			svgData := hbarFillSVG(w, h, inset, inset, fillW, innerH, fr, full, fillHex)
 			shape := "full"
 			if !full {
 				shape = "sharpR"
 			}
-			fillKey := "gen:hbarfill:aa" + strconv.Itoa(barFrameAAScale) + ":" +
+			fillKey := "gen:hbarfill:aa" + strconv.Itoa(barFrameAAScale) + ":c" + fillHex + ":" +
 				strconv.Itoa(w) + "x" + strconv.Itoa(h) +
 				":fw" + strconv.Itoa(fillW) + ":fh" + strconv.Itoa(innerH) +
 				":r" + strconv.Itoa(fr) + ":i" + strconv.Itoa(inset) + ":" + shape
 			fillImg, err := renderSvgBytesAA(svgData, fillKey, barFrameAAScale)
 			if err != nil {
-				fillRect(layer, inset, inset, fillW, innerH, PCAT_YELLOW)
+				fillRect(layer, inset, inset, fillW, innerH, fill)
 			} else {
 				draw.Draw(layer, layer.Bounds(), fillImg, image.Point{}, draw.Over)
 			}
@@ -2593,12 +2648,19 @@ func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
 				}
 			}
 
+			// Optional per-element recolor (set by web color themes): tint the
+			// icon while keeping dark detail and antialiasing.
+			var tint *color.RGBA
+			if len(element.Color) >= 3 {
+				tint = &color.RGBA{uint8(element.Color[0]), uint8(element.Color[1]), uint8(element.Color[2]), 255}
+			}
+
 			fullPath := assetsPrefix + "/" + element.IconPath
 			// SVGs: rasterize at the requested size so size.width/height actually
 			// scale (loadImage only renders at intrinsic viewBox size).
 			if strings.HasSuffix(strings.ToLower(element.IconPath), ".svg") {
 				tw, th := sz.Width, sz.Height
-				if err := drawSVG(frame, fullPath, iconX, element.Position.Y, tw, th); err != nil {
+				if err := drawSVGTinted(frame, fullPath, iconX, element.Position.Y, tw, th, tint); err != nil {
 					log.Printf("Error drawing SVG icon %s: %v", element.IconPath, err)
 				}
 				continue
@@ -2608,6 +2670,15 @@ func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
 			if err != nil {
 				log.Printf("Error loading icon from %s: %v", element.IconPath, err)
 				continue
+			}
+			if tint != nil {
+				tintKey := fmt.Sprintf("%s_t%02x%02x%02x", fullPath, tint.R, tint.G, tint.B)
+				if cached, ok := svgCache[tintKey]; ok {
+					iconImg = cached
+				} else {
+					iconImg = tintIconImage(iconImg, *tint)
+					svgCache[tintKey] = iconImg
+				}
 			}
 			if sz.Width == 0 {
 				sz.Width = iw
@@ -2732,7 +2803,7 @@ func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
 			if len(usages) == 0 {
 				usages = make([]float64, 8)
 			}
-			drawCpuBars(frame, element.Position.X, element.Position.Y, sz.Width, sz.Height, usages)
+			drawCpuBars(frame, element.Position.X, element.Position.Y, sz.Width, sz.Height, usages, elementFillColor(element))
 
 		case "hbar":
 			// Framed horizontal progress bar driven by a 0-100 data key
@@ -2767,7 +2838,7 @@ func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
 			if label != "" && element.Units != "" {
 				label = label + element.Units
 			}
-			drawHBar(frame, element.Position.X, element.Position.Y, sz.Width, sz.Height, pct, label)
+			drawHBar(frame, element.Position.X, element.Position.Y, sz.Width, sz.Height, pct, label, elementFillColor(element))
 
 		case "disk_bars":
 			// Onboard + optional NVMe usage bars, same height as mem, no text.
@@ -2779,7 +2850,7 @@ func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
 			} else if element.Size2 != nil {
 				sz = *element.Size2
 			}
-			drawDiskBars(frame, element.Position.X, element.Position.Y, sz.Width, sz.Height)
+			drawDiskBars(frame, element.Position.X, element.Position.Y, sz.Width, sz.Height, elementFillColor(element))
 
 		default:
 			log.Printf("Unknown element type: %s", element.Type)

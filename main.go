@@ -364,6 +364,9 @@ type GraphConfig struct {
 // DisplayTemplate holds pages of elements.
 type DisplayTemplate struct {
 	Elements map[string][]DisplayElement `json:"elements"`
+	// BgColor is an optional [R,G,B] background for the whole screen. When
+	// absent or invalid the background stays black.
+	BgColor []int `json:"bg_color,omitempty"`
 }
 
 // Config represents the overall config JSON.
@@ -379,6 +382,9 @@ type Config struct {
 	SmsLimitForScreen                int                 `json:"sms_limit_for_screen"`
 	CustomMetrics                    CustomMetricsConfig `json:"custom_metrics,omitempty"`
 	PublicIPLookup                   PublicIPLookup      `json:"public_ip_lookup,omitempty"`
+	// ColorTheme is the name of the color theme the web UI last applied. The
+	// firmware only round-trips it so the UI can highlight the active theme.
+	ColorTheme string `json:"color_theme,omitempty"`
 }
 
 // PublicIPSource is one configurable endpoint used to resolve the public IP.

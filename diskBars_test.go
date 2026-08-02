@@ -64,7 +64,7 @@ func TestDiskBarsCountFollowsPresentDisks(t *testing.T) {
 			globalData.Store("DiskSDPercent", 80.0)
 
 			frame := image.NewRGBA(image.Rect(0, 0, 172, 320))
-			drawDiskBars(frame, x0, y0, w, h)
+			drawDiskBars(frame, x0, y0, w, h, PCAT_YELLOW)
 
 			if got := countDiskBarRuns(frame, x0, y0, w, h); got != tc.want {
 				t.Errorf("drew %d bars, want %d", got, tc.want)
@@ -85,7 +85,7 @@ func TestDiskBarsUnmountedSDDrawsEmptyBar(t *testing.T) {
 	globalData.Store("DiskSDPercent", 0.0)
 
 	frame := image.NewRGBA(image.Rect(0, 0, 172, 320))
-	drawDiskBars(frame, x0, y0, w, h)
+	drawDiskBars(frame, x0, y0, w, h, PCAT_YELLOW)
 
 	if got := countDiskBarRuns(frame, x0, y0, w, h); got != 2 {
 		t.Fatalf("drew %d bars, want 2 (eMMC + empty SD)", got)
@@ -113,7 +113,7 @@ func TestDiskBarsTooNarrowFallsBackToOneBar(t *testing.T) {
 	globalData.Store("DiskSDPercent", 80.0)
 
 	frame := image.NewRGBA(image.Rect(0, 0, 172, 320))
-	drawDiskBars(frame, 5, 104, 10, 12)
+	drawDiskBars(frame, 5, 104, 10, 12, PCAT_YELLOW)
 
 	if got := countDiskBarRuns(frame, 5, 104, 10, 12); got != 1 {
 		t.Errorf("drew %d bars in a 10px slot, want 1", got)

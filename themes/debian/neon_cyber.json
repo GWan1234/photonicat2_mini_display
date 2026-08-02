@@ -1,0 +1,734 @@
+{
+    "display_template": {
+        "elements": {
+            "page0": [
+                {
+                    "type": "icon",
+                    "icon_path": "assets/svg/up_trig.svg",
+                    "position": {
+                        "x": 9,
+                        "y": 18
+                    },
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "WAN Speed Up",
+                    "position": {
+                        "x": 23,
+                        "y": 3
+                    },
+                    "font": "huge",
+                    "color": [
+                        0,
+                        229,
+                        255
+                    ],
+                    "units": "Mbps",
+                    "data_key": "WanUP",
+                    "units_font": "unit",
+                    "enable": 1
+                },
+                {
+                    "type": "icon",
+                    "icon_path": "assets/svg/down_trig.svg",
+                    "position": {
+                        "x": 9,
+                        "y": 58
+                    },
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "WAN Speed Down",
+                    "position": {
+                        "x": 23,
+                        "y": 38
+                    },
+                    "font": "huge",
+                    "color": [
+                        0,
+                        229,
+                        255
+                    ],
+                    "units": "Mbps",
+                    "data_key": "WanDOWN",
+                    "units_font": "unit",
+                    "enable": 1
+                },
+                {
+                    "type": "icon",
+                    "icon_path": "assets/svg/hline.svg",
+                    "position": {
+                        "x": 10,
+                        "y": 84
+                    },
+                    "enable": 1
+                },
+                {
+                    "type": "fixed_text",
+                    "label": "Session Data Usage",
+                    "position": {
+                        "x": 10,
+                        "y": 89
+                    },
+                    "font": "tiny",
+                    "color": [
+                        255,
+                        64,
+                        160
+                    ],
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "Session Data Usage",
+                    "position": {
+                        "x": 10,
+                        "y": 101
+                    },
+                    "font": "huge",
+                    "color": [
+                        0,
+                        229,
+                        255
+                    ],
+                    "units": "GB",
+                    "data_key": "SessionDataUsage",
+                    "units_font": "unit",
+                    "enable": 1
+                },
+                {
+                    "type": "fixed_text",
+                    "label": "Monthly Data Usage",
+                    "position": {
+                        "x": 10,
+                        "y": 141
+                    },
+                    "font": "tiny",
+                    "color": [
+                        255,
+                        64,
+                        160
+                    ],
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "Monthly Data Usage",
+                    "position": {
+                        "x": 10,
+                        "y": 152
+                    },
+                    "font": "huge",
+                    "color": [
+                        0,
+                        229,
+                        255
+                    ],
+                    "units": "GB",
+                    "data_key": "MonthlyDataUsage",
+                    "units_font": "unit",
+                    "enable": 1
+                },
+                {
+                    "type": "icon",
+                    "icon_path": "assets/svg/hline.svg",
+                    "position": {
+                        "x": 10,
+                        "y": 198
+                    },
+                    "enable": 1
+                },
+                {
+                    "type": "icon",
+                    "icon_path": "assets/svg/batt.svg",
+                    "position": {
+                        "x": 10,
+                        "y": 210
+                    },
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "Batt",
+                    "position": {
+                        "x": 100,
+                        "y": 204
+                    },
+                    "font": "reg",
+                    "color": [
+                        0,
+                        229,
+                        255
+                    ],
+                    "units": "w",
+                    "data_key": "BatteryWattage",
+                    "units_font": "unit",
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "Batt_v",
+                    "position": {
+                        "x": 35,
+                        "y": 204
+                    },
+                    "font": "reg",
+                    "color": [
+                        0,
+                        229,
+                        255
+                    ],
+                    "units": "v",
+                    "data_key": "BatteryVoltage",
+                    "units_font": "unit",
+                    "enable": 1
+                },
+                {
+                    "type": "icon",
+                    "icon_path": "assets/svg/charge.svg",
+                    "position": {
+                        "x": 10,
+                        "y": 228
+                    },
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "dc",
+                    "position": {
+                        "x": 35,
+                        "y": 228
+                    },
+                    "font": "reg",
+                    "color": [
+                        0,
+                        229,
+                        255
+                    ],
+                    "units": "v",
+                    "data_key": "DCVoltage",
+                    "units_font": "unit",
+                    "enable": 1
+                },
+                {
+                    "type": "graph",
+                    "position": {
+                        "x": 100,
+                        "y": 228
+                    },
+                    "size": {
+                        "width": 60,
+                        "height": 25
+                    },
+                    "enable": 0,
+                    "graph_config": {
+                        "graph_type": "power",
+                        "time_frame_mins": 15
+                    }
+                }
+            ],
+            "page1": [
+                {
+                    "type": "fixed_text",
+                    "label": "ping: [ping_site0]",
+                    "position": {
+                        "x": 6,
+                        "y": 3
+                    },
+                    "font": "tiny",
+                    "color": [
+                        255,
+                        64,
+                        160
+                    ],
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "Ping0",
+                    "position": {
+                        "x": 6,
+                        "y": 17
+                    },
+                    "font": "big",
+                    "color": [
+                        0,
+                        229,
+                        255
+                    ],
+                    "units": "ms",
+                    "data_key": "Ping0",
+                    "units_font": "unit",
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "Rate0",
+                    "position": {
+                        "x": 115,
+                        "y": 23
+                    },
+                    "font": "unit",
+                    "color": [
+                        160,
+                        190,
+                        215
+                    ],
+                    "units": "%",
+                    "data_key": "Ping0Rate",
+                    "units_font": "unit",
+                    "enable": 1
+                },
+                {
+                    "type": "fixed_text",
+                    "label": "ping: [ping_site1]",
+                    "position": {
+                        "x": 6,
+                        "y": 47
+                    },
+                    "font": "tiny",
+                    "color": [
+                        255,
+                        64,
+                        160
+                    ],
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "Ping1",
+                    "position": {
+                        "x": 6,
+                        "y": 61
+                    },
+                    "font": "big",
+                    "color": [
+                        0,
+                        229,
+                        255
+                    ],
+                    "units": "ms",
+                    "data_key": "Ping1",
+                    "units_font": "unit",
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "Rate1",
+                    "position": {
+                        "x": 115,
+                        "y": 68
+                    },
+                    "font": "unit",
+                    "color": [
+                        160,
+                        190,
+                        215
+                    ],
+                    "units": "%",
+                    "data_key": "Ping1Rate",
+                    "units_font": "unit",
+                    "enable": 1
+                },
+                {
+                    "type": "fixed_text",
+                    "label": "LAN IP",
+                    "position": {
+                        "x": 6,
+                        "y": 93
+                    },
+                    "font": "unit",
+                    "color": [
+                        255,
+                        64,
+                        160
+                    ],
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "lan",
+                    "position": {
+                        "x": 6,
+                        "y": 110
+                    },
+                    "font": "tiny",
+                    "color": [
+                        225,
+                        242,
+                        255
+                    ],
+                    "data_key": "LAN_IP",
+                    "units_font": "unit",
+                    "units": "",
+                    "enable": 1
+                },
+                {
+                    "type": "fixed_text",
+                    "label": "WAN IP",
+                    "position": {
+                        "x": 6,
+                        "y": 126
+                    },
+                    "font": "unit",
+                    "color": [
+                        255,
+                        64,
+                        160
+                    ],
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "wan",
+                    "position": {
+                        "x": 6,
+                        "y": 143
+                    },
+                    "font": "tiny",
+                    "color": [
+                        225,
+                        242,
+                        255
+                    ],
+                    "data_key": "WAN_IP",
+                    "units_font": "unit",
+                    "units": "",
+                    "enable": 1
+                },
+                {
+                    "type": "fixed_text",
+                    "label": "PUBLIC IP",
+                    "position": {
+                        "x": 6,
+                        "y": 159
+                    },
+                    "font": "unit",
+                    "color": [
+                        255,
+                        64,
+                        160
+                    ],
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "public",
+                    "position": {
+                        "x": 6,
+                        "y": 176
+                    },
+                    "font": "tiny",
+                    "color": [
+                        225,
+                        242,
+                        255
+                    ],
+                    "data_key": "PUBLIC_IP",
+                    "units_font": "unit",
+                    "units": "",
+                    "enable": 1
+                },
+                {
+                    "type": "fixed_text",
+                    "label": "SSID",
+                    "position": {
+                        "x": 6,
+                        "y": 192
+                    },
+                    "font": "unit",
+                    "color": [
+                        255,
+                        64,
+                        160
+                    ],
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "ssid",
+                    "position": {
+                        "x": 6,
+                        "y": 209
+                    },
+                    "font": "tiny",
+                    "color": [
+                        225,
+                        242,
+                        255
+                    ],
+                    "data_key": "SSID",
+                    "units_font": "unit",
+                    "units": "",
+                    "enable": 1
+                },
+                {
+                    "type": "fixed_text",
+                    "label": "PUBLIC IPv6",
+                    "position": {
+                        "x": 6,
+                        "y": 225
+                    },
+                    "font": "unit",
+                    "color": [
+                        255,
+                        64,
+                        160
+                    ],
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "public6",
+                    "position": {
+                        "x": 6,
+                        "y": 242
+                    },
+                    "font": "tiny",
+                    "color": [
+                        225,
+                        242,
+                        255
+                    ],
+                    "data_key": "PublicIPv6",
+                    "units_font": "unit",
+                    "units": "",
+                    "enable": 1
+                }
+            ],
+            "page2": [
+                {
+                    "type": "icon",
+                    "icon_path": "assets/svg/cpu.svg",
+                    "position": {
+                        "x": 10,
+                        "y": 5
+                    },
+                    "size": {
+                        "width": 16,
+                        "height": 16
+                    },
+                    "enable": 1
+                },
+                {
+                    "type": "cpu_bars",
+                    "position": {
+                        "x": 95,
+                        "y": 3
+                    },
+                    "data_key": "CpuUsages",
+                    "size": {
+                        "width": 70,
+                        "height": 21
+                    },
+                    "enable": 1
+                },
+                {
+                    "type": "fixed_text",
+                    "label": "CPU C\u00b0:",
+                    "position": {
+                        "x": 10,
+                        "y": 28
+                    },
+                    "font": "unit",
+                    "color": [
+                        255,
+                        64,
+                        160
+                    ],
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "CPU Temp",
+                    "position": {
+                        "x": 110,
+                        "y": 28
+                    },
+                    "font": "unit",
+                    "color": [
+                        225,
+                        242,
+                        255
+                    ],
+                    "units": " C",
+                    "data_key": "CpuTemp",
+                    "units_font": "unit",
+                    "enable": 1
+                },
+                {
+                    "type": "icon",
+                    "icon_path": "assets/svg/mem.svg",
+                    "position": {
+                        "x": 10,
+                        "y": 51
+                    },
+                    "size": {
+                        "width": 16,
+                        "height": 16
+                    },
+                    "enable": 1
+                },
+                {
+                    "type": "hbar",
+                    "position": {
+                        "x": 95,
+                        "y": 54
+                    },
+                    "data_key": "MemUsagePercent",
+                    "size": {
+                        "width": 70,
+                        "height": 12
+                    },
+                    "enable": 1
+                },
+                {
+                    "type": "fixed_text",
+                    "label": "Fan RPM:",
+                    "position": {
+                        "x": 10,
+                        "y": 74
+                    },
+                    "font": "unit",
+                    "color": [
+                        255,
+                        64,
+                        160
+                    ],
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "Fan",
+                    "position": {
+                        "x": 110,
+                        "y": 74
+                    },
+                    "font": "unit",
+                    "color": [
+                        225,
+                        242,
+                        255
+                    ],
+                    "units": "",
+                    "data_key": "FanRPM",
+                    "units_font": "unit",
+                    "enable": 1
+                },
+                {
+                    "type": "disk_bars",
+                    "position": {
+                        "x": 10,
+                        "y": 97
+                    },
+                    "size": {
+                        "width": 155,
+                        "height": 12
+                    },
+                    "enable": 1
+                },
+                {
+                    "type": "fixed_text",
+                    "label": "Uptime:",
+                    "position": {
+                        "x": 10,
+                        "y": 120
+                    },
+                    "font": "unit",
+                    "color": [
+                        255,
+                        64,
+                        160
+                    ],
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "Uptime",
+                    "position": {
+                        "x": 10,
+                        "y": 137
+                    },
+                    "font": "thin",
+                    "color": [
+                        225,
+                        242,
+                        255
+                    ],
+                    "data_key": "Uptime",
+                    "units_font": "unit",
+                    "units": "",
+                    "enable": 1
+                },
+                {
+                    "type": "fixed_text",
+                    "label": "Kernel:",
+                    "position": {
+                        "x": 10,
+                        "y": 206
+                    },
+                    "font": "unit",
+                    "color": [
+                        255,
+                        64,
+                        160
+                    ],
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "Kernel",
+                    "position": {
+                        "x": 75,
+                        "y": 209
+                    },
+                    "font": "tiny",
+                    "color": [
+                        225,
+                        242,
+                        255
+                    ],
+                    "data_key": "Kernel",
+                    "units_font": "unit",
+                    "units": "",
+                    "enable": 1
+                },
+                {
+                    "type": "fixed_text",
+                    "label": "SN:",
+                    "position": {
+                        "x": 10,
+                        "y": 229
+                    },
+                    "font": "unit",
+                    "color": [
+                        255,
+                        64,
+                        160
+                    ],
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "SN",
+                    "position": {
+                        "x": 45,
+                        "y": 232
+                    },
+                    "font": "tiny",
+                    "color": [
+                        225,
+                        242,
+                        255
+                    ],
+                    "data_key": "SN",
+                    "units_font": "unit",
+                    "units": "",
+                    "enable": 1
+                }
+            ]
+        }
+    }
+}
