@@ -735,6 +735,146 @@ func main() {
 		addr = fmt.Sprintf("127.0.0.1:%d", *port) // localhost only
 	}
 
+	// Asset paths, the font table and the image cache are just string and
+	// map setup, but every collector below needs them (collectAndDrawSms
+	// builds its font path from assetsPrefix). They move up here with the
+	// collectors; only the actual panel bring-up stays below.
+	//if assetsFolder not exists, use /usr/local/share/pcat2_mini_display
+	if _, err := os.Stat("assets"); os.IsNotExist(err) {
+		assetsPrefix = "/usr/local/share/pcat2_mini_display"
+	}
+
+	if _, err := os.Stat(assetsPrefix + "/assets"); os.IsNotExist(err) {
+		assetsPrefix = "/usr/share/pcat2_mini_display"
+	}
+
+	// For demonstration, we create a mapping from font names to font configurations.
+	fonts = map[string]FontConfig{
+		"clock":     {FontPath: assetsPrefix + "/assets/fonts/Orbitron-Medium.ttf", FontSize: 20},
+		"clockBold": {FontPath: assetsPrefix + "/assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 17},
+		"reg":       {FontPath: assetsPrefix + "/assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 18},
+		"big":       {FontPath: assetsPrefix + "/assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 25},
+		"unit":      {FontPath: assetsPrefix + "/assets/fonts/Orbitron-Medium.ttf", FontSize: 15},
+		"tiny":      {FontPath: assetsPrefix + "/assets/fonts/Orbitron-Regular.ttf", FontSize: 12},
+		"micro":     {FontPath: assetsPrefix + "/assets/fonts/Orbitron-Regular.ttf", FontSize: 10},
+		"thin":      {FontPath: assetsPrefix + "/assets/fonts/Orbitron-Regular.ttf", FontSize: 18},
+		"huge":      {FontPath: assetsPrefix + "/assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 34},
+		"gigantic":  {FontPath: assetsPrefix + "/assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 48},
+		// Chinese font variants
+		"unit_cjk": {FontPath: assetsPrefix + "/assets/fonts/NotoSansMonoCJK-VF.ttf.ttc", FontSize: 15},
+	}
+
+	imageCache = make(map[string]*image.RGBA)
+
+	// Warm all font faces off the critical path so the first CJK render
+	// doesn't stall a page transition parsing the 37MB CJK collection.
+	go preloadFonts()
+
+	// Data collection starts before the panel does. Nothing below this point
+	// -- DMA probe, periph host.Init, SPI open, GC9307 configure -- feeds a
+	// single globalData value, but on a cold boot it costs several seconds of
+	// contended I/O, so the collectors used to start only ~2s before the
+	// welcome animation handed the panel over and the first page was drawn
+	// from data that had barely been gathered. None of these touch the
+	// display, so they now fill in for the whole animation instead of its tail.
+	loadAllConfigsToVariables() //load user, default configs
+
+	// Page0's remaining-time slot starts blank: until a real estimate arrives
+	// there is nothing to show, so neither the "-" placeholder nor the clock
+	// icon should be drawn.
+	globalData.Store("RemainingTime", "")
+	globalData.Store("RemainingTime_Unit", "")
+
+	// Page-sensitive collector: fixed interval between runs, interruptible
+	// via reschedule so entering the matching page does not wait out a
+	// leftover long sleep. collect runs immediately on start and on each
+	// reschedule.
+	startPageSensitiveCollector := func(
+		intervalFn func() time.Duration,
+		reschedule <-chan struct{},
+		setInterval *time.Duration,
+		collect func(),
+	) {
+		go func() {
+			collect()
+			for weAreRunning {
+				interval := intervalFn()
+				if setInterval != nil {
+					*setInterval = interval
+				}
+				timer := time.NewTimer(interval)
+				select {
+				case <-timer.C:
+					collect()
+				case <-reschedule:
+					if !timer.Stop() {
+						select {
+						case <-timer.C:
+						default:
+						}
+					}
+					// Page change or wake: refresh immediately.
+					collect()
+				}
+			}
+		}()
+	}
+
+	// Ping: 1 Hz on the ping page while awake, otherwise 1 minute. Each row runs
+	// on its own collector goroutine with its own reschedule channel, so a host
+	// that is slow, dead or stuck in DNS only stretches its own row's cadence -
+	// the other row keeps ticking. Only the first mirrors the live cadence into
+	// pingGatherInterval (both share currentPingInterval).
+	startPageSensitiveCollector(currentPingInterval, pingReschedule[0], &pingGatherInterval, func() {
+		pingRow0.collect(cfg.PingSite0)
+	})
+	startPageSensitiveCollector(currentPingInterval, pingReschedule[1], nil, func() {
+		pingRow1.collect(cfg.PingSite1)
+	})
+	// Linux/CPU: 0.5s (2 Hz) on the cpu_bars page while awake, otherwise 1 minute.
+	startPageSensitiveCollector(currentLinuxInterval, linuxReschedule, &dataGatherInterval, func() {
+		collectLinuxData(cfg)
+	})
+	// Page 0 (WAN speed, data usage, battery, DC voltage): 2 Hz while page 0 is
+	// visible and awake, otherwise 1 minute. Each collector gets its own
+	// reschedule channel from page0Reschedule, all signalled together on a page
+	// change so every page-0 value updates live in step.
+	startPageSensitiveCollector(currentPage0Interval, page0Reschedule[0], &batteryDataInterval, collectBatteryData)
+	startPageSensitiveCollector(currentPage0Interval, page0Reschedule[1], &networkGatherInterval, func() {
+		collectNetworkData(cfg)
+	})
+	startPageSensitiveCollector(currentPage0Interval, page0Reschedule[2], nil, getInfoFromPcatWeb)
+	startPageSensitiveCollector(currentPage0Interval, page0Reschedule[3], nil, collectWANNetworkSpeed)
+	// Carrier-aware egress + public-IP flush/reprobe: every 2s while awake on
+	// any page (not only page 0), so unplug drops the eth icon / PUBLIC IP
+	// promptly and plug-in re-probes without waiting for the 60s web poll.
+	startPageSensitiveCollector(currentLinkInterval, linkReschedule, nil, collectLinkStatus)
+
+	go collectFixedData()
+	go getSmsPages()
+	startPmuManager() //board temp + G-sensor from the PMU (sysfs or direct UART)
+
+	// Power graph history: loads the persisted trail and starts the 1 Hz
+	// sampler. Another pure globalData/disk collector, so it belongs with
+	// the rest of the data path rather than behind the panel.
+	// Initialize power graph data recording
+	initPowerDataRecording()
+
+	// Initialize and start custom metrics manager
+	if len(cfg.CustomMetrics.Sources) > 0 {
+		var err error
+		customMetricsMgr, err = NewCustomMetricManager(cfg.CustomMetrics)
+		if err != nil {
+			log.Printf("Failed to create custom metrics manager: %v", err)
+		} else {
+			if err := customMetricsMgr.Start(); err != nil {
+				log.Printf("Failed to start custom metrics manager: %v", err)
+			} else {
+				log.Printf("Custom metrics manager started with %d sources", len(cfg.CustomMetrics.Sources))
+			}
+		}
+	}
+
 	// Set DMA mode from command line flag
 	dmaMode = *useDMA
 	if dmaMode {
@@ -788,37 +928,6 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-
-	//if assetsFolder not exists, use /usr/local/share/pcat2_mini_display
-	if _, err := os.Stat("assets"); os.IsNotExist(err) {
-		assetsPrefix = "/usr/local/share/pcat2_mini_display"
-	}
-
-	if _, err := os.Stat(assetsPrefix + "/assets"); os.IsNotExist(err) {
-		assetsPrefix = "/usr/share/pcat2_mini_display"
-	}
-
-	// For demonstration, we create a mapping from font names to font configurations.
-	fonts = map[string]FontConfig{
-		"clock":     {FontPath: assetsPrefix + "/assets/fonts/Orbitron-Medium.ttf", FontSize: 20},
-		"clockBold": {FontPath: assetsPrefix + "/assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 17},
-		"reg":       {FontPath: assetsPrefix + "/assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 18},
-		"big":       {FontPath: assetsPrefix + "/assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 25},
-		"unit":      {FontPath: assetsPrefix + "/assets/fonts/Orbitron-Medium.ttf", FontSize: 15},
-		"tiny":      {FontPath: assetsPrefix + "/assets/fonts/Orbitron-Regular.ttf", FontSize: 12},
-		"micro":     {FontPath: assetsPrefix + "/assets/fonts/Orbitron-Regular.ttf", FontSize: 10},
-		"thin":      {FontPath: assetsPrefix + "/assets/fonts/Orbitron-Regular.ttf", FontSize: 18},
-		"huge":      {FontPath: assetsPrefix + "/assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 34},
-		"gigantic":  {FontPath: assetsPrefix + "/assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 48},
-		// Chinese font variants
-		"unit_cjk": {FontPath: assetsPrefix + "/assets/fonts/NotoSansMonoCJK-VF.ttf.ttc", FontSize: 15},
-	}
-
-	imageCache = make(map[string]*image.RGBA)
-
-	// Warm all font faces off the critical path so the first CJK render
-	// doesn't stall a page transition parsing the 37MB CJK collection.
-	go preloadFonts()
 
 	// Setup display.
 	display = gc9307.New(conn, gpioreg.ByName(RST_PIN), gpioreg.ByName(DC_PIN), gpioreg.ByName(CS_PIN), gpioreg.ByName(BL_PIN))
@@ -903,105 +1012,10 @@ func main() {
 		}
 	}()
 
-	loadAllConfigsToVariables() //load user, default configs
-
-	// Page0's remaining-time slot starts blank: until a real estimate arrives
-	// there is nothing to show, so neither the "-" placeholder nor the clock
-	// icon should be drawn.
-	globalData.Store("RemainingTime", "")
-	globalData.Store("RemainingTime_Unit", "")
-
-	// Page-sensitive collector: fixed interval between runs, interruptible
-	// via reschedule so entering the matching page does not wait out a
-	// leftover long sleep. collect runs immediately on start and on each
-	// reschedule.
-	startPageSensitiveCollector := func(
-		intervalFn func() time.Duration,
-		reschedule <-chan struct{},
-		setInterval *time.Duration,
-		collect func(),
-	) {
-		go func() {
-			collect()
-			for weAreRunning {
-				interval := intervalFn()
-				if setInterval != nil {
-					*setInterval = interval
-				}
-				timer := time.NewTimer(interval)
-				select {
-				case <-timer.C:
-					collect()
-				case <-reschedule:
-					if !timer.Stop() {
-						select {
-						case <-timer.C:
-						default:
-						}
-					}
-					// Page change or wake: refresh immediately.
-					collect()
-				}
-			}
-		}()
-	}
-
-	// Ping: 1 Hz on the ping page while awake, otherwise 1 minute. Each row runs
-	// on its own collector goroutine with its own reschedule channel, so a host
-	// that is slow, dead or stuck in DNS only stretches its own row's cadence -
-	// the other row keeps ticking. Only the first mirrors the live cadence into
-	// pingGatherInterval (both share currentPingInterval).
-	startPageSensitiveCollector(currentPingInterval, pingReschedule[0], &pingGatherInterval, func() {
-		pingRow0.collect(cfg.PingSite0)
-	})
-	startPageSensitiveCollector(currentPingInterval, pingReschedule[1], nil, func() {
-		pingRow1.collect(cfg.PingSite1)
-	})
-	// Linux/CPU: 0.5s (2 Hz) on the cpu_bars page while awake, otherwise 1 minute.
-	startPageSensitiveCollector(currentLinuxInterval, linuxReschedule, &dataGatherInterval, func() {
-		collectLinuxData(cfg)
-	})
-	// Page 0 (WAN speed, data usage, battery, DC voltage): 2 Hz while page 0 is
-	// visible and awake, otherwise 1 minute. Each collector gets its own
-	// reschedule channel from page0Reschedule, all signalled together on a page
-	// change so every page-0 value updates live in step.
-	startPageSensitiveCollector(currentPage0Interval, page0Reschedule[0], &batteryDataInterval, collectBatteryData)
-	startPageSensitiveCollector(currentPage0Interval, page0Reschedule[1], &networkGatherInterval, func() {
-		collectNetworkData(cfg)
-	})
-	startPageSensitiveCollector(currentPage0Interval, page0Reschedule[2], nil, getInfoFromPcatWeb)
-	startPageSensitiveCollector(currentPage0Interval, page0Reschedule[3], nil, collectWANNetworkSpeed)
-	// Carrier-aware egress + public-IP flush/reprobe: every 2s while awake on
-	// any page (not only page 0), so unplug drops the eth icon / PUBLIC IP
-	// promptly and plug-in re-probes without waiting for the 60s web poll.
-	startPageSensitiveCollector(currentLinkInterval, linkReschedule, nil, collectLinkStatus)
-
-	go collectFixedData()
-	go getSmsPages()
-	startPmuManager() //board temp + G-sensor from the PMU (sysfs or direct UART)
-
-	// Initialize and start custom metrics manager
-	if len(cfg.CustomMetrics.Sources) > 0 {
-		var err error
-		customMetricsMgr, err = NewCustomMetricManager(cfg.CustomMetrics)
-		if err != nil {
-			log.Printf("Failed to create custom metrics manager: %v", err)
-		} else {
-			if err := customMetricsMgr.Start(); err != nil {
-				log.Printf("Failed to start custom metrics manager: %v", err)
-			} else {
-				log.Printf("Custom metrics manager started with %d sources", len(cfg.CustomMetrics.Sources))
-			}
-		}
-	}
-
 	go httpServer(addr)                          //listen local for http request
 	go monitorKeyboard(&changePageTriggered)     // Start keyboard monitoring in a goroutine
 	go monitorConsoleInput(&changePageTriggered) // Start console input monitoring in a goroutine
 	go idleDimmer()                              //control backlight
-
-	// Initialize power graph data recording
-	initPowerDataRecording()
 
 	registerExitHandler() //catch sigterm
 
