@@ -8,6 +8,7 @@ import (
 	"image/png"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -255,6 +256,47 @@ func getJsonContent(cfg *Config) string {
 	return result
 }
 
+// smsThemeColors resolves the SMS page's palette from the active layout.
+//
+// The SMS pages are drawn here in Go rather than from display_template
+// elements, so the web UI's color themes -- which work by rewriting each
+// element's "color" -- never reached them: a themed device showed every cfg
+// page in its new palette and the SMS pages still in hardcoded yellow/white.
+// There is no SMS entry in the template to read, so the palette is taken from
+// the themed pages themselves, using the same role split the web UI applies
+// (see themeRole in screen.html): big value fonts carry "primary", small info
+// text carries "data". Received text takes primary, the sender line data.
+//
+// Falls back to the classic yellow/white when nothing is themed, so an
+// unthemed device looks exactly as before.
+func smsThemeColors() (recv color.RGBA, title color.RGBA) {
+	recv, title = PCAT_YELLOW, PCAT_WHITE
+
+	configMutex.RLock()
+	defer configMutex.RUnlock()
+
+	// Scan pages in order and take the first element of each role that
+	// carries an explicit colour. Any themed page yields the palette; the
+	// GPS page is included, so it works whichever pages exist.
+	bigFonts := map[string]bool{"huge": true, "gigantic": true, "big": true, "reg": true}
+	for i := 0; i < cfgNumPages; i++ {
+		els, ok := cfg.DisplayTemplate.Elements["page"+strconv.Itoa(i)]
+		if !ok {
+			continue
+		}
+		for _, el := range els {
+			if len(el.Color) < 3 || el.Type == "icon" {
+				continue
+			}
+			c := color.RGBA{uint8(el.Color[0]), uint8(el.Color[1]), uint8(el.Color[2]), 255}
+			if bigFonts[el.Font] {
+				return c, title
+			}
+		}
+	}
+	return recv, title
+}
+
 func drawSmsFrJson(jsonContent string, savePng bool, drawPageNum bool) (imgs []image.Image, err error) {
 
 	var smsData struct {
@@ -281,6 +323,15 @@ func drawSmsFrJson(jsonContent string, savePng bool, drawPageNum bool) (imgs []i
 	topPadding := 3.0
 	xStart := 4
 	layout := "2006-01-02 15:04:05"
+
+	// Palette for this render, from the active theme (classic yellow/white
+	// when the device is unthemed). Resolved once per call rather than per
+	// line: the layout cannot change mid-frame and it takes the config lock.
+	smsRecvColor, smsTitleColor := smsThemeColors()
+	// Sent messages keep their own colour: the sent/received distinction is
+	// carried by colour alone here, so tinting both to the theme would erase
+	// it. Unchanged from before (light green).
+	smsSentColor := color.RGBA{144, 238, 144, 255}
 
 	// Create font context
 	fc := freetype.NewContext()
@@ -420,10 +471,10 @@ func drawSmsFrJson(jsonContent string, savePng bool, drawPageNum bool) (imgs []i
 				// Set color for sender based on whether message is sent by me
 				if line.IsSentByMe {
 					// Light green color for sent messages
-					fcTitle.SetSrc(image.NewUniform(color.RGBA{144, 238, 144, 255}))
+					fcTitle.SetSrc(image.NewUniform(smsSentColor))
 				} else {
-					// Default white color for received messages
-					fcTitle.SetSrc(image.NewUniform(color.RGBA{255, 255, 255, 255}))
+					// Received: the theme's info-text colour (white unthemed)
+					fcTitle.SetSrc(image.NewUniform(smsTitleColor))
 				}
 
 				// Place the timestamp first: it is right-aligned and its width
@@ -461,10 +512,10 @@ func drawSmsFrJson(jsonContent string, savePng bool, drawPageNum bool) (imgs []i
 				// Set color based on whether message is sent by me
 				if line.IsSentByMe {
 					// Light green color for sent messages
-					fc.SetSrc(image.NewUniform(color.RGBA{144, 238, 144, 255}))
+					fc.SetSrc(image.NewUniform(smsSentColor))
 				} else {
-					// Default yellow color for received messages
-					fc.SetSrc(image.NewUniform(color.RGBA{255, 255, 0, 255}))
+					// Received: the theme's primary colour (yellow unthemed)
+					fc.SetSrc(image.NewUniform(smsRecvColor))
 				}
 				
 				pt := freetype.Pt(xStart, int(y+fontSize))
