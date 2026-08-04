@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -109,9 +110,15 @@ var (
 	version   = "dev"
 	buildTime = "unknown"
 
-	weAreRunning = true
-	runMainLoop  = true
-	offTime      = time.Now()
+	runMainLoop = true
+	offTime     = time.Now()
+
+	// weAreRunning is the process-wide shutdown flag: the SIGTERM handler
+	// clears it and every background collector loop polls it to wind down.
+	// It is therefore written and read from different goroutines and must be
+	// atomic — as a plain bool it was a data race that `make test-race`
+	// reported. Use setWeAreRunning/weAreRunning rather than touching it.
+	weAreRunningFlag atomic.Bool
 
 	// Shutdown monitoring
 	//shutdownMonitor *ShutdownMonitor
@@ -299,6 +306,15 @@ type ImageBuffer struct {
 	height int
 	loaded bool
 }
+
+func init() { weAreRunningFlag.Store(true) }
+
+// weAreRunning reports whether the daemon is still meant to be running.
+func weAreRunning() bool { return weAreRunningFlag.Load() }
+
+// setWeAreRunning flips the shutdown flag. Clearing it asks every collector
+// loop and the main render loop to return at their next check.
+func setWeAreRunning(v bool) { weAreRunningFlag.Store(v) }
 
 // GetFrameBuffer retrieves a frame buffer from the pool
 func GetFrameBuffer(width, height int) *image.RGBA {
@@ -798,7 +814,7 @@ func main() {
 	) {
 		go func() {
 			collect()
-			for weAreRunning {
+			for weAreRunning() {
 				interval := intervalFn()
 				if setInterval != nil {
 					*setInterval = interval
@@ -1045,7 +1061,7 @@ func registerExitHandler() {
 	go func() { //register ciao screen when sigterm
 		sig := <-sigs
 		log.Printf("Received signal: %v", sig)
-		weAreRunning = false
+		setWeAreRunning(false)
 		offTime = time.Now()
 
 		// Stop shutdown monitoring (temporarily disabled)
@@ -1127,7 +1143,7 @@ func mainLoop() {
 		log.Fatalf("Failed to load font: %v", err)
 	}
 
-	for weAreRunning {
+	for weAreRunning() {
 		if middleFrames%300 == 0 { // Log less frequently
 			log.Println("showsms:", cfg.ShowSms, "totalPages:", totalNumPages, "cfgPages:", cfgNumPages)
 		}

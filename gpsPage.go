@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -112,8 +113,22 @@ func signalGpsReschedule() {
 	}
 }
 
+// gpsCardinal maps a course in degrees to one of the 8 compass points.
+//
+// The heading is normalised into [0,360) first. Go's % keeps the sign of the
+// dividend, so a negative course (some modems report one, and a NaN/garbage
+// value from the web API deserialises to 0 but a signed one does not) would
+// otherwise index the slice negatively and panic — taking the whole daemon
+// down with it, since collectGpsData runs on its own goroutine.
 func gpsCardinal(deg float64) string {
 	dirs := []string{"N", "NE", "E", "SE", "S", "SW", "W", "NW"}
+	if math.IsNaN(deg) || math.IsInf(deg, 0) {
+		return dirs[0]
+	}
+	deg = math.Mod(deg, 360)
+	if deg < 0 {
+		deg += 360
+	}
 	idx := int((deg+22.5)/45.0) % 8
 	return dirs[idx]
 }

@@ -49,14 +49,14 @@ func initPowerDataRecording() {
 	// we keep a sparse trail without waking every second for pixels nobody
 	// can see. Battery collectors already slow to 1/min when idle.
 	go func() {
-		for weAreRunning {
+		for weAreRunning() {
 			interval := 1 * time.Second
 			if displayAsleep() {
 				interval = 10 * time.Second
 			}
 			timer := time.NewTimer(interval)
 			<-timer.C
-			if !weAreRunning {
+			if !weAreRunning() {
 				return
 			}
 			recordPowerSample()

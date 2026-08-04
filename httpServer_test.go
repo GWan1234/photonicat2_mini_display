@@ -57,7 +57,7 @@ func TestValidateJSON(t *testing.T) {
 			wantErr: true,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := validateJSON(tt.input)
@@ -100,7 +100,7 @@ func TestSecureUnmarshal(t *testing.T) {
 			wantErr: true,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := secureUnmarshal(tt.input, tt.target)
@@ -189,11 +189,11 @@ func TestDeepMerge(t *testing.T) {
 			},
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := deepMerge(tt.dest, tt.src)
-			
+
 			if !mapsEqual(result, tt.expected) {
 				t.Errorf("deepMerge() = %v, want %v", result, tt.expected)
 			}
@@ -218,7 +218,7 @@ func TestDeepCopy(t *testing.T) {
 			name: "nested map",
 			src: map[string]interface{}{
 				"nested": map[string]interface{}{
-					"inner": "value",
+					"inner":  "value",
 					"number": 42,
 				},
 				"simple": "value",
@@ -229,30 +229,30 @@ func TestDeepCopy(t *testing.T) {
 			src:  map[string]interface{}{},
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := deepCopy(tt.src)
-			
+
 			// Check that result equals source
 			if !mapsEqual(result, tt.src) {
 				t.Errorf("deepCopy() result doesn't equal source")
 			}
-			
+
 			// Check that modifying result doesn't affect source
 			if len(result) > 0 {
 				// Add a key to result
 				result["new_key"] = "new_value"
-				
+
 				if _, exists := tt.src["new_key"]; exists {
 					t.Errorf("deepCopy() didn't create independent copy")
 				}
 			}
-			
+
 			// Test nested modification if nested map exists
 			if nested, ok := result["nested"].(map[string]interface{}); ok {
 				nested["modified"] = true
-				
+
 				if srcNested, ok := tt.src["nested"].(map[string]interface{}); ok {
 					if _, exists := srcNested["modified"]; exists {
 						t.Errorf("deepCopy() didn't create independent nested copy")
@@ -265,16 +265,16 @@ func TestDeepCopy(t *testing.T) {
 
 func TestHsvToRgb(t *testing.T) {
 	tests := []struct {
-		h, s, v    float64
-		r, g, b    float64
-		tolerance  float64
+		h, s, v   float64
+		r, g, b   float64
+		tolerance float64
 	}{
 		// Pure red
 		{0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.01},
 		// Pure green
-		{1.0/3.0, 1.0, 1.0, 0.0, 1.0, 0.0, 0.01},
+		{1.0 / 3.0, 1.0, 1.0, 0.0, 1.0, 0.0, 0.01},
 		// Pure blue
-		{2.0/3.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.01},
+		{2.0 / 3.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.01},
 		// White
 		{0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 0.01},
 		// Black
@@ -282,10 +282,10 @@ func TestHsvToRgb(t *testing.T) {
 		// Gray
 		{0.0, 0.0, 0.5, 0.5, 0.5, 0.5, 0.01},
 	}
-	
+
 	for _, tt := range tests {
 		r, g, b := hsvToRgb(tt.h, tt.s, tt.v)
-		
+
 		if abs64(r-tt.r) > tt.tolerance || abs64(g-tt.g) > tt.tolerance || abs64(b-tt.b) > tt.tolerance {
 			t.Errorf("hsvToRgb(%f, %f, %f) = (%f, %f, %f), want (%f, %f, %f)",
 				tt.h, tt.s, tt.v, r, g, b, tt.r, tt.g, tt.b)
@@ -320,7 +320,7 @@ func TestSaveUserConfigFromStr(t *testing.T) {
 			expected: false,
 		},
 	}
-	
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			defer func() {
@@ -328,9 +328,9 @@ func TestSaveUserConfigFromStr(t *testing.T) {
 					t.Errorf("saveUserConfigFromStr() panicked: %v", r)
 				}
 			}()
-			
+
 			result := saveUserConfigFromStr(tt.input)
-			
+
 			// We can't guarantee file operations will succeed in test environment,
 			// but we can verify the function handles invalid JSON correctly
 			if tt.expected == false && result == true {
@@ -345,7 +345,7 @@ func mapsEqual(a, b map[string]interface{}) bool {
 	if len(a) != len(b) {
 		return false
 	}
-	
+
 	for k, v := range a {
 		if bv, exists := b[k]; !exists {
 			return false
@@ -366,7 +366,7 @@ func valuesEqual(a, b interface{}) bool {
 	if a == nil || b == nil {
 		return false
 	}
-	
+
 	// Handle maps
 	if aMap, ok := a.(map[string]interface{}); ok {
 		if bMap, ok := b.(map[string]interface{}); ok {
@@ -374,7 +374,7 @@ func valuesEqual(a, b interface{}) bool {
 		}
 		return false
 	}
-	
+
 	// For other types, use simple equality
 	return a == b
 }
@@ -393,15 +393,15 @@ func TestLoadUserConfig(t *testing.T) {
 			t.Errorf("loadUserConfig() panicked: %v", r)
 		}
 	}()
-	
+
 	// This function reads from file system, test it doesn't crash
 	result := loadUserConfig()
-	
+
 	// Should return a string (might be "{}" if no config exists)
 	if len(result) < 2 {
 		t.Error("loadUserConfig should return at least empty JSON object")
 	}
-	
+
 	// Should be valid JSON
 	var temp interface{}
 	if err := json.Unmarshal([]byte(result), &temp); err != nil {
@@ -415,11 +415,11 @@ func TestSaveUserConfigToFile(t *testing.T) {
 			t.Errorf("saveUserConfigToFile() panicked: %v", r)
 		}
 	}()
-	
+
 	// This function writes to file system, test it doesn't crash
 	// Result depends on file system permissions
 	result := saveUserConfigToFile()
-	
+
 	// Should return a boolean
 	_ = result
 }

@@ -579,7 +579,7 @@ func idleDimmer() {
 		var newState int
 
 		switch {
-		case weAreRunning == false:
+		case !weAreRunning():
 			newState = STATE_OFF
 		case idle < fadeInDur:
 			if swippingScreen {

@@ -1,106 +1,63 @@
-# Unit Tests for Photonicat2 Display
+# Testing the Photonicat2 mini display
 
-This directory contains comprehensive unit tests for the photonicat2 display Go application.
+All tests live in the **root package** (`package main`, `*_test.go` next to the
+code they cover). They used to sit in this directory as `package main` files in
+a subdirectory, which meant they referenced root-package symbols they could not
+see and so never compiled — `go test ./...` failed for the whole module. They
+have been moved into the root package and fixed; this directory now holds only
+the on-device runner and this guide.
 
-## Test Files
+## Running on a development host
 
-### Core Tests
-- **`test_utils_test.go`** - Tests for utility functions (frame buffers, color handling, system utilities)
-- **`test_processData_test.go`** - Tests for data processing functions (network, system info, security)
-- **`test_draw_test.go`** - Tests for graphics and drawing functions (text, images, shapes)
-- **`test_main_test.go`** - Tests for core data structures and initialization functions
+The package builds and tests natively on macOS and Linux. The Linux-only PMU
+UART code (termios ioctls, the `unix.Bxxx` baud constants) is isolated behind
+build tags in `pcatPmuSerial_linux.go` / `pcatPmuSerial_other.go`, so it no
+longer blocks the host build.
 
-### Feature-Specific Tests  
-- **`test_processSms_test.go`** - Tests for SMS handling and text processing
-- **`test_httpServer_test.go`** - Tests for web server security and configuration
-- **`test_powerGraph_test.go`** - Tests for power monitoring and graph visualization
-
-## Running Tests
-
-### Run All Tests
 ```bash
-# From the main project directory
-go test -v ./tests/
-
-# Or run all tests recursively
-go test -v ./...
+go test ./...                 # whole suite
+go test -race ./...           # run before pushing; the suite is race-clean
+go test -run TestParsePosixTZ -v .
+make test                     # go test ./...
+make test-race                # go test -race ./...
 ```
 
-### Run Specific Test Files
+Coverage:
+
 ```bash
-# Run utils tests
-go test -v ./tests/ -run TestClearFrame
-
-# Run security tests
-go test -v ./tests/ -run TestValidateJSON
-
-# Run drawing tests  
-go test -v ./tests/ -run TestDrawText
+go test -coverprofile=coverage.out .
+go tool cover -func=coverage.out | tail -1
+go tool cover -html=coverage.out -o coverage.html
 ```
 
-### Run Tests by Category
+## Running on the device
+
+Some behaviour only exists on real hardware: sysfs battery nodes, DMA channels,
+the PMU UART, the actual disk layout. Cross-compile the test binary and run it
+on the target:
+
 ```bash
-# Graphics/drawing tests
-go test -v ./tests/ -run "Test.*Draw|Test.*Copy|Test.*Image"
-
-# Security tests
-go test -v ./tests/ -run "Test.*Valid|Test.*Secure|Test.*Sanitize"
-
-# Text processing tests
-go test -v ./tests/ -run "Test.*Text|Test.*Wrap|Test.*CJK"
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go test -c -o /tmp/pcat-tests .
+scp /tmp/pcat-tests root@<device>:/tmp/
+ssh root@<device> '/tmp/pcat-tests -test.v -test.run TestCollectDiskUsage'
 ```
 
-### Use the Test Runner Script
-```bash
-# From the main project directory
-./run_tests.sh
-```
+`run_test_arm_bin.sh` wraps that last step for a device with no Go toolchain:
+copy it alongside a binary named `test_runner_openwrt`, `test_runner_debian`
+or `test_runner` and run it.
 
-## Test Coverage
+## Conventions
 
-### Security Functions ✅
-- JSON validation and sanitization (`TestValidateJSON`, `TestSecureUnmarshal`)
-- Command argument sanitization (`TestSanitizeCommandArg`)
-- Input validation and bounds checking
-- Memory safety in image operations
-
-### Graphics Functions ✅
-- Text rendering with font support (`TestDrawText`)
-- Image composition and manipulation (`TestCopyImageToImageAt`)
-- Color space conversions (`TestBlendColors`, `TestHsvToRgb`)
-- Drawing primitives (`TestDrawRect`, `TestDrawLine`)
-
-### System Functions ✅
-- Frame buffer management (`TestGetFrameBuffer`, `TestReturnFrameBuffer`)
-- Network data processing (`TestFormatSpeed`, `TestGetNetworkSpeed`)
-- System information gathering (`TestGetUptime`, `TestGetFanSpeed`)
-- Configuration management (`TestDeepMerge`, `TestDeepCopy`)
-
-### SMS/Text Functions ✅
-- Text wrapping with CJK support (`TestWrapText`)
-- SMS data parsing and display (`TestCollectAndDrawSms`)
-- Unicode character handling (`TestIsCJK`)
-
-### Power Management ✅
-- Power graph visualization (`TestDrawPowerGraph`)
-- Data collection and storage (`TestRecordPowerSample`)
-- Color blending for graphs (`TestBlendColors`)
-
-## Test Statistics
-- **Total Test Files**: 7
-- **Functions Tested**: 40+ critical functions  
-- **Individual Test Cases**: 150+ test scenarios
-- **Coverage Areas**: Security, Graphics, Data Processing, Text Handling, System Management
-
-## File Organization
-Tests are organized with descriptive prefixes:
-- `test_*_test.go` - Organized by source file they test
-- All tests are in the main package to access unexported functions
-- Tests can be run individually or as a complete suite
-
-## Notes
-- Tests are designed to handle missing system files/hardware gracefully
-- Some tests may show expected failures in test environments without actual hardware
-- Security tests focus on preventing injection attacks and validating inputs
-- Graphics tests verify correct image manipulation and rendering logic
-- Run `./run_tests.sh` for automated testing with categorized results and coverage reports
+- Tests that mutate package globals (`cfg`, `cfgNumPages`, `idleState`,
+  `weAreRunning`, …) must save and restore them via `t.Cleanup`. The suite runs
+  in a single process, so a leaked mutation surfaces as an unrelated failure in
+  some later test.
+- Do not leave production goroutines running past a test. Several loop until
+  the shutdown flag clears and poll shared state every second; leaked, they
+  race every later test. `TestInitPowerDataRecording` shows the pattern.
+- Tests needing pcat-manager-web should point `localHTTPClient` at an
+  `httptest.Server` via `redirectLocalHTTP` (`testhelpers_test.go`) instead of
+  depending on a live service.
+- Tests must not require root, and must skip rather than fail when a host
+  facility is missing — see the zoneinfo and `/etc/localtime` skips in
+  `timezone_test.go`.

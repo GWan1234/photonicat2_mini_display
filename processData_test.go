@@ -20,14 +20,14 @@ func TestFormatSpeed(t *testing.T) {
 		{10.5, "10.5", "Mbps"},
 		{100.0, "100", "Mbps"},
 		{123.456, "123", "Mbps"},
-		{-1.0, "0.00", "Mbps"}, // Negative should be clamped to 0
+		{-1.0, "0.00", "Mbps"},     // Negative should be clamped to 0
 		{100001.0, "0.00", "Mbps"}, // Too large should be clamped to 0
 	}
-	
+
 	for _, tt := range tests {
 		val, unit := formatSpeed(tt.mbps)
 		if val != tt.expectedVal || unit != tt.expectedUnit {
-			t.Errorf("formatSpeed(%f) = (%s, %s); want (%s, %s)", 
+			t.Errorf("formatSpeed(%f) = (%s, %s); want (%s, %s)",
 				tt.mbps, val, unit, tt.expectedVal, tt.expectedUnit)
 		}
 	}
@@ -43,14 +43,14 @@ func TestSanitizeCommandArg(t *testing.T) {
 		{"file-name.ext", "file-name.ext"},
 		{"123abc", "123abc"},
 		{"arg;dangerous", ""}, // Contains semicolon
-		{"rm -rf /", ""}, // Contains spaces
+		{"rm -rf /", ""},      // Contains spaces
 		{"", ""},
-		{"arg|pipe", ""}, // Contains pipe
+		{"arg|pipe", ""},       // Contains pipe
 		{"arg&background", ""}, // Contains ampersand
 		{"/valid/path", "/valid/path"},
 		{"arg with spaces", ""}, // Contains spaces
 	}
-	
+
 	for _, tt := range tests {
 		result := sanitizeCommandArg(tt.input)
 		if result != tt.expected {
@@ -66,9 +66,9 @@ func TestGetUptimeSeconds(t *testing.T) {
 			t.Errorf("getUptimeSeconds() panicked: %v", r)
 		}
 	}()
-	
+
 	uptime, err := getUptimeSeconds()
-	
+
 	// In a real system, uptime should be positive
 	// In test environment, it might fail, which is acceptable
 	if err == nil && uptime < 0 {
@@ -83,14 +83,14 @@ func TestGetUptime(t *testing.T) {
 			t.Errorf("getUptime() panicked: %v", r)
 		}
 	}()
-	
+
 	uptimeStr, err := getUptime()
-	
+
 	// If successful, should return a non-empty string
 	if err == nil && uptimeStr == "" {
 		t.Error("Expected non-empty uptime string when no error")
 	}
-	
+
 	// If successful, should contain time units
 	if err == nil && !strings.Contains(uptimeStr, "s") {
 		t.Error("Expected uptime string to contain time units")
@@ -104,9 +104,9 @@ func TestIsOpenWRT(t *testing.T) {
 			t.Errorf("isOpenWRT() panicked: %v", r)
 		}
 	}()
-	
+
 	result := isOpenWRT()
-	
+
 	// Should return a boolean without crashing
 	_ = result
 }
@@ -114,9 +114,9 @@ func TestIsOpenWRT(t *testing.T) {
 func TestGetSessionDataUsageGB(t *testing.T) {
 	// Test with a likely non-existent interface
 	iface := "nonexistent_interface"
-	
+
 	_, err := getSessionDataUsageGB(iface)
-	
+
 	// Should return an error for non-existent interface
 	if err == nil {
 		t.Error("Expected error for non-existent interface")
@@ -130,19 +130,19 @@ func TestReadCPUStats(t *testing.T) {
 			t.Errorf("readCPUStats() panicked: %v", r)
 		}
 	}()
-	
+
 	stats, err := readCPUStats()
-	
+
 	// If successful, should return some stats
 	if err == nil && len(stats) == 0 {
 		t.Error("Expected some CPU stats when no error")
 	}
-	
+
 	// If successful, stats should have reasonable values
 	if err == nil && len(stats) > 0 {
 		for i, stat := range stats {
-			total := stat.User + stat.Nice + stat.System + stat.Idle + 
-					 stat.Iowait + stat.Irq + stat.Softirq + stat.Steal
+			total := stat.User + stat.Nice + stat.System + stat.Idle +
+				stat.Iowait + stat.Irq + stat.Softirq + stat.Steal
 			if total == 0 {
 				t.Errorf("CPU stat %d has zero total time", i)
 			}
@@ -156,9 +156,9 @@ func TestGetWANInterface(t *testing.T) {
 			t.Errorf("getWANInterface() panicked: %v", r)
 		}
 	}()
-	
+
 	iface, err := getWANInterface()
-	
+
 	// If successful, should return non-empty string
 	if err == nil && iface == "" {
 		t.Error("Expected non-empty interface name when no error")
@@ -168,15 +168,15 @@ func TestGetWANInterface(t *testing.T) {
 func TestGetInterfaceBytes(t *testing.T) {
 	// Test with loopback interface which usually exists
 	iface := "lo"
-	
+
 	defer func() {
 		if r := recover(); r != nil {
 			t.Errorf("getInterfaceBytes() panicked: %v", r)
 		}
 	}()
-	
+
 	rx, tx, err := getInterfaceBytes(iface)
-	
+
 	// If successful, bytes should be non-negative
 	if err == nil {
 		if rx < 0 || tx < 0 {
@@ -191,9 +191,9 @@ func TestGetFanSpeed(t *testing.T) {
 			t.Errorf("getFanSpeed() panicked: %v", r)
 		}
 	}()
-	
+
 	speed, err := getFanSpeed()
-	
+
 	// If successful, speed should be non-negative
 	if err == nil && speed < 0 {
 		t.Errorf("Fan speed should be non-negative, got %d", speed)
@@ -212,7 +212,7 @@ func TestAbsProcessData(t *testing.T) {
 		{100, 100},
 		{-1, 1},
 	}
-	
+
 	for _, tt := range tests {
 		result := abs(tt.input)
 		if result != tt.expected {
@@ -257,10 +257,10 @@ func TestGetSN(t *testing.T) {
 			t.Errorf("getSN() panicked: %v", r)
 		}
 	}()
-	
+
 	// This reads from hardware-specific files, likely to fail in test environment
 	_, err := getSN()
-	
+
 	// We just test it doesn't crash, error is expected in test environment
 	_ = err
 }

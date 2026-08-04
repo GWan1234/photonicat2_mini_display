@@ -642,7 +642,7 @@ func httpDrawText(c *fiber.Ctx) error {
 }
 
 func makeItRun(c *fiber.Ctx) error {
-	weAreRunning = true
+	setWeAreRunning(true)
 	runMainLoop = true
 	return c.JSON(fiber.Map{"status": "ok"})
 }

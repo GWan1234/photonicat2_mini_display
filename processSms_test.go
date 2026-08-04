@@ -27,12 +27,12 @@ func TestIsCJK(t *testing.T) {
 		{'!', false},
 		{'@', false},
 	}
-	
+
 	// Helper function to check if rune is CJK (copied from processSms.go logic)
 	isCJKFunc := func(r rune) bool {
 		return isCJK(r)
 	}
-	
+
 	for _, tt := range tests {
 		result := isCJKFunc(tt.r)
 		if result != tt.expected {
@@ -45,7 +45,7 @@ func TestWrapText(t *testing.T) {
 	// Use a simple font face for testing
 	face := basicfont.Face7x13
 	maxWidth := 100 // pixels
-	
+
 	tests := []struct {
 		text     string
 		minLines int
@@ -56,23 +56,23 @@ func TestWrapText(t *testing.T) {
 		{"Word", 1, 1},
 		{"", 0, 0},
 		{"VeryLongWordThatShouldBeHyphenated", 1, 3}, // Wider range for hyphenation
-		{"测试中文换行", 1, 10}, // Chinese text can be broken into many lines
-		{"Mixed 中文 English", 1, 5}, // More flexible range
+		{"测试中文换行", 1, 10},                            // Chinese text can be broken into many lines
+		{"Mixed 中文 English", 1, 5},                   // More flexible range
 	}
-	
+
 	for _, tt := range tests {
 		result := wrapText(tt.text, maxWidth, face)
-		
+
 		if len(result) < tt.minLines {
-			t.Errorf("wrapText(%q) returned %d lines, expected at least %d", 
+			t.Errorf("wrapText(%q) returned %d lines, expected at least %d",
 				tt.text, len(result), tt.minLines)
 		}
-		
+
 		if len(result) > tt.maxLines {
-			t.Errorf("wrapText(%q) returned %d lines, expected at most %d", 
+			t.Errorf("wrapText(%q) returned %d lines, expected at most %d",
 				tt.text, len(result), tt.maxLines)
 		}
-		
+
 		// Verify no line is empty (unless input is empty)
 		if tt.text != "" {
 			for i, line := range result {
@@ -81,7 +81,7 @@ func TestWrapText(t *testing.T) {
 				}
 			}
 		}
-		
+
 		// Verify all text is preserved (join lines and compare)
 		if tt.text != "" {
 			joined := strings.Join(result, "")
@@ -89,9 +89,9 @@ func TestWrapText(t *testing.T) {
 			originalNoSpaces := strings.ReplaceAll(tt.text, " ", "")
 			joinedNoSpaces := strings.ReplaceAll(joined, " ", "")
 			joinedNoSpaces = strings.ReplaceAll(joinedNoSpaces, "-", "") // Remove hyphens from wrapping
-			
+
 			if !strings.Contains(joinedNoSpaces, originalNoSpaces) && originalNoSpaces != "" {
-				t.Errorf("wrapText(%q) lost text content. Original: %q, Wrapped: %q", 
+				t.Errorf("wrapText(%q) lost text content. Original: %q, Wrapped: %q",
 					tt.text, originalNoSpaces, joinedNoSpaces)
 			}
 		}
@@ -100,7 +100,7 @@ func TestWrapText(t *testing.T) {
 
 func TestWrapTextWithMaxWidth(t *testing.T) {
 	face := basicfont.Face7x13
-	
+
 	tests := []struct {
 		text     string
 		maxWidth int
@@ -111,17 +111,17 @@ func TestWrapTextWithMaxWidth(t *testing.T) {
 		{"中", 20, true},
 		{"", 10, true},
 	}
-	
+
 	for _, tt := range tests {
 		result := wrapText(tt.text, tt.maxWidth, face)
-		
+
 		// Check if any line exceeds the max width significantly
 		// (allowing more tolerance for font measurement differences and hyphens)
 		drawer := &font.Drawer{Face: face}
 		for i, line := range result {
 			lineWidth := drawer.MeasureString(line)
 			if int(lineWidth>>6) > tt.maxWidth+20 { // +20 for more tolerance
-				t.Errorf("wrapText(%q, %d) line %d exceeds width: %q (width: %d)", 
+				t.Errorf("wrapText(%q, %d) line %d exceeds width: %q (width: %d)",
 					tt.text, tt.maxWidth, i, line, int(lineWidth>>6))
 			}
 		}
@@ -131,29 +131,29 @@ func TestWrapTextWithMaxWidth(t *testing.T) {
 func TestWrapTextEdgeCases(t *testing.T) {
 	face := basicfont.Face7x13
 	maxWidth := 50
-	
+
 	// Test edge cases
 	tests := []string{
-		"",                    // Empty string
-		" ",                   // Single space
-		"  \t  \n  ",         // Only whitespace
-		"A",                   // Single character
-		"AB CD EF",           // Multiple words
-		"ABCDEFGHIJKLMNOP",   // Long word
+		"",                 // Empty string
+		" ",                // Single space
+		"  \t  \n  ",       // Only whitespace
+		"A",                // Single character
+		"AB CD EF",         // Multiple words
+		"ABCDEFGHIJKLMNOP", // Long word
 		"中文测试",             // CJK only
 		"A中B文C测D试E",        // Mixed CJK and Latin
-		"!@#$%^&*()",         // Special characters
+		"!@#$%^&*()",       // Special characters
 	}
-	
+
 	for _, text := range tests {
 		result := wrapText(text, maxWidth, face)
-		
+
 		// Empty/whitespace input may return nil or empty slice
 		trimmed := strings.TrimSpace(text)
 		if result == nil && trimmed != "" {
 			t.Errorf("wrapText(%q) returned nil for non-empty text", text)
 		}
-		
+
 		// For empty or whitespace-only input, should return empty result or handle gracefully
 		if result != nil && trimmed == "" && len(result) > 0 {
 			// wrapText returns empty slice for empty/whitespace input
@@ -165,16 +165,16 @@ func TestWrapTextEdgeCases(t *testing.T) {
 func TestGetJsonContent(t *testing.T) {
 	// Mock config for testing
 	testCfg := &Config{}
-	
+
 	defer func() {
 		if r := recover(); r != nil {
 			t.Errorf("getJsonContent() panicked: %v", r)
 		}
 	}()
-	
+
 	// This function makes HTTP requests, likely to fail in test environment
 	result := getJsonContent(testCfg)
-	
+
 	// Should return a string (might be empty due to network failure in test)
 	if result == "" {
 		t.Log("getJsonContent returned empty string (expected in test environment)")
@@ -191,21 +191,21 @@ func TestCollectAndDrawSms(t *testing.T) {
 	testCfg := &Config{
 		ShowSms: true,
 	}
-	
+
 	defer func() {
 		if r := recover(); r != nil {
 			t.Errorf("collectAndDrawSms() panicked: %v", r)
 		}
 	}()
-	
+
 	// This function depends on network and file system, test it doesn't crash
 	result := collectAndDrawSms(testCfg)
-	
+
 	// Should return a non-negative number
 	if result < 0 {
 		t.Errorf("collectAndDrawSms should return non-negative number, got %d", result)
 	}
-	
+
 	// Test with ShowSms disabled
 	testCfg.ShowSms = false
 	result2 := collectAndDrawSms(testCfg)
@@ -217,22 +217,23 @@ func TestCollectAndDrawSms(t *testing.T) {
 func TestDrawSmsFrJsonWithMockData(t *testing.T) {
 	// Test with minimal valid JSON
 	jsonContent := `{"msg":[]}`
-	
+
 	defer func() {
 		if r := recover(); r != nil {
 			t.Errorf("drawSmsFrJson() panicked with empty messages: %v", r)
 		}
 	}()
-	
+
 	images, err := drawSmsFrJson(jsonContent, false, false)
-	
-	// With empty messages, should still work and return at least one image
+
+	// An empty inbox renders zero pages, not a blank page — collectAndDrawSms
+	// is what decides the "no SMS" placeholder, so returning 0 here is correct.
 	if err != nil {
 		t.Logf("drawSmsFrJson failed with empty messages (expected due to font loading): %v", err)
-	} else if len(images) == 0 {
-		t.Error("Expected at least one image even with empty messages")
+	} else if len(images) != 0 {
+		t.Errorf("empty inbox should render 0 pages, got %d", len(images))
 	}
-	
+
 	// Test with invalid JSON
 	invalidJson := `{"invalid": json`
 	_, err = drawSmsFrJson(invalidJson, false, false)
@@ -247,16 +248,16 @@ func TestSMSImagePool(t *testing.T) {
 	if img1 == nil {
 		t.Error("smsImagePool.Get() returned nil")
 	}
-	
+
 	// Check dimensions
 	if img1.Bounds().Dx() != 172 || img1.Bounds().Dy() != 270 {
 		t.Errorf("SMS image pool returned wrong dimensions: %dx%d, expected 172x270",
 			img1.Bounds().Dx(), img1.Bounds().Dy())
 	}
-	
+
 	// Return to pool
 	smsImagePool.Put(img1)
-	
+
 	// Get another image
 	img2 := smsImagePool.Get().(*image.RGBA)
 	if img2 == nil {
@@ -271,7 +272,7 @@ func TestGetSmsPages(t *testing.T) {
 			t.Errorf("getSmsPages() panicked immediately: %v", r)
 		}
 	}()
-	
+
 	// Start the function in a goroutine
 	done := make(chan bool, 1)
 	go func() {
@@ -281,18 +282,18 @@ func TestGetSmsPages(t *testing.T) {
 			}
 			done <- true
 		}()
-		
+
 		// Run for a very short time to test it starts properly
 		originalShowSms := cfg.ShowSms
 		cfg.ShowSms = false // Disable to reduce side effects
-		
+
 		// We can't really test the full function as it's an infinite loop,
 		// but we can test the initial setup doesn't crash
-		
+
 		cfg.ShowSms = originalShowSms
 		done <- true
 	}()
-	
+
 	// Wait a short time to see if it crashes immediately
 	select {
 	case <-done:
