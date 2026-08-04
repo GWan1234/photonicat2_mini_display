@@ -265,40 +265,32 @@ func TestSMSImagePool(t *testing.T) {
 	}
 }
 
-func TestGetSmsPages(t *testing.T) {
-	// This function runs in an infinite loop, so we can only test it doesn't crash immediately
+// getSmsPages is an infinite collector loop, so it cannot be called directly
+// from a test. What is checkable is the guard it depends on: with ShowSms off,
+// collectAndDrawSms must do nothing and report no pages.
+//
+// This previously spawned a goroutine that toggled cfg.ShowSms and returned
+// without ever being awaited (the select had a default branch), so the
+// mutation raced whichever test ran next — `go test -race -shuffle=on` caught
+// it. It also never called getSmsPages at all.
+func TestGetSmsPagesDisabledShowsNoPages(t *testing.T) {
+	configMutex.Lock()
+	saved := cfg.ShowSms
+	cfg.ShowSms = false
+	configMutex.Unlock()
+	t.Cleanup(func() {
+		configMutex.Lock()
+		cfg.ShowSms = saved
+		configMutex.Unlock()
+	})
+
 	defer func() {
 		if r := recover(); r != nil {
-			t.Errorf("getSmsPages() panicked immediately: %v", r)
+			t.Errorf("collectAndDrawSms panicked with ShowSms off: %v", r)
 		}
 	}()
 
-	// Start the function in a goroutine
-	done := make(chan bool, 1)
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				t.Errorf("getSmsPages() panicked: %v", r)
-			}
-			done <- true
-		}()
-
-		// Run for a very short time to test it starts properly
-		originalShowSms := cfg.ShowSms
-		cfg.ShowSms = false // Disable to reduce side effects
-
-		// We can't really test the full function as it's an infinite loop,
-		// but we can test the initial setup doesn't crash
-
-		cfg.ShowSms = originalShowSms
-		done <- true
-	}()
-
-	// Wait a short time to see if it crashes immediately
-	select {
-	case <-done:
-		// Function completed without panic
-	default:
-		// Function is running (expected for infinite loop)
+	if n := collectAndDrawSms(&cfg); n < 0 {
+		t.Errorf("collectAndDrawSms returned %d, want a non-negative page count", n)
 	}
 }

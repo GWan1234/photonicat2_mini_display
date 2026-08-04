@@ -6,11 +6,32 @@ package main
 // transport for one that rewrites the destination to an httptest server.
 
 import (
+	"image"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"testing"
 )
+
+// TestMain performs the few pieces of startup that main() would normally do
+// and that the draw path assumes have already happened.
+//
+// imageCache is only allocated inside main(), but every memoising renderer
+// writes to it, so a draw test panics on a nil map unless something else
+// initialised it first. That made the suite order-dependent: it passed in
+// declaration order only because a diskBars test happened to run early, and
+// `go test -shuffle=on` surfaced it as a nil-map panic in TestDrawBattery.
+// Doing it once here makes every draw test independent of ordering.
+func TestMain(m *testing.M) {
+	imageCacheMu.Lock()
+	if imageCache == nil {
+		imageCache = make(map[string]*image.RGBA)
+	}
+	imageCacheMu.Unlock()
+
+	os.Exit(m.Run())
+}
 
 // rewriteTransport sends every request to target, preserving the original
 // path and query so handlers can still route on them.
