@@ -13,15 +13,25 @@
                 {
                     "type": "icon",
                     "icon_path": "assets/svg/up_trig.svg",
-                    "position": {"x": 9, "y": 18},
+                    "position": {
+                        "x": 9,
+                        "y": 18
+                    },
                     "enable": 1
                 },
                 {
                     "type": "text",
                     "label": "WAN Speed Up",
-                    "position": {"x": 23, "y": 3},
+                    "position": {
+                        "x": 23,
+                        "y": 3
+                    },
                     "font": "huge",
-                    "color": [255, 229, 0],
+                    "color": [
+                        255,
+                        229,
+                        0
+                    ],
                     "units": "Mbps",
                     "data_key": "WanUP",
                     "units_font": "unit",
@@ -30,15 +40,25 @@
                 {
                     "type": "icon",
                     "icon_path": "assets/svg/down_trig.svg",
-                    "position": {"x": 9, "y": 58},
+                    "position": {
+                        "x": 9,
+                        "y": 58
+                    },
                     "enable": 1
                 },
                 {
                     "type": "text",
                     "label": "WAN Speed Down",
-                    "position": {"x": 23, "y": 38},
+                    "position": {
+                        "x": 23,
+                        "y": 38
+                    },
                     "font": "huge",
-                    "color": [255, 229, 0],
+                    "color": [
+                        255,
+                        229,
+                        0
+                    ],
                     "units": "Mbps",
                     "data_key": "WanDOWN",
                     "units_font": "unit",
@@ -47,23 +67,40 @@
                 {
                     "type": "icon",
                     "icon_path": "assets/svg/hline.svg",
-                    "position": {"x": 10, "y": 84},
+                    "position": {
+                        "x": 10,
+                        "y": 84
+                    },
                     "enable": 1
                 },
                 {
                     "type": "fixed_text",
                     "label": "Session Data Usage",
-                    "position": {"x": 10, "y": 89},
+                    "position": {
+                        "x": 10,
+                        "y": 89
+                    },
                     "font": "tiny",
-                    "color": [255, 229, 0],
+                    "color": [
+                        255,
+                        229,
+                        0
+                    ],
                     "enable": 1
                 },
                 {
                     "type": "text",
                     "label": "Session Data Usage",
-                    "position": {"x": 10, "y": 101},
+                    "position": {
+                        "x": 10,
+                        "y": 101
+                    },
                     "font": "huge",
-                    "color": [255, 229, 0],
+                    "color": [
+                        255,
+                        229,
+                        0
+                    ],
                     "units": "GB",
                     "data_key": "SessionDataUsage",
                     "units_font": "unit",
@@ -72,17 +109,31 @@
                 {
                     "type": "fixed_text",
                     "label": "Monthly Data Usage",
-                    "position": {"x": 10, "y": 141},
+                    "position": {
+                        "x": 10,
+                        "y": 141
+                    },
                     "font": "tiny",
-                    "color": [255, 229, 0],
+                    "color": [
+                        255,
+                        229,
+                        0
+                    ],
                     "enable": 1
                 },
                 {
                     "type": "text",
                     "label": "Monthly Data Usage",
-                    "position": {"x": 10, "y": 152},
+                    "position": {
+                        "x": 10,
+                        "y": 152
+                    },
                     "font": "huge",
-                    "color": [255, 229, 0],
+                    "color": [
+                        255,
+                        229,
+                        0
+                    ],
                     "units": "GB",
                     "data_key": "MonthlyDataUsage",
                     "units_font": "unit",
@@ -91,21 +142,34 @@
                 {
                     "type": "icon",
                     "icon_path": "assets/svg/hline.svg",
-                    "position": {"x": 10, "y": 198},
+                    "position": {
+                        "x": 10,
+                        "y": 198
+                    },
                     "enable": 1
                 },
                 {
                     "type": "icon",
                     "icon_path": "assets/svg/batt.svg",
-                    "position": {"x": 10, "y": 210},
+                    "position": {
+                        "x": 10,
+                        "y": 210
+                    },
                     "enable": 1
                 },
                 {
                     "type": "text",
                     "label": "Batt",
-                    "position": {"x": 100, "y": 204},
+                    "position": {
+                        "x": 100,
+                        "y": 204
+                    },
                     "font": "reg",
-                    "color": [255, 229, 0],
+                    "color": [
+                        255,
+                        229,
+                        0
+                    ],
                     "units": "w",
                     "data_key": "BatteryWattage",
                     "units_font": "unit",
@@ -114,9 +178,16 @@
                 {
                     "type": "text",
                     "label": "Batt_v",
-                    "position": {"x": 35, "y": 204},
+                    "position": {
+                        "x": 35,
+                        "y": 204
+                    },
                     "font": "reg",
-                    "color": [255, 229, 0],
+                    "color": [
+                        255,
+                        229,
+                        0
+                    ],
                     "units": "v",
                     "data_key": "BatteryVoltage",
                     "units_font": "unit",
@@ -125,15 +196,25 @@
                 {
                     "type": "icon",
                     "icon_path": "assets/svg/charge.svg",
-                    "position": {"x": 10, "y": 228},
+                    "position": {
+                        "x": 10,
+                        "y": 228
+                    },
                     "enable": 1
                 },
                 {
                     "type": "text",
                     "label": "dc",
-                    "position": {"x": 35, "y": 228},
+                    "position": {
+                        "x": 35,
+                        "y": 228
+                    },
                     "font": "reg",
-                    "color": [255, 229, 0],
+                    "color": [
+                        255,
+                        229,
+                        0
+                    ],
                     "units": "v",
                     "data_key": "DCVoltage",
                     "units_font": "unit",
@@ -141,8 +222,14 @@
                 },
                 {
                     "type": "graph",
-                    "position": {"x": 100, "y": 228},
-                    "size": {"width": 60, "height": 25},
+                    "position": {
+                        "x": 100,
+                        "y": 228
+                    },
+                    "size": {
+                        "width": 60,
+                        "height": 25
+                    },
                     "enable": 0,
                     "graph_config": {
                         "graph_type": "power",
@@ -154,17 +241,31 @@
                 {
                     "type": "fixed_text",
                     "label": "ping: [ping_site0]",
-                    "position": {"x": 6, "y": 3},
+                    "position": {
+                        "x": 6,
+                        "y": 3
+                    },
                     "font": "tiny",
-                    "color": [255, 229, 0],
+                    "color": [
+                        255,
+                        229,
+                        0
+                    ],
                     "enable": 1
                 },
                 {
                     "type": "text",
                     "label": "Ping0",
-                    "position": {"x": 6, "y": 17},
+                    "position": {
+                        "x": 6,
+                        "y": 17
+                    },
                     "font": "big",
-                    "color": [255, 229, 0],
+                    "color": [
+                        255,
+                        229,
+                        0
+                    ],
                     "units": "ms",
                     "data_key": "Ping0",
                     "units_font": "unit",
@@ -173,9 +274,16 @@
                 {
                     "type": "text",
                     "label": "Rate0",
-                    "position": {"x": 115, "y": 23},
+                    "position": {
+                        "x": 115,
+                        "y": 23
+                    },
                     "font": "unit",
-                    "color": [255, 255, 255],
+                    "color": [
+                        255,
+                        255,
+                        255
+                    ],
                     "units": "%",
                     "data_key": "Ping0Rate",
                     "units_font": "unit",
@@ -184,17 +292,31 @@
                 {
                     "type": "fixed_text",
                     "label": "ping: [ping_site1]",
-                    "position": {"x": 6, "y": 47},
+                    "position": {
+                        "x": 6,
+                        "y": 47
+                    },
                     "font": "tiny",
-                    "color": [255, 229, 0],
+                    "color": [
+                        255,
+                        229,
+                        0
+                    ],
                     "enable": 1
                 },
                 {
                     "type": "text",
                     "label": "Ping1",
-                    "position": {"x": 6, "y": 61},
+                    "position": {
+                        "x": 6,
+                        "y": 61
+                    },
                     "font": "big",
-                    "color": [255, 229, 0],
+                    "color": [
+                        255,
+                        229,
+                        0
+                    ],
                     "units": "ms",
                     "data_key": "Ping1",
                     "units_font": "unit",
@@ -203,9 +325,16 @@
                 {
                     "type": "text",
                     "label": "Rate1",
-                    "position": {"x": 115, "y": 68},
+                    "position": {
+                        "x": 115,
+                        "y": 68
+                    },
                     "font": "unit",
-                    "color": [255, 255, 255],
+                    "color": [
+                        255,
+                        255,
+                        255
+                    ],
                     "units": "%",
                     "data_key": "Ping1Rate",
                     "units_font": "unit",
@@ -214,17 +343,31 @@
                 {
                     "type": "fixed_text",
                     "label": "LAN IP",
-                    "position": {"x": 6, "y": 93},
+                    "position": {
+                        "x": 6,
+                        "y": 93
+                    },
                     "font": "unit",
-                    "color": [255, 229, 0],
+                    "color": [
+                        255,
+                        229,
+                        0
+                    ],
                     "enable": 1
                 },
                 {
                     "type": "text",
                     "label": "lan",
-                    "position": {"x": 6, "y": 110},
+                    "position": {
+                        "x": 6,
+                        "y": 110
+                    },
                     "font": "tiny",
-                    "color": [255, 229, 255],
+                    "color": [
+                        255,
+                        229,
+                        255
+                    ],
                     "data_key": "LAN_IP",
                     "units_font": "unit",
                     "units": "",
@@ -233,17 +376,31 @@
                 {
                     "type": "fixed_text",
                     "label": "WAN IP",
-                    "position": {"x": 6, "y": 126},
+                    "position": {
+                        "x": 6,
+                        "y": 126
+                    },
                     "font": "unit",
-                    "color": [255, 229, 0],
+                    "color": [
+                        255,
+                        229,
+                        0
+                    ],
                     "enable": 1
                 },
                 {
                     "type": "text",
                     "label": "wan",
-                    "position": {"x": 6, "y": 143},
+                    "position": {
+                        "x": 6,
+                        "y": 143
+                    },
                     "font": "tiny",
-                    "color": [255, 229, 255],
+                    "color": [
+                        255,
+                        229,
+                        255
+                    ],
                     "data_key": "WAN_IP",
                     "units_font": "unit",
                     "units": "",
@@ -252,17 +409,31 @@
                 {
                     "type": "fixed_text",
                     "label": "PUBLIC IP",
-                    "position": {"x": 6, "y": 159},
+                    "position": {
+                        "x": 6,
+                        "y": 159
+                    },
                     "font": "unit",
-                    "color": [255, 229, 0],
+                    "color": [
+                        255,
+                        229,
+                        0
+                    ],
                     "enable": 1
                 },
                 {
                     "type": "text",
                     "label": "public",
-                    "position": {"x": 6, "y": 176},
+                    "position": {
+                        "x": 6,
+                        "y": 176
+                    },
                     "font": "tiny",
-                    "color": [255, 229, 255],
+                    "color": [
+                        255,
+                        229,
+                        255
+                    ],
                     "data_key": "PUBLIC_IP",
                     "units_font": "unit",
                     "units": "",
@@ -271,17 +442,31 @@
                 {
                     "type": "fixed_text",
                     "label": "SSID",
-                    "position": {"x": 6, "y": 192},
+                    "position": {
+                        "x": 6,
+                        "y": 192
+                    },
                     "font": "unit",
-                    "color": [255, 229, 0],
+                    "color": [
+                        255,
+                        229,
+                        0
+                    ],
                     "enable": 1
                 },
                 {
                     "type": "text",
                     "label": "ssid",
-                    "position": {"x": 6, "y": 209},
+                    "position": {
+                        "x": 6,
+                        "y": 209
+                    },
                     "font": "tiny",
-                    "color": [255, 229, 255],
+                    "color": [
+                        255,
+                        229,
+                        255
+                    ],
                     "data_key": "SSID",
                     "units_font": "unit",
                     "units": "",
@@ -290,17 +475,31 @@
                 {
                     "type": "fixed_text",
                     "label": "PUBLIC IPv6",
-                    "position": {"x": 6, "y": 225},
+                    "position": {
+                        "x": 6,
+                        "y": 225
+                    },
                     "font": "unit",
-                    "color": [255, 229, 0],
+                    "color": [
+                        255,
+                        229,
+                        0
+                    ],
                     "enable": 1
                 },
                 {
                     "type": "text",
                     "label": "public6",
-                    "position": {"x": 6, "y": 242},
+                    "position": {
+                        "x": 6,
+                        "y": 242
+                    },
                     "font": "tiny",
-                    "color": [255, 229, 255],
+                    "color": [
+                        255,
+                        229,
+                        255
+                    ],
                     "data_key": "PublicIPv6",
                     "units_font": "unit",
                     "units": "",
@@ -311,31 +510,57 @@
                 {
                     "type": "icon",
                     "icon_path": "assets/svg/cpu.svg",
-                    "position": {"x": 10, "y": 5},
-                    "size": {"width": 16, "height": 16},
+                    "position": {
+                        "x": 10,
+                        "y": 5
+                    },
+                    "size": {
+                        "width": 16,
+                        "height": 16
+                    },
                     "enable": 1
                 },
                 {
                     "type": "cpu_bars",
-                    "position": {"x": 95, "y": 3},
+                    "position": {
+                        "x": 95,
+                        "y": 3
+                    },
                     "data_key": "CpuUsages",
-                    "size": {"width": 70, "height": 21},
+                    "size": {
+                        "width": 70,
+                        "height": 21
+                    },
                     "enable": 1
                 },
                 {
                     "type": "fixed_text",
                     "label": "CPU C°:",
-                    "position": {"x": 10, "y": 28},
+                    "position": {
+                        "x": 10,
+                        "y": 28
+                    },
                     "font": "unit",
-                    "color": [255, 229, 0],
+                    "color": [
+                        255,
+                        229,
+                        0
+                    ],
                     "enable": 1
                 },
                 {
                     "type": "text",
                     "label": "CPU Temp",
-                    "position": {"x": 110, "y": 28},
+                    "position": {
+                        "x": 110,
+                        "y": 28
+                    },
                     "font": "unit",
-                    "color": [255, 229, 255],
+                    "color": [
+                        255,
+                        229,
+                        255
+                    ],
                     "units": " C",
                     "data_key": "CpuTemp",
                     "units_font": "unit",
@@ -344,31 +569,57 @@
                 {
                     "type": "icon",
                     "icon_path": "assets/svg/mem.svg",
-                    "position": {"x": 10, "y": 51},
-                    "size": {"width": 16, "height": 16},
+                    "position": {
+                        "x": 10,
+                        "y": 51
+                    },
+                    "size": {
+                        "width": 16,
+                        "height": 16
+                    },
                     "enable": 1
                 },
                 {
                     "type": "hbar",
-                    "position": {"x": 95, "y": 54},
+                    "position": {
+                        "x": 95,
+                        "y": 54
+                    },
                     "data_key": "MemUsagePercent",
-                    "size": {"width": 70, "height": 12},
+                    "size": {
+                        "width": 70,
+                        "height": 12
+                    },
                     "enable": 1
                 },
                 {
                     "type": "fixed_text",
                     "label": "Fan RPM:",
-                    "position": {"x": 10, "y": 74},
+                    "position": {
+                        "x": 10,
+                        "y": 74
+                    },
                     "font": "unit",
-                    "color": [255, 229, 0],
+                    "color": [
+                        255,
+                        229,
+                        0
+                    ],
                     "enable": 1
                 },
                 {
                     "type": "text",
                     "label": "Fan",
-                    "position": {"x": 110, "y": 74},
+                    "position": {
+                        "x": 110,
+                        "y": 74
+                    },
                     "font": "unit",
-                    "color": [255, 229, 255],
+                    "color": [
+                        255,
+                        229,
+                        255
+                    ],
                     "units": "",
                     "data_key": "FanRPM",
                     "units_font": "unit",
@@ -376,24 +627,44 @@
                 },
                 {
                     "type": "disk_bars",
-                    "position": {"x": 10, "y": 97},
-                    "size": {"width": 155, "height": 12},
+                    "position": {
+                        "x": 10,
+                        "y": 97
+                    },
+                    "size": {
+                        "width": 155,
+                        "height": 12
+                    },
                     "enable": 1
                 },
                 {
                     "type": "fixed_text",
                     "label": "Uptime:",
-                    "position": {"x": 10, "y": 120},
+                    "position": {
+                        "x": 10,
+                        "y": 120
+                    },
                     "font": "unit",
-                    "color": [255, 229, 0],
+                    "color": [
+                        255,
+                        229,
+                        0
+                    ],
                     "enable": 1
                 },
                 {
                     "type": "text",
                     "label": "Uptime",
-                    "position": {"x": 10, "y": 137},
+                    "position": {
+                        "x": 10,
+                        "y": 137
+                    },
                     "font": "thin",
-                    "color": [255, 229, 255],
+                    "color": [
+                        255,
+                        229,
+                        255
+                    ],
                     "data_key": "Uptime",
                     "units_font": "unit",
                     "units": "",
@@ -402,17 +673,31 @@
                 {
                     "type": "fixed_text",
                     "label": "Kernel:",
-                    "position": {"x": 10, "y": 206},
+                    "position": {
+                        "x": 10,
+                        "y": 206
+                    },
                     "font": "unit",
-                    "color": [255, 229, 0],
+                    "color": [
+                        255,
+                        229,
+                        0
+                    ],
                     "enable": 1
                 },
                 {
                     "type": "text",
                     "label": "Kernel",
-                    "position": {"x": 75, "y": 209},
+                    "position": {
+                        "x": 75,
+                        "y": 209
+                    },
                     "font": "tiny",
-                    "color": [255, 229, 255],
+                    "color": [
+                        255,
+                        229,
+                        255
+                    ],
                     "data_key": "Kernel",
                     "units_font": "unit",
                     "units": "",
@@ -421,20 +706,298 @@
                 {
                     "type": "fixed_text",
                     "label": "SN:",
-                    "position": {"x": 10, "y": 229},
+                    "position": {
+                        "x": 10,
+                        "y": 229
+                    },
                     "font": "unit",
-                    "color": [255, 229, 0],
+                    "color": [
+                        255,
+                        229,
+                        0
+                    ],
                     "enable": 1
                 },
                 {
                     "type": "text",
                     "label": "SN",
-                    "position": {"x": 45, "y": 232},
+                    "position": {
+                        "x": 45,
+                        "y": 232
+                    },
                     "font": "tiny",
-                    "color": [255, 229, 255],
+                    "color": [
+                        255,
+                        229,
+                        255
+                    ],
                     "data_key": "SN",
                     "units_font": "unit",
                     "units": "",
+                    "enable": 1
+                }
+            ],
+            "page3": [
+                {
+                    "type": "fixed_text",
+                    "label": "GPS Speed",
+                    "position": {
+                        "x": 10,
+                        "y": 3
+                    },
+                    "font": "tiny",
+                    "color": [
+                        255,
+                        229,
+                        0
+                    ],
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "GPS Speed",
+                    "position": {
+                        "x": 10,
+                        "y": 14
+                    },
+                    "font": "huge",
+                    "color": [
+                        255,
+                        229,
+                        0
+                    ],
+                    "units": "km/h",
+                    "data_key": "GpsSpeed",
+                    "units_font": "unit",
+                    "enable": 1
+                },
+                {
+                    "type": "icon",
+                    "icon_path": "assets/svg/hline.svg",
+                    "position": {
+                        "x": 10,
+                        "y": 62
+                    },
+                    "enable": 1
+                },
+                {
+                    "type": "fixed_text",
+                    "label": "Heading:",
+                    "position": {
+                        "x": 10,
+                        "y": 70
+                    },
+                    "font": "unit",
+                    "color": [
+                        255,
+                        229,
+                        0
+                    ],
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "Heading",
+                    "position": {
+                        "x": 94,
+                        "y": 70
+                    },
+                    "font": "unit",
+                    "color": [
+                        255,
+                        229,
+                        255
+                    ],
+                    "data_key": "GpsCourse",
+                    "units_font": "unit",
+                    "enable": 1
+                },
+                {
+                    "type": "fixed_text",
+                    "label": "Altitude:",
+                    "position": {
+                        "x": 10,
+                        "y": 93
+                    },
+                    "font": "unit",
+                    "color": [
+                        255,
+                        229,
+                        0
+                    ],
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "Altitude",
+                    "position": {
+                        "x": 108,
+                        "y": 93
+                    },
+                    "font": "unit",
+                    "color": [
+                        255,
+                        229,
+                        255
+                    ],
+                    "units": "m",
+                    "data_key": "GpsAlt",
+                    "units_font": "unit",
+                    "enable": 1
+                },
+                {
+                    "type": "fixed_text",
+                    "label": "Accuracy:",
+                    "position": {
+                        "x": 10,
+                        "y": 116
+                    },
+                    "font": "unit",
+                    "color": [
+                        255,
+                        229,
+                        0
+                    ],
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "Accuracy",
+                    "position": {
+                        "x": 108,
+                        "y": 116
+                    },
+                    "font": "unit",
+                    "color": [
+                        255,
+                        229,
+                        255
+                    ],
+                    "units": "m",
+                    "data_key": "GpsAccuracy",
+                    "units_font": "unit",
+                    "enable": 1
+                },
+                {
+                    "type": "fixed_text",
+                    "label": "Fix:",
+                    "position": {
+                        "x": 10,
+                        "y": 139
+                    },
+                    "font": "unit",
+                    "color": [
+                        255,
+                        229,
+                        0
+                    ],
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "Fix",
+                    "position": {
+                        "x": 108,
+                        "y": 139
+                    },
+                    "font": "unit",
+                    "color": [
+                        255,
+                        229,
+                        255
+                    ],
+                    "data_key": "GpsFix",
+                    "units_font": "unit",
+                    "enable": 1
+                },
+                {
+                    "type": "fixed_text",
+                    "label": "Satellites:",
+                    "position": {
+                        "x": 10,
+                        "y": 162
+                    },
+                    "font": "unit",
+                    "color": [
+                        255,
+                        229,
+                        0
+                    ],
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "Sats",
+                    "position": {
+                        "x": 108,
+                        "y": 162
+                    },
+                    "font": "unit",
+                    "color": [
+                        255,
+                        229,
+                        255
+                    ],
+                    "data_key": "GpsSats",
+                    "units_font": "unit",
+                    "enable": 1
+                },
+                {
+                    "type": "icon",
+                    "icon_path": "assets/svg/hline.svg",
+                    "position": {
+                        "x": 10,
+                        "y": 188
+                    },
+                    "enable": 1
+                },
+                {
+                    "type": "fixed_text",
+                    "label": "Position",
+                    "position": {
+                        "x": 10,
+                        "y": 196
+                    },
+                    "font": "unit",
+                    "color": [
+                        255,
+                        229,
+                        0
+                    ],
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "Lat",
+                    "position": {
+                        "x": 10,
+                        "y": 213
+                    },
+                    "font": "tiny",
+                    "color": [
+                        255,
+                        229,
+                        255
+                    ],
+                    "data_key": "GpsLat",
+                    "units_font": "unit",
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "Lon",
+                    "position": {
+                        "x": 10,
+                        "y": 231
+                    },
+                    "font": "tiny",
+                    "color": [
+                        255,
+                        229,
+                        255
+                    ],
+                    "data_key": "GpsLon",
+                    "units_font": "unit",
                     "enable": 1
                 }
             ]

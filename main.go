@@ -587,6 +587,7 @@ func updateIntervals() {
 	signalPage0Reschedule()
 	// Link watcher also accelerates on wake so the top-bar icon is current.
 	signalLinkReschedule()
+	signalGpsReschedule()
 }
 
 // currentPingInterval returns 1s (1 Hz) when the screen is awake and the
@@ -845,6 +846,9 @@ func main() {
 	})
 	startPageSensitiveCollector(currentPage0Interval, page0Reschedule[2], nil, getInfoFromPcatWeb)
 	startPageSensitiveCollector(currentPage0Interval, page0Reschedule[3], nil, collectWANNetworkSpeed)
+	// GPS: 1 Hz while the GPS page is visible, 30 s otherwise. This collector
+	// also adds/removes the GPS page as the web toggle flips.
+	startPageSensitiveCollector(currentGpsInterval, gpsReschedule, nil, collectGpsData)
 	// Carrier-aware egress + public-IP flush/reprobe: every 2s while awake on
 	// any page (not only page 0), so unplug drops the eth icon / PUBLIC IP
 	// promptly and plug-in re-probes without waiting for the 60s web poll.
@@ -1236,6 +1240,9 @@ func mainLoop() {
 						if isPage0(prevPageIdx) != isPage0(currPageIdx) {
 							signalPage0Reschedule()
 						}
+						// GPS page (last cfg page when shown): 1 Hz on it,
+						// 30 s off it.
+						signalGpsReschedule()
 						nextPageLength := 0
 						if isNextPageSMS {
 							nextPageLength = lenSmsPagesImages

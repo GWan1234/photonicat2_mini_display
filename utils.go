@@ -829,6 +829,10 @@ func mergeConfigs() error {
 	// pure recolor (theme change) on a static page would otherwise be skipped.
 	configVersion++
 
+	// The GPS page (last pageN, Gps* data keys) starts hidden; the GPS
+	// collector reveals it when pcat-manager-web reports the feature enabled.
+	detectGpsPage()
+
 	// Initialize totalNumPages based on ShowSms setting
 	if cfg.ShowSms {
 		// Will be updated by getSmsPages() goroutine
