@@ -120,7 +120,13 @@ func rememberWebRegion(kind string, frame *image.RGBA) {
 // nothing. Safe to call only from the render thread (uses region ptrs without
 // locking them; the publish copy is protected by webSnapMu).
 func tryPublishWebSnapshot() {
-	if !webFrameDemanded() {
+	// Seed the very first snapshot even with no browser watching: without it,
+	// the first /screen page load races the render loop — serveFrame only
+	// waits 500ms, and a static (frame-skipped) or dimmed screen may not
+	// publish in that window, so the page landed on a broken image until a
+	// click forced a redraw. webSnapshot is only ever assigned on this
+	// (single) render thread, so the nil check is race-free.
+	if !webFrameDemanded() && webSnapshot != nil {
 		return
 	}
 	top, mid, foot := webLastTop, webLastMiddle, webLastFooter
