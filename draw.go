@@ -2353,7 +2353,11 @@ func renderTopBar(frame *image.RGBA) bool {
 			}
 		}
 	}
-	magicStr := timeStr + " " + strconv.Itoa(int(signalStrength*100)) + " " + networkStr + " " + strconv.Itoa(int(battSOC)) + " " + strconv.FormatBool(battChargingStatus)
+	// configVersion joins the key for the same reason as the footer: a theme
+	// change must repaint now, not whenever the clock minute happens to roll.
+	magicStr := timeStr + " " + strconv.Itoa(int(signalStrength*100)) + " " + networkStr + " " +
+		strconv.Itoa(int(battSOC)) + " " + strconv.FormatBool(battChargingStatus) + " " +
+		strconv.Itoa(configVersion)
 
 	if cacheTopBarStr == magicStr {
 		return false //no need to refresh
@@ -2779,6 +2783,18 @@ func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
 			switch element.GraphConfig.GraphType {
 			case "power":
 				drawPowerGraph(frame, element.Position.X, element.Position.Y, sz.Width, sz.Height)
+			case "gps_compass":
+				// Heading tape: reads the raw course (not the preformatted
+				// GpsCourse string) so it can rotate smoothly, and greys out
+				// when there is no fix.
+				course, hasFix := 0.0, false
+				if v, ok := globalData.Load("GpsCourseDeg"); ok && v != nil {
+					if f, ok := v.(float64); ok {
+						course, hasFix = f, true
+					}
+				}
+				drawGpsCompass(frame, element.Position.X, element.Position.Y,
+					sz.Width, sz.Height, course, hasFix, elementFillColor(element))
 			default:
 				log.Printf("Unknown graph type: %s", element.GraphConfig.GraphType)
 			}
@@ -2867,7 +2883,12 @@ func drawFooter(display gc9307.Device, frame *image.RGBA, currPage int, numOfPag
 // renderFooter draws the footer into frame without touching the display.
 // Returns false on a cache hit or load error.
 func renderFooter(frame *image.RGBA, currPage int, numOfPages int, isSMS bool) bool {
-	magicStr:= strconv.Itoa(currPage) + " " + strconv.Itoa(numOfPages) + " " + strconv.FormatBool(isSMS)
+	// configVersion is part of the key so a theme change repaints the footer
+	// immediately. Without it the key only moves when the page index or count
+	// changes, so a recolor left the old footer (background included) on screen
+	// until the user pressed the button to page forward.
+	magicStr := strconv.Itoa(currPage) + " " + strconv.Itoa(numOfPages) + " " +
+		strconv.FormatBool(isSMS) + " " + strconv.Itoa(configVersion)
 	if cacheFooterStr == magicStr {
 		return false //no need to refresh
 	}

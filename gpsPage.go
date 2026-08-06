@@ -168,29 +168,46 @@ func collectGpsData() {
 		globalData.Store("GpsFix", fix.FixType)
 	}
 
+	// Sats read as "7/12" beside a satellite icon — the slash already says
+	// "used of in view", so the spaces (and the label) are gone.
 	if g.Powered {
-		globalData.Store("GpsSats", fmt.Sprintf("%d / %d", fix.SatsUsed, g.Satellites.InView))
+		globalData.Store("GpsSats", fmt.Sprintf("%d/%d", fix.SatsUsed, g.Satellites.InView))
 	} else {
 		globalData.Store("GpsSats", dash)
 	}
 
+	// Speed carries the km/h unit, so it needs no label; whole numbers below
+	// 10 km/h keep one decimal (walking pace differences matter), above that
+	// the tenth is noise on a 172px panel and costs a glyph the big font wants.
 	if fix.HasFix && fix.SpeedKmh != nil {
-		globalData.Store("GpsSpeed", fmt.Sprintf("%.1f", *fix.SpeedKmh))
+		if *fix.SpeedKmh < 10 {
+			globalData.Store("GpsSpeed", fmt.Sprintf("%.1f", *fix.SpeedKmh))
+		} else {
+			globalData.Store("GpsSpeed", fmt.Sprintf("%.0f", *fix.SpeedKmh))
+		}
 	} else {
 		globalData.Store("GpsSpeed", dash)
 	}
+	// GpsCourse stays as text for any layout that still binds it; GpsCourseDeg
+	// is the raw float the compass tape rotates with, and its presence doubles
+	// as the "we have a heading" flag (absent → tape greys out).
 	if fix.HasFix && fix.CourseDeg != nil {
 		globalData.Store("GpsCourse", fmt.Sprintf("%.0f° %s", *fix.CourseDeg, gpsCardinal(*fix.CourseDeg)))
+		globalData.Store("GpsCourseDeg", normalizeDeg(*fix.CourseDeg))
 	} else {
 		globalData.Store("GpsCourse", dash)
+		globalData.Delete("GpsCourseDeg")
 	}
 	if fix.HasFix && fix.AltM != nil {
 		globalData.Store("GpsAlt", fmt.Sprintf("%.0f", *fix.AltM))
 	} else {
 		globalData.Store("GpsAlt", dash)
 	}
+	// Accuracy renders as "+-4m": the sign is the label. It is spelled "+-"
+	// and not "±" because Orbitron has no U+00B1 glyph — that renders as a
+	// tofu box on the panel.
 	if fix.HasFix && fix.AccuracyM != nil {
-		globalData.Store("GpsAccuracy", fmt.Sprintf("%.1f", *fix.AccuracyM))
+		globalData.Store("GpsAccuracy", fmt.Sprintf("+-%.0f", *fix.AccuracyM))
 	} else {
 		globalData.Store("GpsAccuracy", dash)
 	}
@@ -203,8 +220,12 @@ func collectGpsData() {
 		if lon < 0 {
 			lonH, lon = "W", -lon
 		}
-		globalData.Store("GpsLat", fmt.Sprintf("%.6f° %s", lat, latH))
-		globalData.Store("GpsLon", fmt.Sprintf("%.6f° %s", lon, lonH))
+		// Position lines are "31.2304° N" / "121.4737° E" — the hemisphere
+		// letter is the only label a coordinate needs. Four decimals is ~11m,
+		// finer than the fix itself and two glyphs narrower than six, which is
+		// what lets the line render at a readable size on a 172px panel.
+		globalData.Store("GpsLat", fmt.Sprintf("%.4f° %s", lat, latH))
+		globalData.Store("GpsLon", fmt.Sprintf("%.4f° %s", lon, lonH))
 	} else {
 		// "-" renders as an intentionally empty slot
 		globalData.Store("GpsLat", "-")

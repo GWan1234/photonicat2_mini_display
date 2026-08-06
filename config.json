@@ -1059,36 +1059,24 @@
             ],
             "page4": [
                 {
-                    "type": "fixed_text",
-                    "label": "GPS Speed",
+                    "type": "graph",
+                    "label": "Heading",
                     "position": {
-                        "x": 10,
-                        "y": 3
+                        "x": 0,
+                        "y": 4
                     },
-                    "font": "tiny",
+                    "size": {
+                        "width": 172,
+                        "height": 46
+                    },
                     "color": [
                         255,
                         229,
                         0
                     ],
-                    "enable": 1
-                },
-                {
-                    "type": "text",
-                    "label": "GPS Speed",
-                    "position": {
-                        "x": 10,
-                        "y": 14
+                    "graph_config": {
+                        "graph_type": "gps_compass"
                     },
-                    "font": "huge",
-                    "color": [
-                        255,
-                        229,
-                        0
-                    ],
-                    "units": "km/h",
-                    "data_key": "GpsSpeed",
-                    "units_font": "unit",
                     "enable": 1
                 },
                 {
@@ -1096,18 +1084,8 @@
                     "icon_path": "assets/svg/hline.svg",
                     "position": {
                         "x": 10,
-                        "y": 62
+                        "y": 52
                     },
-                    "enable": 1
-                },
-                {
-                    "type": "fixed_text",
-                    "label": "Heading:",
-                    "position": {
-                        "x": 10,
-                        "y": 70
-                    },
-                    "font": "unit",
                     "color": [
                         255,
                         229,
@@ -1117,29 +1095,47 @@
                 },
                 {
                     "type": "text",
-                    "label": "Heading",
+                    "label": "GPS Speed",
                     "position": {
-                        "x": 94,
-                        "y": 70
+                        "x": 10,
+                        "y": 58
                     },
-                    "font": "unit",
+                    "font": "gigantic",
                     "color": [
                         255,
                         229,
-                        255
+                        0
                     ],
-                    "data_key": "GpsCourse",
+                    "data_key": "GpsSpeed",
                     "units_font": "unit",
+                    "enable": 1,
+                    "units": "km/h"
+                },
+                {
+                    "type": "icon",
+                    "icon_path": "assets/svg/hline.svg",
+                    "position": {
+                        "x": 10,
+                        "y": 112
+                    },
+                    "color": [
+                        255,
+                        229,
+                        0
+                    ],
                     "enable": 1
                 },
                 {
-                    "type": "fixed_text",
-                    "label": "Altitude:",
+                    "type": "icon",
+                    "icon_path": "assets/svg/mountain.svg",
                     "position": {
-                        "x": 10,
-                        "y": 93
+                        "x": 8,
+                        "y": 127
                     },
-                    "font": "unit",
+                    "size": {
+                        "width": 20,
+                        "height": 17
+                    },
                     "color": [
                         255,
                         229,
@@ -1151,28 +1147,66 @@
                     "type": "text",
                     "label": "Altitude",
                     "position": {
-                        "x": 108,
-                        "y": 93
+                        "x": 32,
+                        "y": 120
+                    },
+                    "font": "reg",
+                    "color": [
+                        255,
+                        229,
+                        0
+                    ],
+                    "data_key": "GpsAlt",
+                    "units_font": "unit",
+                    "enable": 1,
+                    "units": "m"
+                },
+                {
+                    "type": "icon",
+                    "icon_path": "assets/svg/satellite.svg",
+                    "position": {
+                        "x": 102,
+                        "y": 125
+                    },
+                    "size": {
+                        "width": 18,
+                        "height": 18
+                    },
+                    "color": [
+                        255,
+                        229,
+                        0
+                    ],
+                    "enable": 1
+                },
+                {
+                    "type": "text",
+                    "label": "Sats",
+                    "position": {
+                        "x": 124,
+                        "y": 121
                     },
                     "font": "unit",
                     "color": [
                         255,
                         229,
-                        255
+                        0
                     ],
-                    "units": "m",
-                    "data_key": "GpsAlt",
+                    "data_key": "GpsSats",
                     "units_font": "unit",
                     "enable": 1
                 },
                 {
-                    "type": "fixed_text",
-                    "label": "Accuracy:",
+                    "type": "icon",
+                    "icon_path": "assets/svg/crosshair.svg",
                     "position": {
-                        "x": 10,
-                        "y": 116
+                        "x": 8,
+                        "y": 162
                     },
-                    "font": "unit",
+                    "size": {
+                        "width": 19,
+                        "height": 19
+                    },
                     "color": [
                         255,
                         229,
@@ -1184,41 +1218,26 @@
                     "type": "text",
                     "label": "Accuracy",
                     "position": {
-                        "x": 108,
-                        "y": 116
+                        "x": 32,
+                        "y": 158
                     },
-                    "font": "unit",
-                    "color": [
-                        255,
-                        229,
-                        255
-                    ],
-                    "units": "m",
-                    "data_key": "GpsAccuracy",
-                    "units_font": "unit",
-                    "enable": 1
-                },
-                {
-                    "type": "fixed_text",
-                    "label": "Fix:",
-                    "position": {
-                        "x": 10,
-                        "y": 139
-                    },
-                    "font": "unit",
+                    "font": "reg",
                     "color": [
                         255,
                         229,
                         0
                     ],
-                    "enable": 1
+                    "data_key": "GpsAccuracy",
+                    "units_font": "unit",
+                    "enable": 1,
+                    "units": "m"
                 },
                 {
                     "type": "text",
                     "label": "Fix",
                     "position": {
-                        "x": 108,
-                        "y": 139
+                        "x": 102,
+                        "y": 161
                     },
                     "font": "unit",
                     "color": [
@@ -1231,54 +1250,12 @@
                     "enable": 1
                 },
                 {
-                    "type": "fixed_text",
-                    "label": "Satellites:",
-                    "position": {
-                        "x": 10,
-                        "y": 162
-                    },
-                    "font": "unit",
-                    "color": [
-                        255,
-                        229,
-                        0
-                    ],
-                    "enable": 1
-                },
-                {
-                    "type": "text",
-                    "label": "Sats",
-                    "position": {
-                        "x": 108,
-                        "y": 162
-                    },
-                    "font": "unit",
-                    "color": [
-                        255,
-                        229,
-                        255
-                    ],
-                    "data_key": "GpsSats",
-                    "units_font": "unit",
-                    "enable": 1
-                },
-                {
                     "type": "icon",
                     "icon_path": "assets/svg/hline.svg",
                     "position": {
                         "x": 10,
-                        "y": 188
+                        "y": 198
                     },
-                    "enable": 1
-                },
-                {
-                    "type": "fixed_text",
-                    "label": "Position",
-                    "position": {
-                        "x": 10,
-                        "y": 196
-                    },
-                    "font": "unit",
                     "color": [
                         255,
                         229,
@@ -1291,9 +1268,9 @@
                     "label": "Lat",
                     "position": {
                         "x": 10,
-                        "y": 213
+                        "y": 208
                     },
-                    "font": "tiny",
+                    "font": "unit",
                     "color": [
                         255,
                         229,
@@ -1308,9 +1285,9 @@
                     "label": "Lon",
                     "position": {
                         "x": 10,
-                        "y": 231
+                        "y": 234
                     },
-                    "font": "tiny",
+                    "font": "unit",
                     "color": [
                         255,
                         229,

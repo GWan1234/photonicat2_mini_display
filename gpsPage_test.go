@@ -361,17 +361,23 @@ func TestCollectGpsDataFormatsFix(t *testing.T) {
 
 	collectGpsData()
 
+	// The page renders label-free: the values carry their own meaning, so the
+	// formats are the compact ones the icons sit beside.
 	want := map[string]string{
-		"GpsFix":    "3D",
-		"GpsSats":   "9 / 14",
-		"GpsSpeed":  "63.4",
+		"GpsFix": "3D",
+		// "used/in view" — the slash is the label.
+		"GpsSats": "9/14",
+		// At/above 10 km/h the tenth is dropped: it is noise at this speed and
+		// costs a glyph the gigantic font needs.
+		"GpsSpeed":  "63",
 		"GpsCourse": "92° E",
 		"GpsAlt":    "13",
-		// 4.25 is exact in binary and Go's formatter rounds half-to-even, so
-		// this renders "4.2" rather than "4.3".
-		"GpsAccuracy": "4.2",
-		"GpsLat":      "31.230416° N",
-		"GpsLon":      "121.473701° E",
+		// "+-" rather than "±": Orbitron has no U+00B1 glyph.
+		"GpsAccuracy": "+-4",
+		// 4 decimals ≈ 11 m, finer than the fix itself and narrow enough to
+		// render large.
+		"GpsLat": "31.2304° N",
+		"GpsLon": "121.4737° E",
 	}
 	for key, exp := range want {
 		got, ok := globalData.Load(key)
@@ -412,11 +418,11 @@ func TestCollectGpsDataSouthWestHemispheres(t *testing.T) {
 
 	collectGpsData()
 
-	if got, _ := globalData.Load("GpsLat"); got != "33.865143° S" {
-		t.Errorf("GpsLat = %v, want \"33.865143° S\"", got)
+	if got, _ := globalData.Load("GpsLat"); got != "33.8651° S" {
+		t.Errorf("GpsLat = %v, want \"33.8651° S\"", got)
 	}
-	if got, _ := globalData.Load("GpsLon"); got != "70.669300° W" {
-		t.Errorf("GpsLon = %v, want \"70.669300° W\"", got)
+	if got, _ := globalData.Load("GpsLon"); got != "70.6693° W" {
+		t.Errorf("GpsLon = %v, want \"70.6693° W\"", got)
 	}
 }
 
@@ -439,7 +445,7 @@ func TestCollectGpsDataPlaceholders(t *testing.T) {
 			name:     "no_fix",
 			body:     `{"capable":true,"enabled":true,"powered":true,"fix":{"has_fix":false,"sats_used":0},"satellites":{"in_view":3}}`,
 			wantFix:  "No Fix",
-			wantSats: "0 / 3",
+			wantSats: "0/3",
 		},
 	}
 

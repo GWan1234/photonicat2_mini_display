@@ -19,3 +19,4 @@ test_runner
 test_runner_*
 .DS_Store
 /openwrt/
+__pycache__/

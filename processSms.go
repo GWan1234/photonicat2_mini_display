@@ -41,7 +41,20 @@ type SMS struct {
 var (
 	lastSmsJsonContent string
 	lastNumPages       int
+	// lastSmsConfigVersion records the configVersion the cached SMS images
+	// were rendered at. SMS pages are rasterised once and then blitted, with
+	// the theme palette from smsThemeColors() baked into the pixels, so a
+	// recolor with unchanged message text has to invalidate them explicitly —
+	// otherwise the SMS pages keep the old palette until a new message
+	// arrives. -1 means "nothing rendered yet".
+	lastSmsConfigVersion         = -1
 	lastSuccessfulSmsJsonContent string
+
+	// smsRerender wakes getSmsPages out of its 1-minute wait so a theme change
+	// repaints the SMS pages now instead of at the next poll. Buffered depth 1
+	// with a non-blocking send: coalescing several rapid theme saves into one
+	// re-render is exactly the desired behaviour.
+	smsRerender = make(chan struct{}, 1)
 	
 	// Memory pool for SMS images to reduce allocations
 	smsImagePool = sync.Pool{
@@ -143,6 +156,16 @@ func getSmsFont() *truetype.Font {
 	return smsFont
 }
 
+// signalSmsRerender asks getSmsPages to rebuild the cached SMS page images on
+// its next loop iteration rather than waiting out the poll interval. Safe to
+// call from any goroutine, and a no-op if a re-render is already pending.
+func signalSmsRerender() {
+	select {
+	case smsRerender <- struct{}{}:
+	default:
+	}
+}
+
 func collectAndDrawSms(cfg *Config) int {
 	jsonContent := getJsonContent(cfg)
 
@@ -150,12 +173,15 @@ func collectAndDrawSms(cfg *Config) int {
 		jsonContent = fmt.Sprintf("{\"msg\":[{\"sender\":\"System\",\"timestamp\":\"%s\",\"content\":\"No SMS - 无消息\"}]}", time.Now().Format("2006-01-02 15:04:05"))
 	}
 
-	if jsonContent == lastSmsJsonContent {
+	// Re-render when the messages change OR when the config was remerged (a
+	// theme change): the palette is baked into the cached images.
+	if jsonContent == lastSmsJsonContent && lastSmsConfigVersion == configVersion {
 		log.Println("collectAndDrawSms: No new SMS, lastNumPages:", lastNumPages)
 		return lastNumPages
 	}
 
 	lastSmsJsonContent = jsonContent
+	lastSmsConfigVersion = configVersion
 	lastNumPages = 0
 
 	rawImgs, err := drawSmsFrJson(jsonContent, false, false)
@@ -709,7 +735,12 @@ func getSmsPages() {
 	defer ticker.Stop()
 
 	for {
-		<-ticker.C
+		// Either the poll interval elapsed or a config remerge asked for an
+		// immediate repaint (theme change).
+		select {
+		case <-ticker.C:
+		case <-smsRerender:
+		}
 		if cfg.ShowSms {
 			if !firstFetchComplete {
 				log.Println("Startup retry: attempting SMS fetch...")

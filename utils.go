@@ -829,6 +829,11 @@ func mergeConfigs() error {
 	// pure recolor (theme change) on a static page would otherwise be skipped.
 	configVersion++
 
+	// SMS pages are pre-rasterised with the theme palette baked in, so the
+	// bumped configVersion alone only invalidates them — this kicks the SMS
+	// goroutine to actually redraw now instead of up to a minute later.
+	signalSmsRerender()
+
 	// The GPS page (last pageN, Gps* data keys) starts hidden; the GPS
 	// collector reveals it when pcat-manager-web reports the feature enabled.
 	detectGpsPage()
