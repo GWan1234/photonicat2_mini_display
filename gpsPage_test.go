@@ -6,9 +6,11 @@ package main
 // the presence logic is covered here alongside the pure formatting helpers.
 
 import (
+	"fmt"
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -568,5 +570,55 @@ func TestCollectGpsDataUnreachableServer(t *testing.T) {
 
 	if gpsPageShown {
 		t.Error("GPS page still shown after an unreachable server")
+	}
+}
+
+// Speed is always whole. Walking pace used to keep a decimal ("8.4"), which
+// cost a glyph slot in the page's largest font; the tenth is below GNSS
+// doppler noise anyway, so every speed now rounds.
+func TestCollectGpsDataSpeedHasNoDecimals(t *testing.T) {
+	cases := []struct {
+		kmh  float64
+		want string
+	}{
+		{0, "0"},
+		{0.4, "0"},
+		{0.6, "1"},
+		{8.44, "8"},
+		{9.99, "10"},
+		{63.44, "63"},
+		{188.7, "189"},
+	}
+
+	for _, c := range cases {
+		withGpsState(t)
+
+		body := fmt.Sprintf(`{
+			"capable": true, "enabled": true, "powered": true,
+			"fix": {"has_fix": true, "fix_type": "3D", "speed_kmh": %v, "sats_used": 6},
+			"satellites": {"in_view": 9}
+		}`, c.kmh)
+
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Write([]byte(body))
+		}))
+		restore := redirectLocalHTTP(t, srv)
+
+		gpsPageConfigured = true
+		gpsBaseCfgPages = 4
+		cfgNumPages = 3
+
+		collectGpsData()
+
+		got, _ := globalData.Load("GpsSpeed")
+		if got != c.want {
+			t.Errorf("%v km/h -> GpsSpeed = %v, want %v", c.kmh, got, c.want)
+		}
+		if s, ok := got.(string); ok && strings.Contains(s, ".") {
+			t.Errorf("%v km/h -> GpsSpeed = %q still has a decimal point", c.kmh, s)
+		}
+
+		restore()
+		srv.Close()
 	}
 }

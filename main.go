@@ -331,6 +331,39 @@ func ReturnFrameBuffer(buf *image.RGBA) {
 	}
 }
 
+// buildFontTable returns the name→font mapping the display templates address
+// by their "font" field, rooted at the given assets prefix.
+//
+// It is a function rather than a literal inside main() so tests can build the
+// same table against a local assets/ dir: a test that copied the literal would
+// silently miss any font added later, and an element asking for the missing
+// name renders as nothing at all rather than failing loudly.
+func buildFontTable(prefix string) map[string]FontConfig {
+	orbitron := func(weight string, size float64) FontConfig {
+		return FontConfig{
+			FontPath: prefix + "/assets/fonts/Orbitron-" + weight + ".ttf",
+			FontSize: size,
+		}
+	}
+	return map[string]FontConfig{
+		"clock":     orbitron("Medium", 20),
+		"clockBold": orbitron("ExtraBold", 17),
+		"reg":       orbitron("ExtraBold", 18),
+		"big":       orbitron("ExtraBold", 25),
+		"unit":      orbitron("Medium", 15),
+		"tiny":      orbitron("Regular", 12),
+		"micro":     orbitron("Regular", 10),
+		"thin":      orbitron("Regular", 18),
+		"huge":      orbitron("ExtraBold", 34),
+		"gigantic":  orbitron("ExtraBold", 48),
+		// One step above gigantic, for the GPS page's speed readout. Sized so
+		// three digits ("188") still fit the 172px panel beside their unit.
+		"colossal": orbitron("ExtraBold", 58),
+		// Chinese font variants
+		"unit_cjk": {FontPath: prefix + "/assets/fonts/NotoSansMonoCJK-VF.ttf.ttc", FontSize: 15},
+	}
+}
+
 // Position defines X and Y coordinates.
 type Position struct {
 	X int `json:"x"`
@@ -765,21 +798,7 @@ func main() {
 		assetsPrefix = "/usr/share/pcat2_mini_display"
 	}
 
-	// For demonstration, we create a mapping from font names to font configurations.
-	fonts = map[string]FontConfig{
-		"clock":     {FontPath: assetsPrefix + "/assets/fonts/Orbitron-Medium.ttf", FontSize: 20},
-		"clockBold": {FontPath: assetsPrefix + "/assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 17},
-		"reg":       {FontPath: assetsPrefix + "/assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 18},
-		"big":       {FontPath: assetsPrefix + "/assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 25},
-		"unit":      {FontPath: assetsPrefix + "/assets/fonts/Orbitron-Medium.ttf", FontSize: 15},
-		"tiny":      {FontPath: assetsPrefix + "/assets/fonts/Orbitron-Regular.ttf", FontSize: 12},
-		"micro":     {FontPath: assetsPrefix + "/assets/fonts/Orbitron-Regular.ttf", FontSize: 10},
-		"thin":      {FontPath: assetsPrefix + "/assets/fonts/Orbitron-Regular.ttf", FontSize: 18},
-		"huge":      {FontPath: assetsPrefix + "/assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 34},
-		"gigantic":  {FontPath: assetsPrefix + "/assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 48},
-		// Chinese font variants
-		"unit_cjk": {FontPath: assetsPrefix + "/assets/fonts/NotoSansMonoCJK-VF.ttf.ttc", FontSize: 15},
-	}
+	fonts = buildFontTable(assetsPrefix)
 
 	imageCache = make(map[string]*image.RGBA)
 

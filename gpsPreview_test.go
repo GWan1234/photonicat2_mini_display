@@ -13,20 +13,10 @@ import (
 	"testing"
 )
 
+// gpsPreviewFonts installs the real font table against the repo's assets dir,
+// so a font added to buildFontTable is available here without a second edit.
 func gpsPreviewFonts() {
-	fonts = map[string]FontConfig{
-		"clock":     {FontPath: "./assets/fonts/Orbitron-Medium.ttf", FontSize: 20},
-		"clockBold": {FontPath: "./assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 17},
-		"reg":       {FontPath: "./assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 18},
-		"big":       {FontPath: "./assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 25},
-		"unit":      {FontPath: "./assets/fonts/Orbitron-Medium.ttf", FontSize: 15},
-		"tiny":      {FontPath: "./assets/fonts/Orbitron-Regular.ttf", FontSize: 12},
-		"micro":     {FontPath: "./assets/fonts/Orbitron-Regular.ttf", FontSize: 10},
-		"thin":      {FontPath: "./assets/fonts/Orbitron-Regular.ttf", FontSize: 18},
-		"huge":      {FontPath: "./assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 34},
-		"gigantic":  {FontPath: "./assets/fonts/Orbitron-ExtraBold.ttf", FontSize: 48},
-		"unit_cjk":  {FontPath: "./assets/fonts/NotoSansMonoCJK-VF.ttf.ttc", FontSize: 15},
-	}
+	fonts = buildFontTable(".")
 }
 
 func TestGpsPagePreview(t *testing.T) {
@@ -58,8 +48,20 @@ func TestGpsPagePreview(t *testing.T) {
 		globalData.Store("GpsFix", "No Fix")
 		globalData.Store("GpsLat", "-")
 		globalData.Store("GpsLon", "-")
+	case "fast":
+		// Widest realistic case: three speed digits and four altitude digits
+		// at the page's largest fonts.
+		globalData.Store("GpsSpeed", "188")
+		globalData.Store("GpsCourse", "271° W")
+		globalData.Store("GpsCourseDeg", 271.0)
+		globalData.Store("GpsAlt", "1284")
+		globalData.Store("GpsAccuracy", "+-3")
+		globalData.Store("GpsSats", "11/18")
+		globalData.Store("GpsFix", "3D")
+		globalData.Store("GpsLat", "31.2304° N")
+		globalData.Store("GpsLon", "121.4737° E")
 	case "north":
-		globalData.Store("GpsSpeed", "8.4")
+		globalData.Store("GpsSpeed", "8")
 		globalData.Store("GpsCourse", "3° N")
 		globalData.Store("GpsCourseDeg", 3.0)
 		globalData.Store("GpsAlt", "1284")
@@ -92,4 +94,38 @@ func TestGpsPagePreview(t *testing.T) {
 		out = "/tmp/gps_preview.png"
 	}
 	saveFrameToPng(frame, out)
+}
+
+// Every "font"/"units_font" a shipped config names must exist in the font
+// table. A missing name is silent: getFontFace errors, the draw case logs and
+// `continue`s, and the element just does not appear — which is exactly how the
+// speed readout vanished when "colossal" was added to one table but not the
+// other.
+func TestConfigFontsAllRegistered(t *testing.T) {
+	table := buildFontTable(".")
+
+	for _, name := range []string{"config.json", "config_debian.json"} {
+		c, err := loadConfig(name)
+		if err != nil {
+			t.Fatalf("loadConfig(%s): %v", name, err)
+		}
+		for page, els := range c.DisplayTemplate.Elements {
+			for i, el := range els {
+				for field, want := range map[string]string{
+					"font":       el.Font,
+					"units_font": el.UnitsFont,
+				} {
+					// Only text-bearing elements need a font; blank means
+					// "not applicable" (icons, graphs, bars).
+					if want == "" {
+						continue
+					}
+					if _, ok := table[want]; !ok {
+						t.Errorf("%s %s[%d] %s=%q is not in the font table",
+							name, page, i, field, want)
+					}
+				}
+			}
+		}
+	}
 }

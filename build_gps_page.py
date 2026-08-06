@@ -29,16 +29,18 @@ DATA = [255, 229, 255]
 
 W = 172  # panel width
 
-# Vertical rhythm inside the 266px middle frame.
+# Vertical rhythm inside the 266px middle frame. There is no rule between the
+# compass and the speed: the compass tape ends in its own baseline, so a second
+# horizontal line right under it read as a double rule. Speed moves up into
+# that reclaimed space instead.
 Y_COMPASS = 4
-Y_RULE_1 = 52
-Y_SPEED = 58
+Y_SPEED = 50
 Y_RULE_2 = 112
-Y_ROW_1 = 120
-Y_ROW_2 = 158
-Y_RULE_3 = 198
-Y_LAT = 208
-Y_LON = 234
+Y_ROW_1 = 118
+Y_ROW_2 = 160
+Y_RULE_3 = 200
+Y_LAT = 209
+Y_LON = 235
 
 
 def icon(path, x, y, w, h, color=PRIMARY):
@@ -90,19 +92,23 @@ def build_gps_page():
             "graph_config": {"graph_type": "gps_compass"},
             "enable": 1,
         },
-        hline(Y_RULE_1),
-
-        # --- Speed: biggest number on the page. "km/h" is the only label. ---
-        text("GPS Speed", "GpsSpeed", 10, Y_SPEED, "gigantic", units="km/h"),
+        # --- Speed: biggest number on the page. "km/h" is the only label, and
+        # the value is whole-number so the glyphs can run this large. ---
+        text("GPS Speed", "GpsSpeed", 10, Y_SPEED, "colossal", units="km/h"),
         hline(Y_RULE_2),
 
         # --- Row 1: altitude (mountain) | satellites (dish). Two columns; the
         # right column starts at 100 so the widest left value ("8888m" in big)
         # still clears the satellite icon.
-        icon("mountain.svg", 8, Y_ROW_1 + 7, 20, 17),
-        text("Altitude", "GpsAlt", 32, Y_ROW_1, "reg", units="m"),
-        icon("satellite.svg", 102, Y_ROW_1 + 5, 18, 18),
-        text("Sats", "GpsSats", 124, Y_ROW_1 + 1, "unit"),
+        # Altitude is the widest left value (4 digits + "m" at big), so the
+        # satellite column sits at 118 to stay clear of it.
+        # No "m" on the altitude: the mountain already says what it is, and a
+        # 4-digit value ("1284") plus a unit is wider than the column, so the
+        # suffix collided with the satellite icon.
+        icon("mountain.svg", 6, Y_ROW_1 + 9, 22, 18),
+        text("Altitude", "GpsAlt", 31, Y_ROW_1, "big"),
+        icon("satellite.svg", 103, Y_ROW_1 + 8, 18, 18),
+        text("Sats", "GpsSats", 125, Y_ROW_1 + 5, "tiny"),
 
         # --- Row 2: accuracy (crosshair) | fix type. ---
         icon("crosshair.svg", 8, Y_ROW_2 + 4, 19, 19),

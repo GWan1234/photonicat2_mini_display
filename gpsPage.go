@@ -176,15 +176,12 @@ func collectGpsData() {
 		globalData.Store("GpsSats", dash)
 	}
 
-	// Speed carries the km/h unit, so it needs no label; whole numbers below
-	// 10 km/h keep one decimal (walking pace differences matter), above that
-	// the tenth is noise on a 172px panel and costs a glyph the big font wants.
+	// Speed carries the km/h unit, so it needs no label. Always whole numbers:
+	// the tenth is below GNSS doppler noise anyway, and dropping it lets the
+	// readout render at the page's largest font without a decimal point
+	// eating a glyph slot on a 172px panel.
 	if fix.HasFix && fix.SpeedKmh != nil {
-		if *fix.SpeedKmh < 10 {
-			globalData.Store("GpsSpeed", fmt.Sprintf("%.1f", *fix.SpeedKmh))
-		} else {
-			globalData.Store("GpsSpeed", fmt.Sprintf("%.0f", *fix.SpeedKmh))
-		}
+		globalData.Store("GpsSpeed", fmt.Sprintf("%.0f", *fix.SpeedKmh))
 	} else {
 		globalData.Store("GpsSpeed", dash)
 	}
