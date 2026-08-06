@@ -1064,8 +1064,12 @@ func clampBarRadius(radius, h int) int {
 // expensive supersampled rasterize runs once per (w,h,radius).
 func getBarOuterFrame(w, h, radius int) *image.RGBA {
 	radius = clampBarRadius(radius, h)
+	// The background colour is part of the key: the rendered frame bakes it in,
+	// so a theme change must not be served the previous theme's cached bitmap.
+	bg := barBgHex()
 	cacheKey := "gen:barframe:aa" + strconv.Itoa(barFrameAAScale) + ":" +
-		strconv.Itoa(w) + "x" + strconv.Itoa(h) + ":r" + strconv.Itoa(radius)
+		strconv.Itoa(w) + "x" + strconv.Itoa(h) + ":r" + strconv.Itoa(radius) +
+		":bg" + bg
 
 	imageCacheMu.RLock()
 	if img, ok := imageCache[cacheKey]; ok {
@@ -1079,7 +1083,7 @@ func getBarOuterFrame(w, h, radius int) *image.RGBA {
 	canvas.Start(w, h)
 	// Half-pixel inset keeps the 1px stroke from being clipped at the edge.
 	canvas.Roundrect(0, 0, w-1, h-1, radius, radius,
-		"fill:"+barBgHex+";stroke:"+barTrackHex+";stroke-width:1")
+		"fill:"+bg+";stroke:"+barTrackHex+";stroke-width:1")
 	canvas.End()
 
 	img, err := renderSvgBytesAA(buf.Bytes(), cacheKey, barFrameAAScale)
@@ -1087,7 +1091,7 @@ func getBarOuterFrame(w, h, radius int) *image.RGBA {
 		log.Printf("getBarOuterFrame: %v", err)
 		// Fallback empty black rect so callers still have a buffer.
 		fallback := image.NewRGBA(image.Rect(0, 0, w, h))
-		draw.Draw(fallback, fallback.Bounds(), image.NewUniform(PCAT_BLACK), image.Point{}, draw.Src)
+		draw.Draw(fallback, fallback.Bounds(), image.NewUniform(screenBgColor), image.Point{}, draw.Src)
 		return fallback
 	}
 	return img
@@ -1641,10 +1645,19 @@ func drawSignalStrength(frame *image.RGBA, x0, y0 int, strength float64) {
 var (
 	barFillHex  = fmt.Sprintf("#%02X%02X%02X", PCAT_YELLOW.R, PCAT_YELLOW.G, PCAT_YELLOW.B)
 	barTrackHex = fmt.Sprintf("#%02X%02X%02X", PCAT_GREY.R, PCAT_GREY.G, PCAT_GREY.B)
-	// iStat-menu look: track sits on our black background with only a thin
-	// grey frame drawn to show the edge of each bar.
-	barBgHex = fmt.Sprintf("#%02X%02X%02X", PCAT_BLACK.R, PCAT_BLACK.G, PCAT_BLACK.B)
 )
+
+// barBgHex is the unfilled track colour of the CPU/disk/memory meters. It
+// follows the theme's screen background rather than being hardcoded black:
+// the bars sit directly on the page, so a black track on a themed background
+// (e.g. ember's [26,7,2]) drew as a dark rectangle punched out of the page.
+//
+// It is a function, not a var, because setScreenBgColor can change the
+// background at runtime when a theme is applied — a value computed once at
+// init would keep the startup colour forever.
+func barBgHex() string {
+	return fmt.Sprintf("#%02X%02X%02X", screenBgColor.R, screenBgColor.G, screenBgColor.B)
+}
 
 const (
 	// Shared outer-frame corner radius for CPU bars and the mem hbar so both

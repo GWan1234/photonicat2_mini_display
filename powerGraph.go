@@ -84,8 +84,15 @@ func recordPowerSample() {
 	}
 	
 	powerData.mu.Lock()
-	defer powerData.mu.Unlock()
-	
+	// Unlocked explicitly below (before the file write) rather than by a plain
+	// defer, so the deferred call must not double-unlock on the early paths.
+	locked := true
+	defer func() {
+		if locked {
+			powerData.mu.Unlock()
+		}
+	}()
+
 	// Add new sample
 	sample := PowerSample{
 		Timestamp: time.Now(),
@@ -112,9 +119,29 @@ func recordPowerSample() {
 		powerData.Samples = powerData.Samples[len(powerData.Samples)-MAX_POWER_SAMPLES:]
 	}
 	
-	// Save data periodically (every 10 samples to reduce I/O)
-	if len(powerData.Samples)%10 == 0 {
-		savePowerData()
+	// Save data periodically (every 10 samples to reduce I/O).
+	//
+	// savePowerData takes the read lock, and this function holds the write
+	// lock — Go's RWMutex is not reentrant, so calling it directly here
+	// self-deadlocks the moment the sample count hits a multiple of 10. The
+	// mutex is then held forever and every later reader queues behind it,
+	// which freezes the render loop (middlePageFingerprint reads powerData
+	// for any "graph" element) and the display stops repainting entirely.
+	//
+	// Snapshot under the lock we already hold and write the file outside it:
+	// the encode is I/O, so it should not be under the lock in any case.
+	shouldSave := len(powerData.Samples)%10 == 0
+	var snapshot []PowerSample
+	timeFrame := powerData.TimeFrameMins
+	if shouldSave {
+		snapshot = make([]PowerSample, len(powerData.Samples))
+		copy(snapshot, powerData.Samples)
+	}
+	powerData.mu.Unlock()
+	locked = false
+
+	if shouldSave {
+		savePowerDataSnapshot(snapshot, timeFrame)
 	}
 }
 
@@ -153,20 +180,38 @@ func loadPowerData() {
 	log.Printf("Loaded %d power samples from cache", len(powerData.Samples))
 }
 
-// savePowerData saves power data to file
+// savePowerData saves power data to file.
+//
+// Callers must NOT hold powerData.mu: this takes the read lock itself, and the
+// mutex is not reentrant. To save while already holding the write lock, copy
+// the samples and call savePowerDataSnapshot after unlocking.
 func savePowerData() {
+	powerData.mu.RLock()
+	snapshot := make([]PowerSample, len(powerData.Samples))
+	copy(snapshot, powerData.Samples)
+	timeFrame := powerData.TimeFrameMins
+	powerData.mu.RUnlock()
+
+	savePowerDataSnapshot(snapshot, timeFrame)
+}
+
+// savePowerDataSnapshot writes an already-copied sample set to disk. It takes
+// no locks, so it is safe to call from a path that has just released one — and
+// it keeps the file I/O out of the critical section either way.
+func savePowerDataSnapshot(samples []PowerSample, timeFrameMins int) {
 	file, err := os.Create(POWER_DATA_FILE)
 	if err != nil {
 		log.Printf("Failed to create power data file: %v", err)
 		return
 	}
 	defer file.Close()
-	
-	encoder := json.NewEncoder(file)
-	powerData.mu.RLock()
-	defer powerData.mu.RUnlock()
-	
-	if err := encoder.Encode(powerData); err != nil {
+
+	payload := struct {
+		Samples       []PowerSample `json:"samples"`
+		TimeFrameMins int           `json:"time_frame_mins"`
+	}{Samples: samples, TimeFrameMins: timeFrameMins}
+
+	if err := json.NewEncoder(file).Encode(payload); err != nil {
 		log.Printf("Failed to encode power data: %v", err)
 	}
 }

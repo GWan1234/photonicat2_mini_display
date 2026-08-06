@@ -29,16 +29,14 @@ DATA = [255, 229, 255]
 
 W = 172  # panel width
 
-# Vertical rhythm inside the 266px middle frame. There is no rule between the
-# compass and the speed: the compass tape ends in its own baseline, so a second
-# horizontal line right under it read as a double rule. Speed moves up into
-# that reclaimed space instead.
+# Vertical rhythm inside the 266px middle frame. The page carries no horizontal
+# rules at all: the compass tape ends in its own baseline, and the icon column
+# already groups the rows, so the dividers were pure clutter. Spacing does the
+# separating instead.
 Y_COMPASS = 4
 Y_SPEED = 50
-Y_RULE_2 = 112
 Y_ROW_1 = 118
 Y_ROW_2 = 160
-Y_RULE_3 = 200
 Y_LAT = 209
 Y_LON = 235
 
@@ -50,16 +48,6 @@ def icon(path, x, y, w, h, color=PRIMARY):
         "position": {"x": x, "y": y},
         "size": {"width": w, "height": h},
         "color": color,
-        "enable": 1,
-    }
-
-
-def hline(y):
-    return {
-        "type": "icon",
-        "icon_path": "assets/svg/hline.svg",
-        "position": {"x": 10, "y": y},
-        "color": PRIMARY,
         "enable": 1,
     }
 
@@ -95,27 +83,21 @@ def build_gps_page():
         # --- Speed: biggest number on the page. "km/h" is the only label, and
         # the value is whole-number so the glyphs can run this large. ---
         text("GPS Speed", "GpsSpeed", 10, Y_SPEED, "colossal", units="km/h"),
-        hline(Y_RULE_2),
 
-        # --- Row 1: altitude (mountain) | satellites (dish). Two columns; the
-        # right column starts at 100 so the widest left value ("8888m" in big)
-        # still clears the satellite icon.
-        # Altitude is the widest left value (4 digits + "m" at big), so the
-        # satellite column sits at 118 to stay clear of it.
-        # No "m" on the altitude: the mountain already says what it is, and a
-        # 4-digit value ("1284") plus a unit is wider than the column, so the
-        # suffix collided with the satellite icon.
-        icon("mountain.svg", 6, Y_ROW_1 + 9, 22, 18),
-        text("Altitude", "GpsAlt", 31, Y_ROW_1, "big"),
-        icon("satellite.svg", 103, Y_ROW_1 + 8, 18, 18),
-        text("Sats", "GpsSats", 125, Y_ROW_1 + 5, "tiny"),
+        # --- Row 1: altitude (mountain) | satellites (dish). No "m" on the
+        # altitude: the mountain already says what it is, and a 4-digit value
+        # ("1284") plus a unit is wider than the column, so the suffix collided
+        # with the satellite icon. Both sit a couple of px lower than the row
+        # baseline so they optically centre against the taller left glyphs.
+        icon("mountain.svg", 6, Y_ROW_1 + 11, 22, 18),
+        text("Altitude", "GpsAlt", 31, Y_ROW_1 + 2, "big"),
+        icon("satellite.svg", 103, Y_ROW_1 + 10, 18, 18),
+        text("Sats", "GpsSats", 125, Y_ROW_1 + 7, "tiny"),
 
         # --- Row 2: accuracy (crosshair) | fix type. ---
         icon("crosshair.svg", 8, Y_ROW_2 + 4, 19, 19),
         text("Accuracy", "GpsAccuracy", 32, Y_ROW_2, "reg", units="m"),
         text("Fix", "GpsFix", 102, Y_ROW_2 + 3, "unit", color=DATA),
-
-        hline(Y_RULE_3),
 
         # --- Position: hemisphere letter carries the meaning. ---
         text("Lat", "GpsLat", 10, Y_LAT, "unit", color=DATA),

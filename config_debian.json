@@ -779,24 +779,10 @@
                 },
                 {
                     "type": "icon",
-                    "icon_path": "assets/svg/hline.svg",
-                    "position": {
-                        "x": 10,
-                        "y": 112
-                    },
-                    "color": [
-                        255,
-                        229,
-                        0
-                    ],
-                    "enable": 1
-                },
-                {
-                    "type": "icon",
                     "icon_path": "assets/svg/mountain.svg",
                     "position": {
                         "x": 6,
-                        "y": 127
+                        "y": 129
                     },
                     "size": {
                         "width": 22,
@@ -814,7 +800,7 @@
                     "label": "Altitude",
                     "position": {
                         "x": 31,
-                        "y": 118
+                        "y": 120
                     },
                     "font": "big",
                     "color": [
@@ -831,7 +817,7 @@
                     "icon_path": "assets/svg/satellite.svg",
                     "position": {
                         "x": 103,
-                        "y": 126
+                        "y": 128
                     },
                     "size": {
                         "width": 18,
@@ -849,7 +835,7 @@
                     "label": "Sats",
                     "position": {
                         "x": 125,
-                        "y": 123
+                        "y": 125
                     },
                     "font": "tiny",
                     "color": [
@@ -912,20 +898,6 @@
                     ],
                     "data_key": "GpsFix",
                     "units_font": "unit",
-                    "enable": 1
-                },
-                {
-                    "type": "icon",
-                    "icon_path": "assets/svg/hline.svg",
-                    "position": {
-                        "x": 10,
-                        "y": 200
-                    },
-                    "color": [
-                        255,
-                        229,
-                        0
-                    ],
                     "enable": 1
                 },
                 {

@@ -114,3 +114,50 @@ func TestSignalSmsRerenderNeverBlocks(t *testing.T) {
 		t.Error("signalSmsRerender should leave one pending wakeup")
 	}
 }
+
+// The CPU/disk/memory meters' unfilled track used to be hardcoded black, so on
+// a themed background (ember's [26,7,2]) each bar drew as a black rectangle
+// punched out of the page. The track now follows screenBgColor.
+func TestBarBackgroundFollowsThemeBackground(t *testing.T) {
+	old := screenBgColor
+	t.Cleanup(func() { setScreenBgColor([]int{int(old.R), int(old.G), int(old.B)}) })
+
+	setScreenBgColor([]int{0, 0, 0})
+	if got := barBgHex(); got != "#000000" {
+		t.Errorf("black background -> barBgHex() = %s, want #000000", got)
+	}
+
+	setScreenBgColor([]int{26, 7, 2}) // ember
+	if got := barBgHex(); got != "#1A0702" {
+		t.Errorf("ember background -> barBgHex() = %s, want #1A0702", got)
+	}
+}
+
+// The rendered frame bakes the background in, so the image cache must key on
+// it — otherwise a theme change serves the previous theme's bitmap and the
+// bars keep the old colour until restart.
+func TestBarFrameCacheIsKeyedOnBackground(t *testing.T) {
+	old := screenBgColor
+	t.Cleanup(func() { setScreenBgColor([]int{int(old.R), int(old.G), int(old.B)}) })
+
+	imageCacheMu.Lock()
+	if imageCache == nil {
+		imageCache = make(map[string]*image.RGBA)
+	}
+	imageCacheMu.Unlock()
+
+	setScreenBgColor([]int{0, 0, 0})
+	black := getBarOuterFrame(40, 20, 5)
+
+	setScreenBgColor([]int{26, 7, 2})
+	ember := getBarOuterFrame(40, 20, 5)
+
+	if black == ember {
+		t.Fatal("same cached frame returned for two different backgrounds")
+	}
+	// Sample an interior pixel: it should carry the theme background.
+	r, g, b, _ := ember.At(20, 10).RGBA()
+	if r>>8 != 26 || g>>8 != 7 || b>>8 != 2 {
+		t.Errorf("ember bar interior = (%d,%d,%d), want (26,7,2)", r>>8, g>>8, b>>8)
+	}
+}
