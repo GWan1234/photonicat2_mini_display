@@ -36,6 +36,22 @@ var (
 	pcatWebProbed     atomic.Bool
 )
 
+// Filesystem locations read by the fallback collectors. Package-level vars
+// (defaulted to the real paths) purely so tests can point them at fixture
+// directories; production behavior is identical.
+var (
+	pmuCovSysClassNetPath = "/sys/class/net/"
+	pmuCovOSReleasePath   = "/etc/os-release"
+	pmuCovDTModelPath     = "/sys/firmware/devicetree/base/model"
+	pmuCovBatteryTempPath = "/sys/class/power_supply/battery/temp"
+	pmuCovDHCPLeaseFiles  = []string{
+		"/var/lib/misc/dnsmasq.leases",
+		"/tmp/dhcp.leases",
+	}
+	pmuCovNMLeaseGlob    = "/var/lib/NetworkManager/dnsmasq-*.leases"
+	pmuCovDhcpdLeasePath = "/var/lib/dhcp/dhcpd.leases"
+)
+
 func haveCmd(name string) bool {
 	_, err := exec.LookPath(name)
 	return err == nil
@@ -113,7 +129,7 @@ func netdevHasCarrier(dev string) bool {
 	if !strings.HasPrefix(check, "eth") {
 		return true
 	}
-	b, err := os.ReadFile("/sys/class/net/" + check + "/carrier")
+	b, err := os.ReadFile(pmuCovSysClassNetPath + check + "/carrier")
 	if err != nil {
 		// Interface admin-down or missing: treat as no link.
 		return false
@@ -199,7 +215,7 @@ func classifyEgress(dev string) (egress, conn, label string) {
 	// The modem can present as a USB ethernet gadget (FM350: rndis_host on
 	// eth2) and interface numbering is not stable, so go by driver: a USB
 	// network driver is the modem, not a wired NIC.
-	if d, err := os.Readlink("/sys/class/net/" + dev + "/device/driver"); err == nil {
+	if d, err := os.Readlink(pmuCovSysClassNetPath + dev + "/device/driver"); err == nil {
 		base := filepath.Base(d)
 		if strings.Contains(base, "rndis") || strings.Contains(base, "cdc") {
 			return "mobile", "mobile", "Cell"
@@ -209,7 +225,7 @@ func classifyEgress(dev string) (egress, conn, label string) {
 }
 
 func getOSVersionFromOSRelease() string {
-	data, err := os.ReadFile("/etc/os-release")
+	data, err := os.ReadFile(pmuCovOSReleasePath)
 	if err != nil {
 		return ""
 	}
@@ -313,7 +329,7 @@ func formatOSVersionFromOSRelease(content string) string {
 }
 
 func getDeviceTreeModel() string {
-	data, err := os.ReadFile("/sys/firmware/devicetree/base/model")
+	data, err := os.ReadFile(pmuCovDTModelPath)
 	if err != nil {
 		return ""
 	}
@@ -332,12 +348,12 @@ func getBoardTemperatureC() (int, bool) {
 			return milli / 1000, true
 		}
 	}
-	if data, err := os.ReadFile("/sys/class/power_supply/battery/temp"); err == nil {
+	if data, err := os.ReadFile(pmuCovBatteryTempPath); err == nil {
 		if v, err := strconv.ParseFloat(strings.TrimSpace(string(data)), 64); err == nil {
 			return int(v / 10), true // sysfs reports tenths of °C
 		}
 	}
-	hwmons, _ := filepath.Glob("/sys/class/hwmon/hwmon*")
+	hwmons, _ := filepath.Glob(pmuCovHwmonGlob)
 	for _, h := range hwmons {
 		nameB, err := os.ReadFile(filepath.Join(h, "name"))
 		if err != nil {
@@ -369,11 +385,8 @@ func sdCardState() string {
 // countDHCPLeases counts active leases from the common dnsmasq / ISC dhcpd
 // lease files found on Debian and OpenWrt.
 func countDHCPLeases() (int, error) {
-	files := []string{
-		"/var/lib/misc/dnsmasq.leases",
-		"/tmp/dhcp.leases",
-	}
-	if extra, err := filepath.Glob("/var/lib/NetworkManager/dnsmasq-*.leases"); err == nil {
+	files := append([]string(nil), pmuCovDHCPLeaseFiles...)
+	if extra, err := filepath.Glob(pmuCovNMLeaseGlob); err == nil {
 		files = append(files, extra...)
 	}
 	for _, f := range files {
@@ -390,7 +403,7 @@ func countDHCPLeases() (int, error) {
 		return n, nil
 	}
 	// ISC dhcpd uses a block format instead of one lease per line.
-	if data, err := os.ReadFile("/var/lib/dhcp/dhcpd.leases"); err == nil {
+	if data, err := os.ReadFile(pmuCovDhcpdLeasePath); err == nil {
 		seen := map[string]bool{}
 		for _, line := range strings.Split(string(data), "\n") {
 			fields := strings.Fields(line)
@@ -409,7 +422,7 @@ func countWifiStations() (int, error) {
 	if !haveCmd("iw") {
 		return 0, fmt.Errorf("iw not available")
 	}
-	dirs, _ := filepath.Glob("/sys/class/net/*/wireless")
+	dirs, _ := filepath.Glob(pmuCovSysClassNetPath + "*/wireless")
 	total := 0
 	found := false
 	for _, d := range dirs {

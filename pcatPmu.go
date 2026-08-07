@@ -72,6 +72,19 @@ var (
 	pmuPoweroffAck   = make(chan struct{}, 1)
 )
 
+// Filesystem locations used by the PMU detection/sysfs scans. Package-level
+// vars (defaulted to the real paths) purely so tests can point them at
+// fixture directories; production behavior is identical.
+var (
+	pmuCovSysKernelPMPath = "/sys/kernel/photonicat-pm"
+	pmuCovDevPMCtlPath    = "/dev/pcat-pm-ctl"
+	pmuCovDTAliasGlob     = "/sys/firmware/devicetree/base/aliases/serial*"
+	pmuCovDTBasePath      = "/sys/firmware/devicetree/base"
+	pmuCovProcFdGlob      = "/proc/[0-9]*/fd/*"
+	pmuCovProcPrefix      = "/proc/"
+	pmuCovHwmonGlob       = "/sys/class/hwmon/hwmon*"
+)
+
 // pmuActive reports whether either PMU data path is delivering board
 // temperature (used by the Linux fallback sweep to avoid overwriting the
 // real MCU reading with a CPU-temperature approximation).
@@ -253,10 +266,10 @@ func pmuApplyStatus(st pmuStatus) {
 // ---- mode selection -------------------------------------------------------
 
 func pmuKernelDriverPresent() bool {
-	if _, err := os.Stat("/sys/kernel/photonicat-pm"); err == nil {
+	if _, err := os.Stat(pmuCovSysKernelPMPath); err == nil {
 		return true
 	}
-	if _, err := os.Stat("/dev/pcat-pm-ctl"); err == nil {
+	if _, err := os.Stat(pmuCovDevPMCtlPath); err == nil {
 		return true
 	}
 	return false
@@ -266,14 +279,14 @@ func pmuKernelDriverPresent() bool {
 // device-tree serial aliases for the node with a "photonicat-pm" child
 // (e.g. photonicat2: serial10 → /dev/ttyS10; photonicat1 used ttyS4).
 func pmuDetectSerialDevice() string {
-	aliases, _ := filepath.Glob("/sys/firmware/devicetree/base/aliases/serial*")
+	aliases, _ := filepath.Glob(pmuCovDTAliasGlob)
 	for _, alias := range aliases {
 		target, err := os.ReadFile(alias)
 		if err != nil {
 			continue
 		}
 		node := strings.TrimRight(strings.TrimSpace(string(target)), "\x00")
-		compat, err := os.ReadFile("/sys/firmware/devicetree/base" + node +
+		compat, err := os.ReadFile(pmuCovDTBasePath + node +
 			"/pcat-pm/compatible")
 		if err != nil {
 			continue
@@ -296,13 +309,13 @@ func pmuDetectSerialDevice() string {
 func pmuPortUsers(dev string) []string {
 	var users []string
 	self := strconv.Itoa(os.Getpid())
-	fds, _ := filepath.Glob("/proc/[0-9]*/fd/*")
+	fds, _ := filepath.Glob(pmuCovProcFdGlob)
 	for _, fd := range fds {
 		target, err := os.Readlink(fd)
 		if err != nil || target != dev {
 			continue
 		}
-		pid := strings.Split(strings.TrimPrefix(fd, "/proc/"), "/")[0]
+		pid := strings.Split(strings.TrimPrefix(fd, pmuCovProcPrefix), "/")[0]
 		if pid == self {
 			continue
 		}
@@ -332,7 +345,7 @@ func startPmuManager() {
 // pmuFindTempMbHwmon resolves the hwmon node registered by the kernel driver
 // (name prefix pcat_pm_hwmon_temp_mb), the same scan pmu-manager.c performs.
 func pmuFindTempMbHwmon() string {
-	hwmons, _ := filepath.Glob("/sys/class/hwmon/hwmon*")
+	hwmons, _ := filepath.Glob(pmuCovHwmonGlob)
 	for _, h := range hwmons {
 		name, err := os.ReadFile(filepath.Join(h, "name"))
 		if err != nil {

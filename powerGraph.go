@@ -38,6 +38,11 @@ var (
 		Samples:       make([]PowerSample, 0, MAX_POWER_SAMPLES),
 		TimeFrameMins: DEFAULT_TIME_FRAME_MINS,
 	}
+
+	// powerDataFilePath is where the power history is persisted. It defaults
+	// to POWER_DATA_FILE; it is a variable only so tests can point the
+	// load/save paths at a temporary directory. Production never changes it.
+	powerDataFilePath = POWER_DATA_FILE
 )
 
 // initPowerDataRecording starts the power data recording goroutine
@@ -147,7 +152,7 @@ func recordPowerSample() {
 
 // loadPowerData loads power data from file
 func loadPowerData() {
-	file, err := os.Open(POWER_DATA_FILE)
+	file, err := os.Open(powerDataFilePath)
 	if err != nil {
 		log.Printf("No existing power data file, starting fresh")
 		return
@@ -199,7 +204,7 @@ func savePowerData() {
 // no locks, so it is safe to call from a path that has just released one — and
 // it keeps the file I/O out of the critical section either way.
 func savePowerDataSnapshot(samples []PowerSample, timeFrameMins int) {
-	file, err := os.Create(POWER_DATA_FILE)
+	file, err := os.Create(powerDataFilePath)
 	if err != nil {
 		log.Printf("Failed to create power data file: %v", err)
 		return

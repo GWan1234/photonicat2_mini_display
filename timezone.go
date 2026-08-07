@@ -20,6 +20,13 @@ import (
 
 var displayLoc atomic.Pointer[time.Location]
 
+// Testability seams: the real system timezone sources, reassigned only by
+// tests (to t.TempDir() fixtures) so every fallback branch can be exercised.
+var (
+	utilCovLocaltimePath = "/etc/localtime"
+	utilCovPosixTZPaths  = []string{"/etc/TZ", "/tmp/TZ"}
+)
+
 // displayNow returns the current time in the resolved display timezone and
 // whether the timezone is known yet.
 func displayNow() (time.Time, bool) {
@@ -35,27 +42,34 @@ func displayNow() (time.Time, bool) {
 func startTimezoneKeeper() {
 	go func() {
 		for {
-			if loc := resolveTimezone(); loc != nil {
-				displayLoc.Store(loc)
-				time.Sleep(30 * time.Second)
-			} else {
-				time.Sleep(2 * time.Second)
-			}
+			time.Sleep(utilCovTimezoneKeeperStep())
 		}
 	}()
+}
+
+// utilCovTimezoneKeeperStep runs one resolve/publish pass and returns how long
+// the keeper should sleep before the next one. Extracted from the endless
+// keeper goroutine so the resolve/publish logic is testable; behaviour is
+// unchanged.
+func utilCovTimezoneKeeperStep() time.Duration {
+	if loc := resolveTimezone(); loc != nil {
+		displayLoc.Store(loc)
+		return 30 * time.Second
+	}
+	return 2 * time.Second
 }
 
 func resolveTimezone() *time.Location {
 	// TZif database file (Debian always; OpenWrt with zoneinfo installed:
 	// /etc/localtime -> /tmp/localtime -> /usr/share/zoneinfo/...). Handles
 	// DST rules properly, so it is preferred.
-	if b, err := os.ReadFile("/etc/localtime"); err == nil && len(b) > 0 {
+	if b, err := os.ReadFile(utilCovLocaltimePath); err == nil && len(b) > 0 {
 		if loc, err := time.LoadLocationFromTZData("local", b); err == nil {
 			return loc
 		}
 	}
 	// POSIX TZ string (OpenWrt: /etc/TZ -> /tmp/TZ, e.g. "CST-8").
-	for _, p := range []string{"/etc/TZ", "/tmp/TZ"} {
+	for _, p := range utilCovPosixTZPaths {
 		if b, err := os.ReadFile(p); err == nil {
 			if loc := parsePosixTZ(strings.TrimSpace(string(b))); loc != nil {
 				return loc

@@ -28,6 +28,19 @@ var (
 	wasConsoleScreenIdle bool // Track if screen was idle for console input
 )
 
+// Testability seams: these default to the real hardware / system paths and are
+// never reassigned at runtime; tests point them at t.TempDir() fixtures so the
+// surrounding logic can run without touching /sys or /etc.
+var (
+	utilCovBacklightPath       = "/sys/class/backlight/backlight/brightness"
+	utilCovMovementTriggerPath = "/sys/kernel/photonicat-pm/movement_trigger"
+	utilCovEtcConfigPath       = ETC_CONFIG_PATH
+	utilCovEtcDebianConfigPath = ETC_DEBIAN_CONFIG_PATH
+	utilCovEtcUserConfigPath   = ETC_USER_CONFIG_PATH
+	utilCovLocalUserConfigPath = "user_config.json"
+	utilCovIsOpenWRT           = isOpenWRT
+)
+
 // loadConfig reads and unmarshals the config file.
 func loadConfig(path string) (Config, error) {
 	data, err := os.ReadFile(path)
@@ -278,7 +291,7 @@ func setBacklight(brightness int) {
 	phys := brightness
 
 	// perform the write
-	if err := os.WriteFile("/sys/class/backlight/backlight/brightness", []byte(strconv.Itoa(phys)), 0644); err != nil {
+	if err := os.WriteFile(utilCovBacklightPath, []byte(strconv.Itoa(phys)), 0644); err != nil {
 		log.Printf("backlight write error: %v", err)
 	} else {
 		//log.Printf("→ physical backlight %d", phys)
@@ -292,7 +305,7 @@ func setBacklight(brightness int) {
 			defer mu.Unlock()
 			if lastLogical == 0 {
 				// still supposed to be off, so write 0 now
-				if err := os.WriteFile("/sys/class/backlight/backlight/brightness", []byte("0"), 0644); err != nil {
+				if err := os.WriteFile(utilCovBacklightPath, []byte("0"), 0644); err != nil {
 					log.Printf("backlight final-off error: %v", err)
 				} else {
 					log.Println("→ physical backlight OFF")
@@ -474,31 +487,38 @@ func monitorConsoleInput(changePageTriggered *bool) {
 		}
 
 		// Trigger on any input (including empty/just Enter key)
-		now := time.Now()
-		log.Printf("⌨️  KEYBOARD ENTER HIT (state: %s)", stateName(idleState))
-
-		if idleState == STATE_IDLE || idleState == STATE_OFF || idleState == STATE_FADE_OUT {
-			log.Println("Screen waking up")
-			wasConsoleScreenIdle = true
-		} else if idleState == STATE_ACTIVE || idleState == STATE_FADE_IN {
-			if wasConsoleScreenIdle {
-				log.Println("Screen already active, not changing page")
-				wasConsoleScreenIdle = false // Reset flag
-			} else {
-				log.Println("Triggering page change")
-				swippingScreen = true
-				*changePageTriggered = true
-				signalPageChange()
-			}
-		}
-		lastActivityMu.Lock()
-		lastActivity = now
-		lastActivityMu.Unlock()
+		utilCovConsoleEnter(changePageTriggered)
 	}
 }
 
+// utilCovConsoleEnter handles a single ENTER keypress from the console
+// monitor. Extracted from monitorConsoleInput (whose stdin read loop never
+// returns) so the state handling is testable; behaviour is unchanged.
+func utilCovConsoleEnter(changePageTriggered *bool) {
+	now := time.Now()
+	log.Printf("⌨️  KEYBOARD ENTER HIT (state: %s)", stateName(idleState))
+
+	if idleState == STATE_IDLE || idleState == STATE_OFF || idleState == STATE_FADE_OUT {
+		log.Println("Screen waking up")
+		wasConsoleScreenIdle = true
+	} else if idleState == STATE_ACTIVE || idleState == STATE_FADE_IN {
+		if wasConsoleScreenIdle {
+			log.Println("Screen already active, not changing page")
+			wasConsoleScreenIdle = false // Reset flag
+		} else {
+			log.Println("Triggering page change")
+			swippingScreen = true
+			*changePageTriggered = true
+			signalPageChange()
+		}
+	}
+	lastActivityMu.Lock()
+	lastActivity = now
+	lastActivityMu.Unlock()
+}
+
 func getBacklight() int {
-	data, err := os.ReadFile("/sys/class/backlight/backlight/brightness")
+	data, err := os.ReadFile(utilCovBacklightPath)
 	if err != nil {
 		log.Printf("getBacklight error: %v", err)
 		return 0
@@ -559,42 +579,14 @@ func idleDimmer() {
 
 	for range ticker.C {
 		// 1) Movement/keypress detection
-		data, err := os.ReadFile("/sys/kernel/photonicat-pm/movement_trigger")
-		if err == nil && strings.TrimSpace(string(data)) == "1" {
-			// Reset idle timer, treat screen as already “on”
-			now := time.Now()
-			lastActivityMu.Lock()
-			tempLastActivity := now.Add(-2 * time.Second)
-			if tempLastActivity.After(lastActivity) {
-				lastActivity = tempLastActivity
-			}
-			lastActivityMu.Unlock()
-		}
+		utilCovMovementKick()
 
 		// 2) Compute idle time
 		lastActivityMu.Lock()
 		idle := time.Since(lastActivity)
 		lastActivityMu.Unlock()
 
-		var newState int
-
-		switch {
-		case !weAreRunning():
-			newState = STATE_OFF
-		case idle < fadeInDur:
-			if swippingScreen {
-				newState = STATE_ACTIVE
-			} else {
-				newState = STATE_FADE_IN
-			}
-		case idle < idleTimeout:
-			newState = STATE_ACTIVE
-			swippingScreen = false
-		case idle < idleTimeout+fadeDuration:
-			newState = STATE_FADE_OUT
-		default:
-			newState = STATE_IDLE
-		}
+		newState := utilCovIdleStateFor(idle)
 
 		if prevState != newState {
 			log.Printf("STATE CHANGED: %s -> %s", stateName(prevState), stateName(newState))
@@ -644,6 +636,45 @@ func idleDimmer() {
 			}
 		}
 
+	}
+}
+
+// utilCovMovementKick resets the idle timer when the photonicat PM movement
+// trigger has fired. Extracted from idleDimmer (an endless ticker loop) so the
+// trigger handling is testable; behaviour is unchanged.
+func utilCovMovementKick() {
+	data, err := os.ReadFile(utilCovMovementTriggerPath)
+	if err == nil && strings.TrimSpace(string(data)) == "1" {
+		// Reset idle timer, treat screen as already “on”
+		now := time.Now()
+		lastActivityMu.Lock()
+		tempLastActivity := now.Add(-2 * time.Second)
+		if tempLastActivity.After(lastActivity) {
+			lastActivity = tempLastActivity
+		}
+		lastActivityMu.Unlock()
+	}
+}
+
+// utilCovIdleStateFor maps the current idle duration onto a screen state.
+// Extracted from idleDimmer so the state machine is testable; it clears
+// swippingScreen exactly where the inline switch did.
+func utilCovIdleStateFor(idle time.Duration) int {
+	switch {
+	case !weAreRunning():
+		return STATE_OFF
+	case idle < fadeInDur:
+		if swippingScreen {
+			return STATE_ACTIVE
+		}
+		return STATE_FADE_IN
+	case idle < idleTimeout:
+		swippingScreen = false
+		return STATE_ACTIVE
+	case idle < idleTimeout+fadeDuration:
+		return STATE_FADE_OUT
+	default:
+		return STATE_IDLE
 	}
 }
 
@@ -852,13 +883,13 @@ func mergeConfigs() error {
 // hasShowSmsInUserConfig checks if the user config file explicitly contains show_sms field
 func hasShowSmsInUserConfig() bool {
 	var userConfigPath string
-	localUserConfig := "user_config.json"
+	localUserConfig := utilCovLocalUserConfigPath
 
 	// Determine which user config file to check
 	if _, err := os.Stat(localUserConfig); err == nil {
 		userConfigPath = localUserConfig
 	} else {
-		userConfigPath = ETC_USER_CONFIG_PATH
+		userConfigPath = utilCovEtcUserConfigPath
 	}
 
 	// Read the raw JSON
@@ -880,7 +911,7 @@ func hasShowSmsInUserConfig() bool {
 // embeddedDefaultConfigJSON returns the package-default layout baked into the
 // binary (OpenWrt vs Debian). This is the source of truth for every release.
 func embeddedDefaultConfigJSON() []byte {
-	if !isOpenWRT() {
+	if !utilCovIsOpenWRT() {
 		return embeddedDebianConfigJSON
 	}
 	return embeddedOpenWrtConfigJSON
@@ -889,10 +920,10 @@ func embeddedDefaultConfigJSON() []byte {
 // defaultConfigDiskPath is where we mirror the embedded default so operators
 // (and older tools) can still read a file under /etc.
 func defaultConfigDiskPath() string {
-	if !isOpenWRT() {
-		return ETC_DEBIAN_CONFIG_PATH
+	if !utilCovIsOpenWRT() {
+		return utilCovEtcDebianConfigPath
 	}
-	return ETC_CONFIG_PATH
+	return utilCovEtcConfigPath
 }
 
 // loadConfigFromBytes unmarshals a Config from raw JSON.
@@ -934,20 +965,20 @@ func loadAllConfigsToVariables() {
 
 	// 3) User overrides: cwd user_config.json wins for local dev, else /etc.
 	userPath := ""
-	if _, err := os.Stat("user_config.json"); err == nil {
-		userPath = "user_config.json"
+	if _, err := os.Stat(utilCovLocalUserConfigPath); err == nil {
+		userPath = utilCovLocalUserConfigPath
 		log.Println("User config found at", userPath)
-	} else if _, err := os.Stat(ETC_USER_CONFIG_PATH); err == nil {
-		userPath = ETC_USER_CONFIG_PATH
+	} else if _, err := os.Stat(utilCovEtcUserConfigPath); err == nil {
+		userPath = utilCovEtcUserConfigPath
 		log.Println("User config found at", userPath)
 	} else {
 		// Ensure an empty user config exists under /etc for the web editor.
-		if err := os.WriteFile(ETC_USER_CONFIG_PATH, []byte("{}\n"), 0644); err != nil {
+		if err := os.WriteFile(utilCovEtcUserConfigPath, []byte("{}\n"), 0644); err != nil {
 			log.Printf("could not create empty user config: %v", err)
 		} else {
-			log.Println("Created empty user config at", ETC_USER_CONFIG_PATH)
+			log.Println("Created empty user config at", utilCovEtcUserConfigPath)
 		}
-		userPath = ETC_USER_CONFIG_PATH
+		userPath = utilCovEtcUserConfigPath
 	}
 
 	userCfg, err = loadConfig(userPath)

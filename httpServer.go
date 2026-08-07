@@ -85,6 +85,15 @@ var (
 	webFrameDemandWindow = 3 * time.Second // keep publishing this long after last HTTP hit
 )
 
+// Testability seams: the handlers below hardcode filesystem paths and the PMU
+// power-off call. Tests point these at temp dirs / stubs; production defaults
+// are identical to the previous literals, so behavior is unchanged.
+var (
+	httpCovUserConfigPath    = ETC_USER_CONFIG_PATH      // user config read/written by config handlers
+	httpCovWebUserConfigPath = "config/user_config.json" // overrides persisted by setUserConfig/setConfig
+	httpCovPmuPowerOff       = pmuPowerOff               // seam so tests never power the box off
+)
+
 // noteWebFrameDemand marks that a browser is requesting preview frames so the
 // render loop will start publishing complete snapshots.
 func noteWebFrameDemand() {
@@ -237,7 +246,7 @@ func loadUserConfig() string {
 	if userJsonConfig != "" {
 		return userJsonConfig
 	}
-	path := ETC_USER_CONFIG_PATH
+	path := httpCovUserConfigPath
 	raw, err := os.ReadFile(path)
 
 	if err != nil {
@@ -278,20 +287,20 @@ func saveUserConfigToFile() bool {
 	}
 
 	// 2) Ensure directory exists
-	if err := os.MkdirAll(filepath.Dir(ETC_USER_CONFIG_PATH), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(httpCovUserConfigPath), 0755); err != nil {
 		log.Printf("could not create config dir: %v", err)
 		return false
 	}
 
 	// 3) Write to temp file
-	tmpPath := ETC_USER_CONFIG_PATH + ".tmp"
+	tmpPath := httpCovUserConfigPath + ".tmp"
 	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
 		log.Printf("could not write temp user config: %v", err)
 		return false
 	}
 
 	// 4) Rename temp file into place
-	if err := os.Rename(tmpPath, ETC_USER_CONFIG_PATH); err != nil {
+	if err := os.Rename(tmpPath, httpCovUserConfigPath); err != nil {
 		log.Printf("could not rename temp config file: %v", err)
 		return false
 	}
@@ -319,8 +328,8 @@ func saveUserConfigFromStr(str string) bool {
 	// 3) Write the prettified JSON to disk atomically
 	//    (we skip updating userCfg here since you may not have a struct to unmarshal into;
 	//     if you do, unmarshal into it before step 1 and assign to userCfg)
-	tmpPath := ETC_USER_CONFIG_PATH + ".tmp"
-	if err := os.MkdirAll(filepath.Dir(ETC_USER_CONFIG_PATH), 0755); err != nil {
+	tmpPath := httpCovUserConfigPath + ".tmp"
+	if err := os.MkdirAll(filepath.Dir(httpCovUserConfigPath), 0755); err != nil {
 		log.Printf("could not create config dir: %v", err)
 		return false
 	}
@@ -328,7 +337,7 @@ func saveUserConfigFromStr(str string) bool {
 		log.Printf("could not write temp config: %v", err)
 		return false
 	}
-	if err := os.Rename(tmpPath, ETC_USER_CONFIG_PATH); err != nil {
+	if err := os.Rename(tmpPath, httpCovUserConfigPath); err != nil {
 		log.Printf("could not rename temp config into place: %v", err)
 		return false
 	}
@@ -378,7 +387,7 @@ func getDefaultConfig(c *fiber.Ctx) error {
 // GET /api/v1/get_user_config.json
 func getUserConfig(c *fiber.Ctx) error {
 	// 1) Read the file
-	data, err := os.ReadFile(ETC_USER_CONFIG_PATH)
+	data, err := os.ReadFile(httpCovUserConfigPath)
 	if err != nil {
 		log.Printf("could not read user config: %v", err)
 		return c.
@@ -436,7 +445,7 @@ func setUserConfig(c *fiber.Ctx) error {
 			Status(fiber.StatusInternalServerError).
 			JSON(fiber.Map{"error": "could not save config"})
 	}
-	if err := os.WriteFile("config/user_config.json", raw, 0644); err != nil {
+	if err := os.WriteFile(httpCovWebUserConfigPath, raw, 0644); err != nil {
 		log.Printf("warning: could not write user_config.json: %v", err)
 		return c.
 			Status(fiber.StatusInternalServerError).
@@ -474,7 +483,7 @@ func setConfig(c *fiber.Ctx) error {
 	// Persist userOverrides back to disk
 	if raw, err := json.MarshalIndent(userOverrides, "", "  "); err != nil {
 		log.Printf("warning: could not marshal user_config.json: %v", err)
-	} else if err := os.WriteFile("config/user_config.json", raw, 0644); err != nil {
+	} else if err := os.WriteFile(httpCovWebUserConfigPath, raw, 0644); err != nil {
 		log.Printf("warning: could not write user_config.json: %v", err)
 	}
 
@@ -534,7 +543,7 @@ func requestPowerOff(c *fiber.Ctx) error {
 	}
 	log.Println("Power off requested via HTTP")
 	go func() {
-		if err := pmuPowerOff(); err != nil {
+		if err := httpCovPmuPowerOff(); err != nil {
 			log.Printf("Power off failed: %v", err)
 		}
 	}()

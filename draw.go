@@ -379,7 +379,9 @@ func drawScrollingText(frame *image.RGBA, text string, x, y, availWidth int, fac
 }
 
 // remoteImageCacheDir is where downloaded remote icons are stored on disk.
-const remoteImageCacheDir = "/tmp/pcat_remote_icons"
+// A var (defaulted to the original path) rather than a const so tests can
+// point it at a temp dir; production behavior is unchanged.
+var remoteImageCacheDir = "/tmp/pcat_remote_icons"
 
 // fetchRemoteImage downloads an http(s) image URL to a deterministic local
 // file (named by the URL hash, keeping the original extension) and returns the

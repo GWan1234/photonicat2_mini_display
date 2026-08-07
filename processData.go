@@ -60,6 +60,29 @@ func getUserAgent() string {
 	return "photonicat2_display/r7700"
 }
 
+// Testability seams: these vars default to the exact literals the collectors
+// have always used, so production behaviour is unchanged. Tests point them at
+// t.TempDir() fixtures (or, for pdCovExecOutput, a canned dispatcher) so the
+// /proc-/sys-/exec-backed readers can run on non-Linux development hosts.
+var (
+	pdCovProcNetRoutePath   = "/proc/net/route"
+	pdCovOpenwrtReleasePath = "/etc/openwrt_release"
+	pdCovProcUptimePath     = "/proc/uptime"
+	pdCovChargerVoltagePath = "/sys/class/power_supply/charger/voltage_now"
+	pdCovSysClassNetDir     = "/sys/class/net"
+	pdCovProcStatPath       = "/proc/stat"
+	pdCovBatteryDir         = "/sys/class/power_supply/battery"
+	pdCovThermalZonePath    = "/sys/class/thermal/thermal_zone0/temp"
+	pdCovProcMeminfoPath    = "/proc/meminfo"
+	pdCovHwmonFanGlob       = "/sys/class/hwmon/hwmon*/fan1_input"
+	pdCovMmcTypeGlob        = "/sys/block/mmcblk*/device/type"
+	pdCovProcMountsPath     = "/proc/mounts"
+	pdCovProcNetDevPath     = "/proc/net/dev"
+	pdCovExecOutput         = func(name string, args ...string) ([]byte, error) {
+		return exec.Command(name, args...).Output()
+	}
+)
+
 // sanitizeCommandArg validates and sanitizes command arguments
 func sanitizeCommandArg(arg string) string {
 	// Remove any shell metacharacters and limit to alphanumeric, dash, underscore, dot, slash
@@ -95,7 +118,7 @@ func secureExecCommand(command string, args ...string) ([]byte, error) {
 		}
 	}
 
-	return exec.Command(command, sanitizedArgs...).Output()
+	return pdCovExecOutput(command, sanitizedArgs...)
 }
 
 // WiFiInterface mirrors each element of "wifi_interfaces" in the JSON.
@@ -562,7 +585,7 @@ func formatSpeed(mbps float64) (string, string) {
 // serves and cheap enough to resolve every cycle. Falls back to br-lan on
 // OpenWrt so there is something to watch while no uplink is routed.
 func getWANInterface() (string, error) {
-	if data, err := os.ReadFile("/proc/net/route"); err == nil {
+	if data, err := os.ReadFile(pdCovProcNetRoutePath); err == nil {
 		lines := strings.Split(string(data), "\n")
 		best, bestMetric := "", int64(-1)
 		for _, line := range lines[1:] {
@@ -780,7 +803,7 @@ func collectLinuxData(cfg Config) {
 // valid integer it reads.
 func getFanSpeed() (int, error) {
 	// Glob all fan1_input files in hwmon directories
-	paths, err := filepath.Glob("/sys/class/hwmon/hwmon*/fan1_input")
+	paths, err := filepath.Glob(pdCovHwmonFanGlob)
 	if err != nil {
 		return 0, fmt.Errorf("failed to glob hwmon paths: %w", err)
 	}
@@ -1184,7 +1207,7 @@ func getSN() (string, error) {
 // getUptimeSeconds returns system uptime in seconds
 func getUptimeSeconds() (float64, error) {
 	// Read /proc/uptime
-	data, err := os.ReadFile("/proc/uptime")
+	data, err := os.ReadFile(pdCovProcUptimePath)
 	if err != nil {
 		return 0, fmt.Errorf("error reading /proc/uptime: %v", err)
 	}
@@ -1255,7 +1278,7 @@ func getKernelDate() (string, error) {
 
 // getDCVoltageUV reads DC voltage from the system.
 func getDCVoltageUV() (float64, error) {
-	file, err := os.Open("/sys/class/power_supply/charger/voltage_now")
+	file, err := os.Open(pdCovChargerVoltagePath)
 	if err != nil {
 		return 0, err
 	}
@@ -1273,7 +1296,7 @@ func getDCVoltageUV() (float64, error) {
 
 // getInterfaceBytes reads rx and tx bytes for a given interface.
 func getInterfaceBytes(iface string) (rxBytes, txBytes uint64, err error) {
-	basePath := "/sys/class/net/" + iface + "/statistics/"
+	basePath := pdCovSysClassNetDir + "/" + iface + "/statistics/"
 	rxPath := basePath + "rx_bytes"
 	txPath := basePath + "tx_bytes"
 
@@ -1295,7 +1318,7 @@ func getInterfaceBytes(iface string) (rxBytes, txBytes uint64, err error) {
 }
 
 func isOpenWRT() bool {
-	if _, err := os.Stat("/etc/openwrt_release"); err == nil {
+	if _, err := os.Stat(pdCovOpenwrtReleasePath); err == nil {
 		return true
 	}
 	return false
@@ -1607,7 +1630,7 @@ func getSessionDataUsageGB(iface string) (float64, error) {
 
 	for _, stat := range stats {
 		// build path: /sys/class/net/<iface>/statistics/<stat>
-		path := filepath.Join("/sys/class/net", iface, "statistics", stat)
+		path := filepath.Join(pdCovSysClassNetDir, iface, "statistics", stat)
 
 		// read the file
 		data, err := os.ReadFile(path)
@@ -1708,7 +1731,7 @@ type CPUStats struct {
 }
 
 func readCPUStats() ([]CPUStats, error) {
-	data, err := os.ReadFile("/proc/stat")
+	data, err := os.ReadFile(pdCovProcStatPath)
 	if err != nil {
 		return nil, err
 	}
@@ -1857,7 +1880,7 @@ func pingICMP(host string) (int64, error) {
 
 // getBatterySoc returns the battery soc from /sys/class/power_supply/battery/capacity.
 func getBatterySoc() (int, error) {
-	file, err := os.Open("/sys/class/power_supply/battery/capacity")
+	file, err := os.Open(pdCovBatteryDir + "/capacity")
 	if err != nil {
 		return -1, err
 	}
@@ -1883,7 +1906,7 @@ func getBatteryCharging() (bool, error) {
 		}
 		return current > 0, nil
 	} else {
-		file, err := os.Open("/sys/class/power_supply/battery/status")
+		file, err := os.Open(pdCovBatteryDir + "/status")
 		if err != nil {
 			return false, err
 		}
@@ -1903,7 +1926,7 @@ func getBatteryCharging() (bool, error) {
 }
 
 func getBatteryVoltageUV() (float64, error) {
-	file, err := os.Open("/sys/class/power_supply/battery/voltage_now")
+	file, err := os.Open(pdCovBatteryDir + "/voltage_now")
 	if err != nil {
 		return 0, err
 	}
@@ -1916,7 +1939,7 @@ func getBatteryVoltageUV() (float64, error) {
 }
 
 func getBatteryCurrentUA() (float64, error) {
-	file, err := os.Open("/sys/class/power_supply/battery/current_now")
+	file, err := os.Open(pdCovBatteryDir + "/current_now")
 	if err != nil {
 		return 0, err
 	}
@@ -1932,7 +1955,7 @@ func getBatteryCurrentUA() (float64, error) {
 // /sys/class/power_supply/battery/<name> node. Returns an error when the node
 // is missing or unparsable so callers can fall back to alternate counters.
 func readBatterySysfsFloat(name string) (float64, error) {
-	content, err := os.ReadFile("/sys/class/power_supply/battery/" + name)
+	content, err := os.ReadFile(pdCovBatteryDir + "/" + name)
 	if err != nil {
 		return 0, err
 	}
@@ -2063,9 +2086,14 @@ func formatRemainingTime(hours float64) string {
 	return fmt.Sprintf("%d:%02d", h, m)
 }
 
+// pdCovLocalIPv4Candidates is the LAN-side interface probe order used by
+// getLocalIPv4 (a var only so tests can point it at interfaces that exist on
+// the test host; the default is unchanged).
+var pdCovLocalIPv4Candidates = []string{"eth1", "end1", "end0", "br-lan"}
+
 // getLocalIPv4 returns eth0 IP on OpenWrt or WAN IP (default route) on Debian.
 func getLocalIPv4() (string, error) {
-	candidates := []string{"eth1", "end1", "end0", "br-lan"}
+	candidates := pdCovLocalIPv4Candidates
 
 	for _, name := range candidates {
 		iface, err := net.InterfaceByName(name)
@@ -2248,7 +2276,7 @@ func getIPv6Public() (string, error) {
 
 // getCpuTemp returns CPU temperature from /sys/class/thermal/thermal_zone0/temp.
 func getCpuTemp() (float64, error) {
-	file, err := os.Open("/sys/class/thermal/thermal_zone0/temp")
+	file, err := os.Open(pdCovThermalZonePath)
 	if err != nil {
 		return 0, err
 	}
@@ -2262,7 +2290,7 @@ func getCpuTemp() (float64, error) {
 
 // getMemUsedAndTotalGB returns used and total memory in GB.
 func getMemUsedAndTotalGB() (usedGB float64, totalGB float64, err error) {
-	data, err := os.ReadFile("/proc/meminfo")
+	data, err := os.ReadFile(pdCovProcMeminfoPath)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -2350,7 +2378,7 @@ func parseBlockMounts(content string) [][2]string {
 // a card.
 func sdCardDisks() map[string]bool {
 	disks := map[string]bool{}
-	types, _ := filepath.Glob("/sys/block/mmcblk*/device/type")
+	types, _ := filepath.Glob(pdCovMmcTypeGlob)
 	for _, p := range types {
 		data, err := os.ReadFile(p)
 		if err != nil || strings.TrimSpace(string(data)) != "SD" {
@@ -2445,7 +2473,7 @@ func collectDiskUsage() {
 	nvmePresent := false
 	nvmePct, sdPct := 0.0, 0.0
 	sdPresent := len(sdDisks) > 0
-	if data, err := os.ReadFile("/proc/mounts"); err == nil {
+	if data, err := os.ReadFile(pdCovProcMountsPath); err == nil {
 		nvmeMp, sdMp := pickExtraDiskMounts(parseBlockMounts(string(data)), sdDisks)
 		if nvmeMp != "" {
 			nvme = formatDiskUsageGB(nvmeMp)
@@ -2478,7 +2506,7 @@ type networkStats struct {
 
 // readNetworkStats reads current network stats from /proc/net/dev.
 func readNetworkStats() (map[string]networkStats, error) {
-	file, err := os.Open("/proc/net/dev")
+	file, err := os.Open(pdCovProcNetDevPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open /proc/net/dev: %v", err)
 	}
