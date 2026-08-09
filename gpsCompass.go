@@ -6,8 +6,8 @@ package main
 // the bearing circle centered on the current course: the tape slides under a
 // fixed center pointer as the device turns, so the heading is read the way it
 // is in a game HUD — cardinal letters and tick marks moving past a caret. The
-// numeric bearing sits under the caret so the exact value is still available
-// without a label.
+// numeric bearing breaks into the baseline itself (the line parts around the
+// number) so the exact value is still available without a label or extra row.
 //
 // Rendering is deliberately plain pixel work (drawLine/fillRect/drawText) to
 // match drawCpuBars and drawPowerGraph; no rasterizer state is kept between
@@ -18,6 +18,8 @@ import (
 	"image"
 	"image/color"
 	"math"
+
+	"golang.org/x/image/font"
 )
 
 // compassDegPerPx sets the tape scale: how many bearing degrees one horizontal
@@ -83,16 +85,16 @@ func drawGpsCompass(frame *image.RGBA, x0, y0, w, h int, course float64, hasFix 
 	course = normalizeDeg(course)
 	centerX := x0 + w/2
 
-	// Vertical bands, top to bottom: cardinal letters, tick marks, baseline,
-	// then the numeric bearing. The caret sits over the letters (game HUDs put
-	// the pointer above the tape, not below it) so the letter it is selecting
-	// is never occluded.
+	// Vertical bands, top to bottom: cardinal letters, tick marks, baseline.
+	// The caret sits over the letters (game HUDs put the pointer above the
+	// tape, not below it) so the letter it is selecting is never occluded.
+	// The numeric bearing no longer gets its own row: it breaks INTO the
+	// baseline, HUD-style, sitting in a gap at the center of the line.
 	caretY := y0
 	labelY := y0 + 7   // top of the cardinal letter row
 	tickTop := y0 + 21 // ticks hang below the letters
 	tickH := 9
 	baselineY := tickTop + tickH
-	textY := baselineY + 3
 
 	// Caret: a filled triangle pointing down at the tape, drawn as shrinking
 	// horizontal runs so it stays crisp at this size (a rasterized SVG would
@@ -105,9 +107,57 @@ func drawGpsCompass(frame *image.RGBA, x0, y0, w, h int, course float64, hasFix 
 		fillRect(frame, centerX-runW/2, caretY+i, runW, 1, tapeColor)
 	}
 
-	// Baseline under the tape gives the ticks something to hang from and
-	// visually separates the moving strip from the static readouts below.
-	fillRect(frame, x0, baselineY, w, 1, dim)
+	// Numeric bearing, break-the-line style: the number sits inside a gap in
+	// the baseline, vertically centered on the line, so the line appears to
+	// pass through the text. Twice the size of the old bottom-row readout
+	// (which fit "micro" at 10px): "clock" is the 20px face, with smaller
+	// fallbacks so a shorter box degrades instead of overflowing.
+	bearingText := "--"
+	if hasFix {
+		bearingText = fmt.Sprintf("%03d°", int(math.Round(course))%360)
+	}
+	var bearFace font.Face
+	bearTop, gapHalf := 0, 0
+	for _, name := range []string{"clock", "reg", "unit", "tiny", "micro"} {
+		face, _, err := getFontFace(name)
+		if err != nil {
+			continue
+		}
+		m := face.Metrics()
+		fh := (m.Ascent + m.Descent).Round()
+		// Digits occupy [baseline-capHeight, baseline] — the descent is empty
+		// for numerals — so centering the line box on the tape line leaves the
+		// glyphs hanging below it. Place the text baseline capHeight/2 under
+		// the tape line instead: the visual middle of the digits lands on it.
+		cap := m.CapHeight.Round()
+		if cap <= 0 {
+			cap = m.Ascent.Round() * 7 / 10
+		}
+		top := baselineY + cap/2 - m.Ascent.Round()
+		if top >= y0 && top+fh <= y0+h {
+			bearFace = face
+			bearTop = top
+			gapHalf = font.MeasureString(face, bearingText).Round()/2 + 6
+			break
+		}
+	}
+
+	// Baseline under the tape gives the ticks something to hang from; drawn
+	// in two segments so the bearing text sits in a real gap, not on top of
+	// the line.
+	if bearFace != nil {
+		leftW := centerX - gapHalf - x0
+		if leftW > 0 {
+			fillRect(frame, x0, baselineY, leftW, 1, dim)
+		}
+		rightX := centerX + gapHalf
+		if rightW := x0 + w - rightX; rightW > 0 {
+			fillRect(frame, rightX, baselineY, rightW, 1, dim)
+		}
+		drawText(frame, bearingText, centerX, bearTop, bearFace, tapeColor, true)
+	} else {
+		fillRect(frame, x0, baselineY, w, 1, dim)
+	}
 
 	// Ticks every 15°, cardinal labels every 45°. Sweeping a fixed window of
 	// offsets around the current course (rather than all 360°) keeps the work
@@ -124,6 +174,11 @@ func drawGpsCompass(frame *image.RGBA, x0, y0, w, h int, course float64, hasFix 
 		if px < x0 || px >= x0+w {
 			continue
 		}
+
+		// Ticks vanish inside the bearing gap (the letters above it stay: the
+		// number is below the letter row, so the cardinal under the caret
+		// keeps its label while its tick yields to the text).
+		inGap := bearFace != nil && px > centerX-gapHalf-1 && px < centerX+gapHalf+1
 
 		isCardinal := int(math.Round(bearing))%45 == 0
 		if isCardinal {
@@ -143,35 +198,15 @@ func drawGpsCompass(frame *image.RGBA, x0, y0, w, h int, course float64, hasFix 
 					}
 				}
 			}
-			fillRect(frame, px, tickTop, 1, tickH, letterClr)
+			if !inGap {
+				fillRect(frame, px, tickTop, 1, tickH, letterClr)
+			}
 			if errTape == nil {
 				drawText(frame, label, px, labelY, faceTape, letterClr, true)
 			}
-		} else {
+		} else if !inGap {
 			// Minor tick: short stub, dimmed so the cardinals dominate.
 			fillRect(frame, px, baselineY-4, 1, 4, dim)
-		}
-	}
-
-	// Numeric bearing under the caret — no "Heading:" label; the tape above it
-	// already says what the number means.
-	bearingText := "--"
-	if hasFix {
-		bearingText = fmt.Sprintf("%03d°", int(math.Round(course))%360)
-	}
-	// Pick the largest font whose full line box (ascent+descent) still fits
-	// between the baseline and the bottom of the element, so the descender
-	// never bleeds into the rule drawn just below the compass.
-	avail := y0 + h - textY
-	for _, name := range []string{"reg", "unit", "tiny", "micro"} {
-		face, _, err := getFontFace(name)
-		if err != nil {
-			continue
-		}
-		m := face.Metrics()
-		if (m.Ascent + m.Descent).Round() <= avail {
-			drawText(frame, bearingText, centerX, textY, face, tapeColor, true)
-			break
 		}
 	}
 }

@@ -2601,7 +2601,14 @@ func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
 			// element pins an explicit width via "size".width. Values wider than
 			// this (long SSIDs, IPv6 addresses, ISP names, …) scroll as a ticker
 			// instead of being clipped; values that fit are drawn in place.
+			// A centered value grows symmetrically from Position.X, so its
+			// budget is the whole panel between the margins, not the distance
+			// from its left edge to the right margin.
+			centered := element.Align == "center"
 			availWidth := PCAT2_LCD_WIDTH - element.Position.X - PCAT2_R_MARGIN
+			if centered {
+				availWidth = PCAT2_LCD_WIDTH - PCAT2_L_MARGIN - PCAT2_R_MARGIN
+			}
 			if element.Size != nil && element.Size.Width > 0 {
 				availWidth = element.Size.Width
 			} else if element.Size2 != nil && element.Size2.Width > 0 {
@@ -2612,11 +2619,15 @@ func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
 			// A ping timeout is a single "X"; never scroll it. Only overflowing
 			// values scroll, and a scrolling value carries no trailing units.
 			if !isPingTimeout && mainW > availWidth {
-				drawScrollingText(frame, textToDisplay, element.Position.X, element.Position.Y, availWidth, face, clr)
+				scrollX := element.Position.X
+				if centered {
+					scrollX -= availWidth / 2
+				}
+				drawScrollingText(frame, textToDisplay, scrollX, element.Position.Y, availWidth, face, clr)
 				break
 			}
 
-			xMain, _ := drawText(frame, textToDisplay, element.Position.X, element.Position.Y, face, clr, false)
+			xMain, _ := drawText(frame, textToDisplay, element.Position.X, element.Position.Y, face, clr, centered)
 
 			// Calculate the y position for the units text so that its baseline aligns with the main text.
 			unitAscent := unitFace.Metrics().Ascent.Round()
@@ -2741,7 +2752,7 @@ func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
 			})
 		
 
-			drawText(frame, label, element.Position.X, element.Position.Y, face, clr, false)
+			drawText(frame, label, element.Position.X, element.Position.Y, face, clr, element.Align == "center")
 
 		case "vtext":
 			// Vertical (stacked-letter) fixed label, e.g. "CPU"/"MEM" beside a

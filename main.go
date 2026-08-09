@@ -357,8 +357,9 @@ func buildFontTable(prefix string) map[string]FontConfig {
 		"huge":      orbitron("ExtraBold", 34),
 		"gigantic":  orbitron("ExtraBold", 48),
 		// One step above gigantic, for the GPS page's speed readout. Sized so
-		// three digits ("188") still fit the 172px panel beside their unit.
-		"colossal": orbitron("ExtraBold", 58),
+		// three digits ("188") still fit the 172px panel now that the km/h
+		// unit is gone from the layout.
+		"colossal": orbitron("ExtraBold", 62),
 		// Chinese font variants
 		"unit_cjk": {FontPath: prefix + "/assets/fonts/NotoSansMonoCJK-VF.ttf.ttc", FontSize: 15},
 	}
@@ -402,6 +403,10 @@ type DisplayElement struct {
 	AnchorAfterDataKey string `json:"anchor_after_data_key,omitempty"`
 	AnchorFont         string `json:"anchor_font,omitempty"` // font of the anchored text (defaults to "reg")
 	AnchorGap          int    `json:"anchor_gap,omitempty"`  // extra px between text and icon
+	// Align, when "center" on a text element, treats Position.X as the
+	// horizontal center of the rendered value instead of its left edge
+	// (e.g. the GPS speed centered on the panel regardless of digit count).
+	Align string `json:"align,omitempty"`
 }
 
 // GraphConfig holds configuration for graph elements
