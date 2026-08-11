@@ -1324,3 +1324,37 @@ func TestPDCovCollectLinuxDataPmuFanFallback(t *testing.T) {
 		t.Errorf("FanRPM = %v, want 3210 from the PMU UART fallback", v)
 	}
 }
+
+// An empty modem_model must not stick. dashboard.json's model/firmware fields
+// are "set once" because they are fixed for a running process, but the guard
+// keyed on presence rather than on a non-empty value: one early poll answered
+// before pcat-manager-web had probed the modem would store "" permanently, and
+// the page-3 celldev row then stayed blank for the whole process lifetime
+// (draw skips empty values). On OpenWrt this reproduces every boot -- the
+// display starts several seconds before pcat-manager-web, and the mmcli
+// fallback that would otherwise fill ModemModel does not exist there.
+func TestPDCovModemModelEmptyDoesNotStick(t *testing.T) {
+	pdCovSaveWebState(t)
+	pdCovSavePublicIPState(t)
+
+	blank := strings.Replace(pdCovDashboardJSON,
+		`"modem_model": "RM500Q-GL",`, `"modem_model": "",`, 1)
+	if blank == pdCovDashboardJSON {
+		t.Fatal("fixture no longer contains modem_model; update this test")
+	}
+
+	globalData.Delete("ModemModel")
+
+	// Poll 1: the modem is not probed yet, so the web reports an empty model.
+	redirectLocalHTTP(t, pdCovWebServer(t, blank, pdCovStatsJSON, pdCovBasicJSON))
+	getInfoFromPcatWeb()
+
+	// Poll 2: the modem is up and the web reports it. The display must adopt it.
+	redirectLocalHTTP(t, pdCovWebServer(t, pdCovDashboardJSON, pdCovStatsJSON, pdCovBasicJSON))
+	getInfoFromPcatWeb()
+
+	got, _ := globalData.Load("ModemModel")
+	if got != "RM500Q-GL" {
+		t.Errorf("ModemModel = %q, want %q (an empty early value stuck)", got, "RM500Q-GL")
+	}
+}

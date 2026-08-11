@@ -342,6 +342,24 @@ func cellGeneration(modemMode, carrier string) string {
 	return ""
 }
 
+// storeOnceNonEmpty fills a key that is fixed for the process lifetime, but
+// only from a value that actually says something. Guarding on presence alone
+// is not enough: pcat-manager-web answers dashboard.json before it has probed
+// the modem, so an early poll reports "modem_model": "" and a presence-only
+// guard would pin that empty string forever — the page-3 celldev row then
+// stays blank until restart, because drawing skips empty values. OpenWrt hits
+// this on every boot (the display starts seconds before pcat-manager-web, and
+// has no mmcli fallback to fill the gap).
+func storeOnceNonEmpty(key, val string) {
+	if val == "" {
+		return
+	}
+	if _, exists := globalData.Load(key); exists {
+		return
+	}
+	globalData.Store(key, val)
+}
+
 func getInfoFromPcatWeb() {
 	// Runs on the shared 1-minute cadence (including while the screen is
 	// dark) so wake always has fresh dashboard values.
@@ -400,16 +418,10 @@ func getInfoFromPcatWeb() {
 				}
 				globalData.Store("DHCPClientsCount", info.DHCPClientsCount)
 				// Firmware / model are fixed for a running process — set once.
-				if _, exists := globalData.Load("FirmwareVersion"); !exists {
-					globalData.Store("FirmwareVersion", info.FirmwareVersion)
-				}
+				storeOnceNonEmpty("FirmwareVersion", info.FirmwareVersion)
 				globalData.Store("ISPName", info.ISPName)
-				if _, exists := globalData.Load("Model"); !exists {
-					globalData.Store("Model", info.Model)
-				}
-				if _, exists := globalData.Load("ModemModel"); !exists {
-					globalData.Store("ModemModel", info.ModemModel)
-				}
+				storeOnceNonEmpty("Model", info.Model)
+				storeOnceNonEmpty("ModemModel", info.ModemModel)
 				globalData.Store("ModemSignalStrength", info.ModemSignalStrength)
 				if info.SdState == 0 {
 					globalData.Store("SdState", "No")
