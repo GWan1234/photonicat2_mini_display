@@ -1084,7 +1084,7 @@
                     "label": "GPS Speed",
                     "position": {
                         "x": 86,
-                        "y": 38
+                        "y": 35
                     },
                     "font": "colossal",
                     "color": [
