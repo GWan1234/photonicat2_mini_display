@@ -23,7 +23,11 @@ func withGpsState(t *testing.T) {
 	sCfgNum, sTotal, sCurr := cfgNumPages, totalNumPages, currPageIdx
 	sSms, sLenSms, sTrig := cfg.ShowSms, lenSmsPagesImages, httpChangePageTriggered
 	sIdle := idleState
+	// The trip meter is a session accumulator, so a test that drives
+	// collectGpsData would otherwise leave kilometres behind for the next one.
+	sTrip := gpsTrip
 	t.Cleanup(func() {
+		gpsTrip = sTrip
 		gpsPageConfigured, gpsBaseCfgPages, gpsPageShown = sConfigured, sBase, sShown
 		cfgNumPages, totalNumPages, currPageIdx = sCfgNum, sTotal, sCurr
 		cfg.ShowSms, lenSmsPagesImages, httpChangePageTriggered = sSms, sLenSms, sTrig
@@ -380,6 +384,9 @@ func TestCollectGpsDataFormatsFix(t *testing.T) {
 		// render large.
 		"GpsLat": "31.2304° N",
 		"GpsLon": "121.4737° E",
+		// First fix of the session: it anchors the trip meter, and anchoring
+		// is not travelling.
+		"GpsTrip": "0.0",
 	}
 	for key, exp := range want {
 		got, ok := globalData.Load(key)
@@ -620,5 +627,155 @@ func TestCollectGpsDataSpeedHasNoDecimals(t *testing.T) {
 
 		restore()
 		srv.Close()
+	}
+}
+
+// A receiver standing still still moves: its reported position wanders inside
+// the error circle, and at one sample a second an unfiltered accumulator would
+// invent kilometres a day out of that wander. Nothing here is real motion, so
+// the trip total must not move at all.
+func TestGpsTripIgnoresReceiverJitter(t *testing.T) {
+	var trip gpsTripMeter
+	base := time.Unix(1700000000, 0)
+	// ~4 m of scatter around one point, which is what a ±4 m fix looks like.
+	const degPer4m = 4.0 / 111320.0
+	offsets := []float64{0, 1, -1, 0.7, -0.9, 0.4, -0.6, 1, -1, 0.3}
+
+	for i, o := range offsets {
+		trip.add(31.2304+o*degPer4m, 121.4737-o*degPer4m, 4, base.Add(time.Duration(i)*time.Second))
+	}
+	if trip.meters != 0 {
+		t.Errorf("stationary receiver logged %.1f m", trip.meters)
+	}
+}
+
+// The flip side: every step of a walk is smaller than the noise floor, so a
+// filter that re-anchored on each rejected step would throw the whole walk
+// away one metre at a time. The anchor has to survive rejection.
+func TestGpsTripAccumulatesStepsBelowTheNoiseFloor(t *testing.T) {
+	var trip gpsTripMeter
+	base := time.Unix(1700000000, 0)
+	const degPerM = 1.0 / 111320.0
+
+	// 200 s of walking due north at 1.4 m/s: 280 m, in steps of 1.4 m.
+	for i := 0; i <= 200; i++ {
+		trip.add(31.2304+float64(i)*1.4*degPerM, 121.4737, 4, base.Add(time.Duration(i)*time.Second))
+	}
+	// The tail of the walk sits unclaimed in the current anchor, so the total
+	// trails the truth by less than one noise floor.
+	if trip.meters < 280-gpsTripMinStepM || trip.meters > 280 {
+		t.Errorf("280 m walk logged as %.1f m, want within %.0f m below 280",
+			trip.meters, gpsTripMinStepM)
+	}
+}
+
+// Two ways to get a hop that is not a journey: the daemon stops sampling (fix
+// lost, modem off, device asleep) and picks up somewhere else, or the receiver
+// glitches and reports a position on the far side of town. Neither is distance
+// travelled, but both leave the meter tracking from the new position.
+func TestGpsTripSkipsGapsAndGlitches(t *testing.T) {
+	base := time.Unix(1700000000, 0)
+	const degPerM = 1.0 / 111320.0
+
+	t.Run("gap", func(t *testing.T) {
+		var trip gpsTripMeter
+		trip.add(31.2304, 121.4737, 4, base)
+		trip.add(31.2304+5000*degPerM, 121.4737, 4, base.Add(gpsTripMaxGap+time.Second))
+		if trip.meters != 0 {
+			t.Errorf("5 km across a %v gap logged %.1f m", gpsTripMaxGap, trip.meters)
+		}
+		// ...but the new position is the anchor now, so real motion after the
+		// gap counts from there.
+		trip.add(31.2304+5100*degPerM, 121.4737, 4, base.Add(gpsTripMaxGap+11*time.Second))
+		if trip.meters < 95 || trip.meters > 105 {
+			t.Errorf("100 m after the gap logged %.1f m", trip.meters)
+		}
+	})
+
+	t.Run("glitch", func(t *testing.T) {
+		var trip gpsTripMeter
+		trip.add(31.2304, 121.4737, 4, base)
+		// 2 km in one second is 7200 km/h.
+		trip.add(31.2304+2000*degPerM, 121.4737, 4, base.Add(time.Second))
+		if trip.meters != 0 {
+			t.Errorf("teleport logged %.1f m", trip.meters)
+		}
+	})
+
+	t.Run("clock stepping backwards", func(t *testing.T) {
+		var trip gpsTripMeter
+		trip.add(31.2304, 121.4737, 4, base)
+		trip.add(31.2304+100*degPerM, 121.4737, 4, base.Add(-time.Hour))
+		if trip.meters != 0 {
+			t.Errorf("hop across a backwards clock step logged %.1f m", trip.meters)
+		}
+	})
+}
+
+// The readout is 172px wide and shares its row with an icon and a unit, so the
+// decimal is dropped once the number is long enough not to need it.
+func TestGpsTripDisplay(t *testing.T) {
+	tests := []struct {
+		meters float64
+		want   string
+	}{
+		// Before any fix, and before moving: the honest answer is zero, not a
+		// placeholder — the number is a session counter, not a reading.
+		{0, "0.0"},
+		{42, "0.0"},
+		{940, "0.9"},
+		{42_730, "42.7"},
+		{99_949, "99.9"},
+		{128_400, "128"},
+		{1_284_000, "1284"},
+	}
+	for _, tt := range tests {
+		trip := gpsTripMeter{meters: tt.meters}
+		if got := trip.display(); got != tt.want {
+			t.Errorf("%.0f m -> %q, want %q", tt.meters, got, tt.want)
+		}
+	}
+}
+
+func TestHaversineMeters(t *testing.T) {
+	tests := []struct {
+		name                   string
+		lat1, lon1, lat2, lon2 float64
+		want, tol              float64
+	}{
+		{"same point", 31.2304, 121.4737, 31.2304, 121.4737, 0, 0.001},
+		{"one degree of latitude", 0, 0, 1, 0, 111195, 200},
+		{"one degree of longitude at the equator", 0, 0, 0, 1, 111195, 200},
+		// Longitude lines converge: at 60°N a degree is half as wide.
+		{"one degree of longitude at 60N", 60, 0, 60, 1, 55597, 200},
+		{"across the antimeridian", 0, 179.99, 0, -179.99, 2224, 20},
+		{"Shanghai to Beijing", 31.2304, 121.4737, 39.9042, 116.4074, 1067000, 5000},
+	}
+	for _, tt := range tests {
+		got := haversineMeters(tt.lat1, tt.lon1, tt.lat2, tt.lon2)
+		if math.Abs(got-tt.want) > tt.tol {
+			t.Errorf("%s: %.0f m, want %.0f ±%.0f", tt.name, got, tt.want, tt.tol)
+		}
+	}
+}
+
+// Garbage coordinates (a modem reporting 0/0 as NaN, or a parse producing an
+// out-of-range value) must not become distance, and must not poison the anchor
+// for the fixes that follow.
+func TestGpsTripRejectsImpossibleCoordinates(t *testing.T) {
+	var trip gpsTripMeter
+	base := time.Unix(1700000000, 0)
+	const degPerM = 1.0 / 111320.0
+
+	trip.add(31.2304, 121.4737, 4, base)
+	trip.add(math.NaN(), 121.4737, 4, base.Add(time.Second))
+	trip.add(91.5, 121.4737, 4, base.Add(2*time.Second))
+	trip.add(31.2304, 999, 4, base.Add(3*time.Second))
+	if trip.meters != 0 {
+		t.Errorf("impossible coordinates logged %.1f m", trip.meters)
+	}
+	trip.add(31.2304+100*degPerM, 121.4737, 4, base.Add(10*time.Second))
+	if trip.meters < 95 || trip.meters > 105 {
+		t.Errorf("100 m after the garbage logged %.1f m, want the anchor intact", trip.meters)
 	}
 }

@@ -133,6 +133,96 @@ func gpsCardinal(deg float64) string {
 	return dirs[idx]
 }
 
+// Trip distance for this session only: it starts at zero every time the
+// daemon starts and is never written to disk. A persistent odometer would
+// need somewhere to store it and a rule for when to clear it; "since boot" is
+// the question the panel can answer honestly.
+//
+// Distance is summed as great-circle hops between consecutive fixes, which
+// means it measures the path at the sampling resolution — and the collector
+// only polls once a second while you are actually looking at the GPS page
+// (currentGpsInterval), every 30 s otherwise. Straight-line hops across 30 s
+// cut every corner, so a twisty back-road drive with the screen asleep reads
+// low. It is a floor on the distance travelled, not a survey.
+var gpsTrip gpsTripMeter
+
+// gpsTripMeter accumulates distance from a stream of fixes. Only the GPS
+// collector goroutine touches it, so it needs no lock.
+type gpsTripMeter struct {
+	anchored bool
+	lat, lon float64
+	at       time.Time
+	meters   float64
+}
+
+const (
+	// A hop that would have taken longer than this to walk in a straight line
+	// is a gap, not a journey: the fix was lost, the modem was off, or the
+	// daemon was polling slowly while the device moved. Re-anchor instead of
+	// drawing a chord across it.
+	gpsTripMaxGap = 5 * time.Minute
+	// Ignore hops shorter than the fix could resolve. A parked receiver
+	// wanders inside its own error circle, and at one sample a second that
+	// wander would otherwise add kilometres a day. Jitter rarely exceeds twice
+	// the reported accuracy, with a floor for optimistic receivers.
+	gpsTripMinStepM  = 12.0
+	gpsTripAccuracyK = 2.0
+	// 400 km/h between two fixes is a receiver glitch, not a car.
+	gpsTripMaxSpeedMS = 111.0
+)
+
+// add folds one fix into the running total.
+func (t *gpsTripMeter) add(lat, lon, accuracyM float64, now time.Time) {
+	if math.IsNaN(lat) || math.IsNaN(lon) || math.Abs(lat) > 90 || math.Abs(lon) > 180 {
+		return
+	}
+	if !t.anchored {
+		t.anchored, t.lat, t.lon, t.at = true, lat, lon, now
+		return
+	}
+
+	elapsed := now.Sub(t.at)
+	d := haversineMeters(t.lat, t.lon, lat, lon)
+	switch {
+	case elapsed <= 0:
+		// Clock stepped backwards (NTP catching up at boot). Re-anchor.
+	case elapsed > gpsTripMaxGap, d/elapsed.Seconds() > gpsTripMaxSpeedMS:
+		// Gap or glitch: take the new position, but not the distance.
+	case d < math.Max(gpsTripMinStepM, gpsTripAccuracyK*accuracyM):
+		// Inside the noise. Keep the old anchor rather than re-anchoring, or
+		// a slow walk would be discarded one sub-threshold hop at a time and
+		// never accumulate at all.
+		return
+	default:
+		t.meters += d
+	}
+	t.lat, t.lon, t.at = lat, lon, now
+}
+
+// display formats the total the way the page shows it: kilometres, one
+// decimal until the number gets long enough that the decimal is noise on a
+// 172px panel. Always a number, never a placeholder — "0.0" is the honest
+// answer before the first fix, and it keeps the route icon from sitting on
+// the page beside an empty slot.
+func (t *gpsTripMeter) display() string {
+	km := t.meters / 1000
+	if km >= 100 {
+		return fmt.Sprintf("%.0f", km)
+	}
+	return fmt.Sprintf("%.1f", km)
+}
+
+// haversineMeters is the great-circle distance between two WGS-84 points.
+func haversineMeters(lat1, lon1, lat2, lon2 float64) float64 {
+	const earthRadiusM = 6371008.8 // IUGG mean radius
+	rad := math.Pi / 180
+	dLat := (lat2 - lat1) * rad
+	dLon := (lon2 - lon1) * rad
+	a := math.Sin(dLat/2)*math.Sin(dLat/2) +
+		math.Cos(lat1*rad)*math.Cos(lat2*rad)*math.Sin(dLon/2)*math.Sin(dLon/2)
+	return 2 * earthRadiusM * math.Asin(math.Sqrt(math.Min(1, a)))
+}
+
 func collectGpsData() {
 	resp, err := localHTTPClient.Get("http://localhost:80/api/v1/gps.json")
 	if err != nil {
@@ -208,6 +298,18 @@ func collectGpsData() {
 	} else {
 		globalData.Store("GpsAccuracy", dash)
 	}
+	if fix.HasFix && fix.Lat != nil && fix.Lon != nil {
+		acc := 0.0
+		if fix.AccuracyM != nil {
+			acc = *fix.AccuracyM
+		}
+		gpsTrip.add(*fix.Lat, *fix.Lon, acc, time.Now())
+	}
+	// The trip total survives a lost fix — it is what this session has covered,
+	// not a property of the current position — so it is stored outside the
+	// has-fix branch, and it reads "0.0" rather than "--" when there is no fix.
+	globalData.Store("GpsTrip", gpsTrip.display())
+
 	if fix.HasFix && fix.Lat != nil && fix.Lon != nil {
 		latH, lonH := "N", "E"
 		lat, lon := *fix.Lat, *fix.Lon

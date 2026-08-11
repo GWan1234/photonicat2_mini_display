@@ -36,9 +36,10 @@ W = 172  # panel width
 Y_COMPASS = 4
 Y_SPEED = 38
 Y_ROW_1 = 118
-Y_ROW_2 = 160
-Y_LAT = 209
-Y_LON = 235
+Y_ROW_2 = 153
+Y_TRIP = 185
+Y_LAT = 216
+Y_LON = 242
 
 
 def icon(path, x, y, w, h, color=PRIMARY):
@@ -115,6 +116,14 @@ def build_gps_page():
         icon("crosshair.svg", 8, Y_ROW_2 + 4, 19, 19),
         text("Accuracy", "GpsAccuracy", 32, Y_ROW_2, "reg", units="m"),
         text("Fix", "GpsFix", 102, Y_ROW_2 + 3, "unit", color=DATA),
+
+        # --- Trip: distance covered since the daemon started. It gets the
+        # 30px of air that was going spare between the accuracy row and the
+        # coordinates, so nothing else had to move. Unlike the rows above it
+        # this one is not a pair — the route icon plus a single number reads
+        # as a total, and a second column here would crowd the coordinates.
+        icon("route.svg", 6, Y_TRIP + 2, 22, 18),
+        text("Trip", "GpsTrip", 32, Y_TRIP, "reg", units="km"),
 
         # --- Position: hemisphere letter carries the meaning. ---
         text("Lat", "GpsLat", 10, Y_LAT, "unit", color=DATA),

@@ -48,6 +48,7 @@ func TestGpsPagePreview(t *testing.T) {
 		globalData.Delete("GpsCourseDeg")
 		globalData.Store("GpsAlt", "--")
 		globalData.Store("GpsAccuracy", "--")
+		globalData.Store("GpsTrip", "0.0")
 		globalData.Store("GpsSats", "0/3")
 		globalData.Store("GpsFix", "No Fix")
 		globalData.Store("GpsLat", "-")
@@ -60,6 +61,7 @@ func TestGpsPagePreview(t *testing.T) {
 		globalData.Store("GpsCourseDeg", 271.0)
 		globalData.Store("GpsAlt", "1284")
 		globalData.Store("GpsAccuracy", "±3")
+		globalData.Store("GpsTrip", "128")
 		globalData.Store("GpsSats", "11/18")
 		globalData.Store("GpsFix", "3D")
 		globalData.Store("GpsLat", "31.2304° N")
@@ -70,6 +72,7 @@ func TestGpsPagePreview(t *testing.T) {
 		globalData.Store("GpsCourseDeg", 3.0)
 		globalData.Store("GpsAlt", "1284")
 		globalData.Store("GpsAccuracy", "±12")
+		globalData.Store("GpsTrip", "0.0")
 		globalData.Store("GpsSats", "11/18")
 		globalData.Store("GpsFix", "3D")
 		globalData.Store("GpsLat", "31.2304° N")
@@ -80,6 +83,7 @@ func TestGpsPagePreview(t *testing.T) {
 		globalData.Store("GpsCourseDeg", 132.0)
 		globalData.Store("GpsAlt", "412")
 		globalData.Store("GpsAccuracy", "±4")
+		globalData.Store("GpsTrip", "42.7")
 		globalData.Store("GpsSats", "7/12")
 		globalData.Store("GpsFix", "3D")
 		globalData.Store("GpsLat", "31.2304° N")
@@ -222,6 +226,51 @@ func TestPlusMinusIsComposedNotTofu(t *testing.T) {
 	if plus.Min.X < x0 || bar.Min.X < x0 || plus.Max.X > finishX || bar.Max.X > finishX {
 		t.Errorf("sign spans x=%d..%d, outside the measured cell x=%d..%d",
 			min(plus.Min.X, bar.Min.X), max(plus.Max.X, bar.Max.X), x0, finishX)
+	}
+}
+
+// The lower half of the page is five stacked lines — altitude/sats,
+// accuracy/fix, trip, latitude, longitude — laid out by hand-picked Y
+// constants in build_gps_page.py. Adding the trip row spent the slack that
+// used to sit above the coordinates, so the rows are now close enough that a
+// font change or one careless constant would fuse two of them. This renders
+// the page and insists they stay apart.
+func TestGpsPageRowsKeepTheirDistance(t *testing.T) {
+	fonts = buildFontTable(".")
+	assetsPrefix = "."
+
+	c, err := loadConfig("config.json")
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+	pageIdx, _ := gpsSpeedElement(t, &c)
+
+	for key, val := range map[string]string{
+		"GpsSpeed": "32", "GpsAlt": "412", "GpsSats": "7/12", "GpsAccuracy": "±4",
+		"GpsFix": "3D", "GpsTrip": "42.7", "GpsLat": "31.2304° N", "GpsLon": "121.4737° E",
+	} {
+		globalData.Store(key, val)
+	}
+	globalData.Store("GpsCourseDeg", 132.0)
+
+	frame := image.NewRGBA(image.Rect(0, 0, PCAT2_LCD_WIDTH, middleFrameHeight))
+	renderMiddle(frame, &c, false, pageIdx)
+
+	// From below the speed block to the bottom of the frame.
+	const bandTop = 120
+	rows := inkRows(frame, bandTop, middleFrameHeight)
+	if len(rows) != 5 {
+		t.Fatalf("want 5 lines below the speed block, got %d: %v", len(rows), rows)
+	}
+	const minGap = 8
+	for i := 1; i < len(rows); i++ {
+		if gap := rows[i].top - rows[i-1].bottom - 1; gap < minGap {
+			t.Errorf("only %dpx between the line ending at y=%d and the one starting at y=%d, want %d",
+				gap, rows[i-1].bottom, rows[i].top, minGap)
+		}
+	}
+	if last := rows[len(rows)-1].bottom; last > middleFrameHeight-6 {
+		t.Errorf("last line ends at y=%d, against the %dpx frame bottom", last, middleFrameHeight)
 	}
 }
 
