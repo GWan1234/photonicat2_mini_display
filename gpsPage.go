@@ -200,11 +200,11 @@ func collectGpsData() {
 	} else {
 		globalData.Store("GpsAlt", dash)
 	}
-	// Accuracy renders as "+-4m": the sign is the label. It is spelled "+-"
-	// and not "±" because Orbitron has no U+00B1 glyph — that renders as a
-	// tofu box on the panel.
+	// Accuracy renders as "±4m": the sign is the label. Orbitron has no U+00B1
+	// glyph in any weight, so drawText composes the sign from the face's own
+	// "+" and "-" (see drawPlusMinus) instead of drawing a tofu box.
 	if fix.HasFix && fix.AccuracyM != nil {
-		globalData.Store("GpsAccuracy", fmt.Sprintf("+-%.0f", *fix.AccuracyM))
+		globalData.Store("GpsAccuracy", fmt.Sprintf("±%.0f", *fix.AccuracyM))
 	} else {
 		globalData.Store("GpsAccuracy", dash)
 	}

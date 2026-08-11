@@ -341,7 +341,7 @@ func drawCovStoreRealPageData(t *testing.T) {
 		"WiFiClientsCount": 3, "DHCPClientsCount": 5, "SdState": "-", // dash placeholder
 		"FanRPM": 4200, "BoardTemperature": "42.5",
 		"GpsSpeed": "32", "GpsCourse": "132° SE", "GpsCourseDeg": 132.0,
-		"GpsAlt": "412", "GpsAccuracy": "+-4", "GpsSats": "7/12",
+		"GpsAlt": "412", "GpsAccuracy": "±4", "GpsSats": "7/12",
 		"GpsFix": "3D", "GpsLat": "31.2304° N", "GpsLon": "121.4737° E",
 	}
 	for k, v := range vals {

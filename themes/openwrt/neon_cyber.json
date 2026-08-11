@@ -1052,8 +1052,8 @@
                     "type": "text",
                     "label": "GPS Speed",
                     "position": {
-                        "x": 4,
-                        "y": 50
+                        "x": 86,
+                        "y": 38
                     },
                     "font": "colossal",
                     "color": [
@@ -1065,7 +1065,8 @@
                     "units_font": "tiny",
                     "enable": 1,
                     "units": "km/h",
-                    "units_dy": -4
+                    "units_below": 5,
+                    "align": "center"
                 },
                 {
                     "type": "icon",

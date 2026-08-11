@@ -374,8 +374,8 @@ func TestCollectGpsDataFormatsFix(t *testing.T) {
 		"GpsSpeed":  "63",
 		"GpsCourse": "92° E",
 		"GpsAlt":    "13",
-		// "+-" rather than "±": Orbitron has no U+00B1 glyph.
-		"GpsAccuracy": "+-4",
+		// Drawn with a composed ±: Orbitron carries no U+00B1 glyph.
+		"GpsAccuracy": "±4",
 		// 4 decimals ≈ 11 m, finer than the fix itself and narrow enough to
 		// render large.
 		"GpsLat": "31.2304° N",

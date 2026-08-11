@@ -97,13 +97,63 @@ func drawText(img *image.RGBA, text string, posX, posY int, face font.Face, clr 
         }
     }()
     
-    d.DrawString(text)
+    drawStringComposed(d, text)
 
     // Calculate finishing coordinates.
     finishX = x + textWidth
     finishY = y - metrics.Ascent.Round() + textHeight // Bottom of the text block.
 
     return
+}
+
+// plusMinus is the one glyph the layout asks for that Orbitron does not carry:
+// U+00B1 is absent from every weight shipped in assets/fonts, and the missing
+// glyph renders as a tofu box, not as nothing.
+const plusMinus = '±'
+
+// drawStringComposed draws s at the drawer's pen, building any ± itself when
+// the face has no glyph for it. The alternative — borrowing the sign from the
+// CJK fallback font — would set a light, round symbol next to Orbitron's
+// squared-off ExtraBold digits; composing it from the face's own "+" and "-"
+// inherits exactly the right stroke weight, and costs a couple of extra
+// DrawString calls on a string that is four characters long.
+func drawStringComposed(d *font.Drawer, s string) {
+	if _, ok := d.Face.GlyphAdvance(plusMinus); ok || !strings.ContainsRune(s, plusMinus) {
+		d.DrawString(s)
+		return
+	}
+	for i, part := range strings.Split(s, string(plusMinus)) {
+		if i > 0 {
+			drawPlusMinus(d)
+		}
+		d.DrawString(part)
+	}
+}
+
+// drawPlusMinus stacks the face's "+" over its "-" at the drawer's pen and
+// leaves the pen one ± advance further on. That advance is the width callers
+// already measured for the rune (the notdef box's), so composing the glyph
+// does not shift anything measured around it.
+func drawPlusMinus(d *font.Drawer) {
+	dot := d.Dot
+	advance := font.MeasureString(d.Face, string(plusMinus))
+	plus, _ := font.BoundString(d.Face, "+")
+	bar, _ := font.BoundString(d.Face, "-")
+
+	// The bar sits on the baseline, where the digits beside it sit; the plus
+	// rides above it, clear by three quarters of the bar's own thickness.
+	barDy := -bar.Max.Y
+	plusDy := bar.Min.Y + barDy - (bar.Max.Y-bar.Min.Y)*3/4 - plus.Max.Y
+	// Centre the pair in the advance, then line the bar up with the plus
+	// rather than with the pen: the two glyphs carry different side bearings.
+	plusDx := (advance-(plus.Max.X-plus.Min.X))/2 - plus.Min.X
+	barDx := plus.Min.X + plusDx - bar.Min.X
+
+	d.Dot = fixed.Point26_6{X: dot.X + plusDx, Y: dot.Y + plusDy}
+	d.DrawString("+")
+	d.Dot = fixed.Point26_6{X: dot.X + barDx, Y: dot.Y + barDy}
+	d.DrawString("-")
+	d.Dot = fixed.Point26_6{X: dot.X + advance, Y: dot.Y}
 }
 
 // drawVerticalText draws text with each rune stacked on its own line, reading
@@ -2629,11 +2679,7 @@ func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
 
 			xMain, _ := drawText(frame, textToDisplay, element.Position.X, element.Position.Y, face, clr, centered)
 
-			// Calculate the y position for the units text so that its baseline aligns with the main text.
-			unitAscent := unitFace.Metrics().Ascent.Round()
-			unitY := mainBaseline - unitAscent + element.UnitsDy
-
-			// Draw the units text slightly to the right of the main text (skip units for timeout)
+			// Draw the units (skip them for timeout, which renders a bare "X").
 			if !isPingTimeout {
 				unitText := element.Units
 				//check if there is a override unit
@@ -2642,7 +2688,39 @@ func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
 					unitTextVal, _ := globalData.Load(theKey)
 					unitText = unitTextVal.(string)
 				}
-				drawText(frame, unitText, xMain+1, unitY, unitFace, clr, false)
+
+				// Default: trailing, 1px past the value, sharing its baseline.
+				unitAscent := unitFace.Metrics().Ascent.Round()
+				unitX := xMain + 1
+				unitY := mainBaseline - unitAscent + element.UnitsDy
+
+				if element.UnitsBelow > 0 {
+					// Stacked: the unit gets its own line under the value, with
+					// UnitsBelow px of clear space between the two. Measured
+					// off the glyphs' ink boxes, not their em boxes — a 62px
+					// digit's em box runs well past the bottom of the "3", so
+					// baseline arithmetic alone would open a gap that looks
+					// nothing like the number asked for. Kept in 26.6 fixed
+					// point and rounded once at the end: rounding the two ink
+					// edges separately costs a pixel each way.
+					valueInk, _ := font.BoundString(face, textToDisplay)
+					unitInk, _ := font.BoundString(unitFace, unitText)
+					// The value's floor is its baseline, even when the glyphs
+					// stop short of it: a placeholder "--" is all mid-height
+					// ink, and measuring that literally would ride the unit
+					// 15px up the panel, then drop it again the moment a fix
+					// arrives and the dashes become digits.
+					valueBottom := valueInk.Max.Y
+					if valueBottom < 0 {
+						valueBottom = 0
+					}
+					unitBaseline := (fixed.I(mainBaseline) + valueBottom +
+						fixed.I(element.UnitsBelow) - unitInk.Min.Y).Round()
+					unitX = element.Position.X
+					unitY = unitBaseline - unitAscent + element.UnitsDy
+				}
+
+				drawText(frame, unitText, unitX, unitY, unitFace, clr, centered && element.UnitsBelow > 0)
 			}
 		
 		case "icon":
