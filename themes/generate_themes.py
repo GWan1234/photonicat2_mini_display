@@ -92,7 +92,10 @@ def main():
             payload = {"display_template": {"elements": recolor(elements, palette)}}
             out_path = os.path.join(out_dir, theme_name + ".json")
             with open(out_path, "w") as f:
-                json.dump(payload, f, indent=4)
+                # ensure_ascii=False to match build_gps_page.py: without it the
+                # "°" in labels round-trips to "°", so every regeneration
+                # churns lines that did not actually change.
+                json.dump(payload, f, indent=4, ensure_ascii=False)
                 f.write("\n")
             print("wrote", os.path.relpath(out_path, ROOT))
 

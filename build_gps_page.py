@@ -52,7 +52,7 @@ def icon(path, x, y, w, h, color=PRIMARY):
     }
 
 
-def text(label, key, x, y, font, color=PRIMARY, units="", units_font="unit"):
+def text(label, key, x, y, font, color=PRIMARY, units="", units_font="unit", units_dy=0):
     el = {
         "type": "text",
         "label": label,
@@ -65,6 +65,8 @@ def text(label, key, x, y, font, color=PRIMARY, units="", units_font="unit"):
     }
     if units:
         el["units"] = units
+    if units_dy:
+        el["units_dy"] = units_dy
     return el
 
 
@@ -81,8 +83,17 @@ def build_gps_page():
             "enable": 1,
         },
         # --- Speed: biggest number on the page. "km/h" is the only label, and
-        # the value is whole-number so the glyphs can run this large. ---
-        text("GPS Speed", "GpsSpeed", 10, Y_SPEED, "colossal", units="km/h"),
+        # the value is whole-number so the glyphs can run this large. The unit
+        # rides 4px above the shared baseline: at 62px the digits' lower right
+        # is exactly where a baseline-aligned "km/h" wants to sit, so the two
+        # overlapped. ---
+        # x=4 and a "tiny" unit so the widest case still fits: "188" measures
+        # 128px at colossal, and a 15px "unit" km/h added 42px more — together
+        # they overran the 172px panel and clipped the unit to "km/". At 12px
+        # the unit is 34px, which fits, and the smaller size reads better
+        # against 62px digits anyway.
+        text("GPS Speed", "GpsSpeed", 4, Y_SPEED, "colossal",
+             units="km/h", units_font="tiny", units_dy=-4),
 
         # --- Row 1: altitude (mountain) | satellites (dish). No "m" on the
         # altitude: the mountain already says what it is, and a 4-digit value

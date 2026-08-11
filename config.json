@@ -1083,8 +1083,8 @@
                     "type": "text",
                     "label": "GPS Speed",
                     "position": {
-                        "x": 86,
-                        "y": 52
+                        "x": 4,
+                        "y": 50
                     },
                     "font": "colossal",
                     "color": [
@@ -1093,32 +1093,17 @@
                         0
                     ],
                     "data_key": "GpsSpeed",
-                    "units_font": "unit",
+                    "units_font": "tiny",
                     "enable": 1,
-                    "align": "center"
-                },
-                {
-                    "type": "fixed_text",
-                    "label": "km/h",
-                    "position": {
-                        "x": 86,
-                        "y": 110
-                    },
-                    "font": "unit",
-                    "color": [
-                        255,
-                        229,
-                        0
-                    ],
-                    "align": "center",
-                    "enable": 1
+                    "units": "km/h",
+                    "units_dy": -4
                 },
                 {
                     "type": "icon",
                     "icon_path": "assets/svg/mountain.svg",
                     "position": {
                         "x": 6,
-                        "y": 137
+                        "y": 129
                     },
                     "size": {
                         "width": 22,
@@ -1136,7 +1121,7 @@
                     "label": "Altitude",
                     "position": {
                         "x": 31,
-                        "y": 128
+                        "y": 120
                     },
                     "font": "big",
                     "color": [
@@ -1153,7 +1138,7 @@
                     "icon_path": "assets/svg/satellite.svg",
                     "position": {
                         "x": 103,
-                        "y": 136
+                        "y": 128
                     },
                     "size": {
                         "width": 18,
@@ -1171,7 +1156,7 @@
                     "label": "Sats",
                     "position": {
                         "x": 125,
-                        "y": 133
+                        "y": 125
                     },
                     "font": "tiny",
                     "color": [
@@ -1188,7 +1173,7 @@
                     "icon_path": "assets/svg/crosshair.svg",
                     "position": {
                         "x": 8,
-                        "y": 174
+                        "y": 164
                     },
                     "size": {
                         "width": 19,
@@ -1206,7 +1191,7 @@
                     "label": "Accuracy",
                     "position": {
                         "x": 32,
-                        "y": 170
+                        "y": 160
                     },
                     "font": "reg",
                     "color": [
@@ -1224,7 +1209,7 @@
                     "label": "Fix",
                     "position": {
                         "x": 102,
-                        "y": 173
+                        "y": 163
                     },
                     "font": "unit",
                     "color": [
@@ -1241,7 +1226,7 @@
                     "label": "Lat",
                     "position": {
                         "x": 10,
-                        "y": 206
+                        "y": 209
                     },
                     "font": "unit",
                     "color": [
@@ -1258,7 +1243,7 @@
                     "label": "Lon",
                     "position": {
                         "x": 10,
-                        "y": 240
+                        "y": 235
                     },
                     "font": "unit",
                     "color": [

@@ -2631,7 +2631,7 @@ func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
 
 			// Calculate the y position for the units text so that its baseline aligns with the main text.
 			unitAscent := unitFace.Metrics().Ascent.Round()
-			unitY := mainBaseline - unitAscent
+			unitY := mainBaseline - unitAscent + element.UnitsDy
 
 			// Draw the units text slightly to the right of the main text (skip units for timeout)
 			if !isPingTimeout {

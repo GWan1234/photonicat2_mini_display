@@ -390,6 +390,11 @@ type DisplayElement struct {
 	// drawn centered over the bar; Units is appended if present ("GB" → "3.2/16GB").
 	LabelDataKey string       `json:"label_data_key,omitempty"`
 	UnitsFont    string       `json:"units_font,omitempty"`
+	// UnitsDy shifts the units text vertically off the value's baseline
+	// (negative = up). Units normally share the value's baseline, which reads
+	// well at body sizes but collides at display sizes: against the GPS page's
+	// 62px speed digits the "km/h" tucks into the last glyph's lower right.
+	UnitsDy      int          `json:"units_dy,omitempty"`
 	IconPath     string       `json:"icon_path,omitempty"`
 	Enable       int          `json:"enable,omitempty"`
 	Size         *Size        `json:"size,omitempty"`         // for icons, if provided

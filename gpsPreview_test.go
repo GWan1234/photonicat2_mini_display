@@ -11,6 +11,8 @@ import (
 	"image/color"
 	"os"
 	"testing"
+
+	"golang.org/x/image/font"
 )
 
 // gpsPreviewFonts installs the real font table against the repo's assets dir,
@@ -94,6 +96,46 @@ func TestGpsPagePreview(t *testing.T) {
 		out = "/tmp/gps_preview.png"
 	}
 	saveFrameToPng(frame, out)
+}
+
+// The speed readout plus its trailing unit must fit the panel at the widest
+// value the layout has to render. This is not hypothetical: at "188" the
+// colossal digits measure 128px and "km/h" another 42px, which from x=10 ran
+// 9px off the 172px panel and clipped the unit to "km/". The draw path's
+// overflow check only measures the value, so nothing else catches this.
+func TestGpsSpeedPlusUnitFitsPanel(t *testing.T) {
+	fonts = buildFontTable(".")
+
+	for _, name := range []string{"config.json", "config_debian.json"} {
+		c, err := loadConfig(name)
+		if err != nil {
+			t.Fatalf("loadConfig(%s): %v", name, err)
+		}
+		for page, els := range c.DisplayTemplate.Elements {
+			for _, el := range els {
+				if el.DataKey != "GpsSpeed" {
+					continue
+				}
+				face, _, err := getFontFaceForText(el.Font, "188")
+				if err != nil {
+					t.Fatalf("%s %s: font %q: %v", name, page, el.Font, err)
+				}
+				unitFace, _, err := getFontFace(el.UnitsFont)
+				if err != nil {
+					t.Fatalf("%s %s: units font %q: %v", name, page, el.UnitsFont, err)
+				}
+				// "188" is the widest speed the page renders: three digits, and
+				// collectGpsData formats speed with no decimal point.
+				end := el.Position.X +
+					font.MeasureString(face, "188").Round() + 1 +
+					font.MeasureString(unitFace, el.Units).Round()
+				if end > PCAT2_LCD_WIDTH {
+					t.Errorf("%s %s: speed %q + unit %q ends at x=%d, past the %dpx panel",
+						name, page, "188", el.Units, end, PCAT2_LCD_WIDTH)
+				}
+			}
+		}
+	}
 }
 
 // Every "font"/"units_font" a shipped config names must exist in the font
