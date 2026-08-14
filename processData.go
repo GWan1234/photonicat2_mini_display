@@ -1854,8 +1854,10 @@ const pingTimeout = 3 * time.Second
 // pingICMP uses github.com/go-ping/ping to perform an ICMP ping.
 // Note: raw ICMP ping usually requires root privileges.
 // Returns -2 for timeouts >3 seconds, -1 for other errors, or ping time in ms.
+// The target goes through pingTarget so a transparent proxy's fake-ip answer
+// cannot turn a healthy link into a red X (see pingResolve.go).
 func pingICMP(host string) (int64, error) {
-	pinger, err := ping.NewPinger(host)
+	pinger, err := ping.NewPinger(pingTarget(host))
 	if err != nil {
 		return -1, err
 	}
