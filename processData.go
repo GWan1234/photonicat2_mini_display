@@ -931,9 +931,27 @@ func collectNetworkData(cfg Config) {
 // (var, not const, only so tests can shorten it.)
 var pingProbeDeadline = pingTimeout + 500*time.Millisecond
 
-// pingProbe is the probe a row runs; a var so tests can substitute a slow or
-// hanging host without touching the network.
-var pingProbe = pingICMP
+// pingProbe is the ICMP probe a row runs; a var so tests can substitute a
+// slow or hanging host without touching the network. pingProbeTCP and
+// pingProbeHTTP are the other two modes' probes, vars for the same reason.
+var (
+	pingProbe     = pingICMP
+	pingProbeTCP  = pingTCP
+	pingProbeHTTP = pingHTTP
+)
+
+// probeForPingType picks a row's probe from its configured ping type
+// ("icmp"/"tcp"/"http"; anything else normalizes to ICMP — see pingModes.go).
+func probeForPingType(pingType string) func(string) (int64, error) {
+	switch normalizePingType(pingType) {
+	case pingTypeTCP:
+		return pingProbeTCP
+	case pingTypeHTTP:
+		return pingProbeHTTP
+	default:
+		return pingProbe
+	}
+}
 
 // pingRow owns one ping row (Ping0/Ping1): its display keys, its success
 // counters and its single in-flight probe. Each row is polled by its own
@@ -964,7 +982,7 @@ var (
 // collect runs one probe for this row and publishes the result. It returns as
 // soon as the probe answers, or at pingProbeDeadline - whichever comes first -
 // so the row's cadence never depends on how long a broken host takes to fail.
-func (r *pingRow) collect(site string) {
+func (r *pingRow) collect(site, pingType string) {
 	if !r.inFlight.CompareAndSwap(false, true) {
 		// The previous probe is still out there (wedged resolver, black-holed
 		// route). Don't queue another one behind it; the row already shows the
@@ -972,11 +990,13 @@ func (r *pingRow) collect(site string) {
 		return
 	}
 
+	probe := probeForPingType(pingType)
+
 	// Buffered so an abandoned probe can deliver its result and exit instead of
 	// blocking forever on a receiver that has moved on.
 	done := make(chan int64, 1)
 	go func() {
-		pingMs, err := pingProbe(site)
+		pingMs, err := probe(site)
 		if err != nil {
 			pingMs = -1
 		}

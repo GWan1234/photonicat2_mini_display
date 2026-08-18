@@ -667,6 +667,12 @@ func setPingSites(c *fiber.Ctx) error {
 	configMutex.Lock()
 	userCfg.PingSite0 = c.FormValue("ping_site0")
 	userCfg.PingSite1 = c.FormValue("ping_site1")
+	if t := c.FormValue("ping_type0"); t != "" {
+		userCfg.PingType0 = normalizePingType(t)
+	}
+	if t := c.FormValue("ping_type1"); t != "" {
+		userCfg.PingType1 = normalizePingType(t)
+	}
 	saveUserConfigToFile() // persist
 	configMutex.Unlock()
 

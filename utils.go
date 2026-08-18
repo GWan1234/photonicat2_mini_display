@@ -820,6 +820,16 @@ func mergeConfigs() error {
 		cfg.PingSite1 = "photonicat.com"
 	}
 
+	// Ping types: unknown/missing values normalize to ICMP so a stale or
+	// hand-edited user_config can never turn a row off.
+	cfg.PingType0 = normalizePingType(cfg.PingType0)
+	cfg.PingType1 = normalizePingType(cfg.PingType1)
+
+	// config_version describes the shipped default config's schema, so the
+	// value from config.json always wins over whatever an old user_config
+	// (saved by an earlier firmware's web UI) still carries.
+	cfg.ConfigVersion = dftCfg.ConfigVersion
+
 	// 5. Validation
 	if cfg.ScreenDimmerTimeOnBatterySeconds < 0 {
 		return fmt.Errorf("screen_dimmer_time_on_battery_seconds must be ≥ 0, got %d",

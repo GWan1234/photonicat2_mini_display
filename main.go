@@ -443,6 +443,17 @@ type Config struct {
 	ScreenMinBrightness              int                 `json:"screen_min_brightness"`
 	PingSite0                        string              `json:"ping_site0"`
 	PingSite1                        string              `json:"ping_site1"`
+	// PingType0/1 select each row's probe: "icmp" (default), "tcp" (one TCP
+	// handshake to host[:port], port 443 when omitted) or "http" (one GET,
+	// gen_204 style — any HTTP response counts). See pingModes.go.
+	PingType0 string `json:"ping_type0,omitempty"`
+	PingType1 string `json:"ping_type1,omitempty"`
+	// ConfigVersion is the schema/feature version of the SHIPPED config.json;
+	// it is bumped whenever a release adds config-driven features so the web
+	// UI (and support) can tell what this firmware understands. mergeConfigs
+	// forces the shipped value, so a stale copy in user_config never wins.
+	// History: 100 = pre-versioned scheme, 101 = ping_type0/1 (tcp/http ping).
+	ConfigVersion int `json:"config_version,omitempty"`
 	DisplayTemplate                  DisplayTemplate     `json:"display_template"`
 	ShowSms                          bool                `json:"show_sms"`
 	SmsLimitForScreen                int                 `json:"sms_limit_for_screen"`
@@ -879,10 +890,10 @@ func main() {
 	// the other row keeps ticking. Only the first mirrors the live cadence into
 	// pingGatherInterval (both share currentPingInterval).
 	startPageSensitiveCollector(currentPingInterval, pingReschedule[0], &pingGatherInterval, func() {
-		pingRow0.collect(cfg.PingSite0)
+		pingRow0.collect(cfg.PingSite0, cfg.PingType0)
 	})
 	startPageSensitiveCollector(currentPingInterval, pingReschedule[1], nil, func() {
-		pingRow1.collect(cfg.PingSite1)
+		pingRow1.collect(cfg.PingSite1, cfg.PingType1)
 	})
 	// Linux/CPU: 0.5s (2 Hz) on the cpu_bars page while awake, otherwise 1 minute.
 	startPageSensitiveCollector(currentLinuxInterval, linuxReschedule, &dataGatherInterval, func() {

@@ -24,7 +24,7 @@ func TestPingRowHangingProbeHitsDeadline(t *testing.T) {
 	row := &pingRow{valueKey: "TestPingValue", rateKey: "TestPingRate", lastSuccess: -1}
 
 	start := time.Now()
-	row.collect("stuck.example")
+	row.collect("stuck.example", "icmp")
 	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
 		t.Errorf("collect() waited %v on a hung probe, want ~%v", elapsed, pingProbeDeadline)
 	}
@@ -38,7 +38,7 @@ func TestPingRowHangingProbeHitsDeadline(t *testing.T) {
 	// The first probe is still stuck: the next tick must not stack another one
 	// behind it, and must still return promptly.
 	start = time.Now()
-	row.collect("stuck.example")
+	row.collect("stuck.example", "icmp")
 	if elapsed := time.Since(start); elapsed > 100*time.Millisecond {
 		t.Errorf("second collect() took %v, want an immediate skip", elapsed)
 	}
@@ -50,7 +50,7 @@ func TestPingRowHangingProbeHitsDeadline(t *testing.T) {
 	close(release)
 	deadline := time.Now().Add(time.Second)
 	for len(calls) < 2 && time.Now().Before(deadline) {
-		row.collect("stuck.example")
+		row.collect("stuck.example", "icmp")
 		time.Sleep(5 * time.Millisecond)
 	}
 	if len(calls) < 2 {

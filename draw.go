@@ -2816,9 +2816,13 @@ func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
 				key := tok[1 : len(tok)-1] // strip brackets
 				switch key {
 				case "ping_site0":
-					return cfg.PingSite0
+					return pingSiteLabel(cfg.PingSite0)
 				case "ping_site1":
-					return cfg.PingSite1
+					return pingSiteLabel(cfg.PingSite1)
+				case "ping_type0":
+					return normalizePingType(cfg.PingType0)
+				case "ping_type1":
+					return normalizePingType(cfg.PingType1)
 				/*case "screen_dimmer_time_on_battery_seconds":
 					return strconv.Itoa(cfg.ScreenDimmerTimeOnBatterySeconds)
 				case "screen_dimmer_time_on_dc_seconds":
