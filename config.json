@@ -286,7 +286,7 @@
             "page1": [
                 {
                     "type": "fixed_text",
-                    "label": "ping: [ping_site0]",
+                    "label": "[ping_site0]",
                     "position": {
                         "x": 6,
                         "y": 3
@@ -337,7 +337,7 @@
                 },
                 {
                     "type": "fixed_text",
-                    "label": "ping: [ping_site1]",
+                    "label": "[ping_site1]",
                     "position": {
                         "x": 6,
                         "y": 47

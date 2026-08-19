@@ -57,10 +57,11 @@ func pingSiteLabel(site string) string {
 	return site
 }
 
-// pingSiteDisplay is the ping page's site text: the scheme-stripped site,
-// prefixed with the probe mode when it is not the ICMP default — "TCP
-// google.com" / "HTTP google.com" — so the row says what kind of "up" it is
-// measuring.
+// pingSiteDisplay is the ping page's whole row text (the default template's
+// label is just "[ping_siteN]"): the classic "ping: <site>" for ICMP, and the
+// mode name instead of "ping:" for the others — "TCP google.com" /
+// "HTTP google.com" / "HTTPS google.com" — because both prefixes together
+// would not fit the 172px row.
 func pingSiteDisplay(site, pingType string) string {
 	label := pingSiteLabel(site)
 	switch normalizePingType(pingType) {
@@ -71,7 +72,7 @@ func pingSiteDisplay(site, pingType string) string {
 	case pingTypeHTTPS:
 		return "HTTPS " + label
 	default:
-		return label
+		return "ping: " + label
 	}
 }
 

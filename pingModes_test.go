@@ -73,8 +73,8 @@ func TestPingTCPAddr(t *testing.T) {
 
 func TestPingSiteDisplay(t *testing.T) {
 	cases := []struct{ site, ptype, want string }{
-		{"google.com", "icmp", "google.com"},
-		{"google.com", "", "google.com"},
+		{"google.com", "icmp", "ping: google.com"},
+		{"google.com", "", "ping: google.com"},
 		{"google.com", "tcp", "TCP google.com"},
 		{"google.com", "http", "HTTP google.com"},
 		{"google.com", "https", "HTTPS google.com"},
