@@ -76,6 +76,21 @@ func pingSiteDisplay(site, pingType string) string {
 	}
 }
 
+// collapsePingLabel repairs a ping row label built from a stale template.
+// user_configs saved before pingSiteDisplay returned the whole row text carry
+// the literal "ping: " prefix around the placeholder, which now renders as
+// "ping: ping: 1.1.1.1" or "ping: TCP google.com". The literal prefix gives
+// way: the substitution already carries the right one.
+func collapsePingLabel(label string) string {
+	const p = "ping: "
+	for _, prefix := range []string{p, "TCP ", "HTTP ", "HTTPS "} {
+		if strings.HasPrefix(label, p+prefix) {
+			return strings.TrimPrefix(label, p)
+		}
+	}
+	return label
+}
+
 // pingTCPDefaultPort is used when the site has no explicit port. 443 rather
 // than 80 because HTTPS is the one port effectively every site answers on.
 const pingTCPDefaultPort = "443"

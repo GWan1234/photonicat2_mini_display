@@ -88,6 +88,24 @@ func TestPingSiteDisplay(t *testing.T) {
 	}
 }
 
+func TestCollapsePingLabel(t *testing.T) {
+	cases := map[string]string{
+		"ping: ping: 1.1.1.1":     "ping: 1.1.1.1",
+		"ping: TCP google.com":    "TCP google.com",
+		"ping: HTTP google.com":   "HTTP google.com",
+		"ping: HTTPS google.com":  "HTTPS google.com",
+		"ping: 1.1.1.1":           "ping: 1.1.1.1",
+		"TCP google.com":          "TCP google.com",
+		"my ping: ping: x":        "my ping: ping: x",
+		"ping: HTTPer google.com": "ping: HTTPer google.com",
+	}
+	for in, want := range cases {
+		if got := collapsePingLabel(in); got != want {
+			t.Errorf("collapsePingLabel(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestPingSiteLabel(t *testing.T) {
 	if got := pingSiteLabel("https://www.google.com/generate_204"); got != "www.google.com/generate_204" {
 		t.Errorf("pingSiteLabel stripped to %q", got)

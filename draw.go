@@ -2832,7 +2832,13 @@ func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
 					return tok
 				}
 			})
-		
+			if strings.Contains(element.Label, "[ping_site") {
+				// Saved layouts from before the substitution carried its own
+				// prefix still wrap the placeholder in "ping: " — drop the
+				// stale copy (see collapsePingLabel).
+				label = collapsePingLabel(label)
+			}
+
 
 			drawText(frame, label, element.Position.X, element.Position.Y, face, clr, element.Align == "center")
 
