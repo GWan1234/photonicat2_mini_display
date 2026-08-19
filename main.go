@@ -444,15 +444,17 @@ type Config struct {
 	PingSite0                        string              `json:"ping_site0"`
 	PingSite1                        string              `json:"ping_site1"`
 	// PingType0/1 select each row's probe: "icmp" (default), "tcp" (one TCP
-	// handshake to host[:port], port 443 when omitted) or "http" (one GET,
-	// gen_204 style — any HTTP response counts). See pingModes.go.
+	// handshake to host[:port], port 443 when omitted), "http" or "https"
+	// (one GET, gen_204 style — any HTTP response counts; https times the
+	// TLS handshake too). See pingModes.go.
 	PingType0 string `json:"ping_type0,omitempty"`
 	PingType1 string `json:"ping_type1,omitempty"`
 	// ConfigVersion is the schema/feature version of the SHIPPED config.json;
 	// it is bumped whenever a release adds config-driven features so the web
 	// UI (and support) can tell what this firmware understands. mergeConfigs
 	// forces the shipped value, so a stale copy in user_config never wins.
-	// History: 100 = pre-versioned scheme, 101 = ping_type0/1 (tcp/http ping).
+	// History: 100 = pre-versioned scheme, 101 = ping_type0/1 (tcp/http
+	// ping), 102 = "https" ping type.
 	ConfigVersion int `json:"config_version,omitempty"`
 	DisplayTemplate                  DisplayTemplate     `json:"display_template"`
 	ShowSms                          bool                `json:"show_sms"`

@@ -27,9 +27,10 @@ import (
 )
 
 const (
-	pingTypeICMP = "icmp"
-	pingTypeTCP  = "tcp"
-	pingTypeHTTP = "http"
+	pingTypeICMP  = "icmp"
+	pingTypeTCP   = "tcp"
+	pingTypeHTTP  = "http"
+	pingTypeHTTPS = "https"
 )
 
 // normalizePingType maps any config value onto one of the three modes.
@@ -41,6 +42,8 @@ func normalizePingType(t string) string {
 		return pingTypeTCP
 	case pingTypeHTTP:
 		return pingTypeHTTP
+	case pingTypeHTTPS:
+		return pingTypeHTTPS
 	default:
 		return pingTypeICMP
 	}
@@ -65,6 +68,8 @@ func pingSiteDisplay(site, pingType string) string {
 		return "TCP " + label
 	case pingTypeHTTP:
 		return "HTTP " + label
+	case pingTypeHTTPS:
+		return "HTTPS " + label
 	default:
 		return label
 	}
@@ -144,15 +149,29 @@ var pingHTTPPingClient = &http.Client{
 	}},
 }
 
+// pingHTTPURL fills in the mode's scheme when the site is a bare host; a full
+// URL passes through untouched, whatever its scheme.
+func pingHTTPURL(site, scheme string) string {
+	if strings.Contains(site, "://") {
+		return site
+	}
+	return scheme + "://" + site
+}
+
 // pingHTTP times one HTTP GET to the site (gen_204 style). Any HTTP response,
 // whatever its status code, is a success: connectivity is what is being
 // measured, not the page. Same return convention as pingICMP.
 func pingHTTP(site string) (int64, error) {
-	url := site
-	if !strings.Contains(url, "://") {
-		url = "http://" + url
-	}
+	return pingHTTPProbe(pingHTTPURL(site, "http"))
+}
 
+// pingHTTPS is pingHTTP with https:// as the default scheme, so the probe
+// times the TLS handshake as well as the request.
+func pingHTTPS(site string) (int64, error) {
+	return pingHTTPProbe(pingHTTPURL(site, "https"))
+}
+
+func pingHTTPProbe(url string) (int64, error) {
 	start := time.Now()
 	resp, err := pingHTTPPingClient.Get(url)
 	if err != nil {

@@ -1,5 +1,5 @@
 {
-    "config_version": 101,
+    "config_version": 102,
     "ping_site0": "1.1.1.1",
     "ping_type0": "icmp",
     "ping_site1": "photonicat.com",

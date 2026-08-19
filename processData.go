@@ -935,19 +935,23 @@ var pingProbeDeadline = pingTimeout + 500*time.Millisecond
 // slow or hanging host without touching the network. pingProbeTCP and
 // pingProbeHTTP are the other two modes' probes, vars for the same reason.
 var (
-	pingProbe     = pingICMP
-	pingProbeTCP  = pingTCP
-	pingProbeHTTP = pingHTTP
+	pingProbe      = pingICMP
+	pingProbeTCP   = pingTCP
+	pingProbeHTTP  = pingHTTP
+	pingProbeHTTPS = pingHTTPS
 )
 
 // probeForPingType picks a row's probe from its configured ping type
-// ("icmp"/"tcp"/"http"; anything else normalizes to ICMP — see pingModes.go).
+// ("icmp"/"tcp"/"http"/"https"; anything else normalizes to ICMP — see
+// pingModes.go).
 func probeForPingType(pingType string) func(string) (int64, error) {
 	switch normalizePingType(pingType) {
 	case pingTypeTCP:
 		return pingProbeTCP
 	case pingTypeHTTP:
 		return pingProbeHTTP
+	case pingTypeHTTPS:
+		return pingProbeHTTPS
 	default:
 		return pingProbe
 	}

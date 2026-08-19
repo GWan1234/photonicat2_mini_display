@@ -18,6 +18,8 @@ func TestNormalizePingType(t *testing.T) {
 		" TCP ": pingTypeTCP,
 		"http":  pingTypeHTTP,
 		"Http":  pingTypeHTTP,
+		"https": pingTypeHTTPS,
+		"HTTPS": pingTypeHTTPS,
 		"bogus": pingTypeICMP,
 	}
 	for in, want := range cases {
@@ -28,17 +30,21 @@ func TestNormalizePingType(t *testing.T) {
 }
 
 func TestProbeForPingType(t *testing.T) {
-	origICMP, origTCP, origHTTP := pingProbe, pingProbeTCP, pingProbeHTTP
-	defer func() { pingProbe, pingProbeTCP, pingProbeHTTP = origICMP, origTCP, origHTTP }()
+	origICMP, origTCP, origHTTP, origHTTPS := pingProbe, pingProbeTCP, pingProbeHTTP, pingProbeHTTPS
+	defer func() {
+		pingProbe, pingProbeTCP, pingProbeHTTP, pingProbeHTTPS = origICMP, origTCP, origHTTP, origHTTPS
+	}()
 
 	pingProbe = func(string) (int64, error) { return 1, nil }
 	pingProbeTCP = func(string) (int64, error) { return 2, nil }
 	pingProbeHTTP = func(string) (int64, error) { return 3, nil }
+	pingProbeHTTPS = func(string) (int64, error) { return 4, nil }
 
 	for in, want := range map[string]int64{
 		"icmp": 1, "": 1, "junk": 1,
-		"tcp":  2,
-		"http": 3,
+		"tcp":   2,
+		"http":  3,
+		"https": 4,
 	} {
 		got, _ := probeForPingType(in)("x")
 		if got != want {
@@ -71,6 +77,7 @@ func TestPingSiteDisplay(t *testing.T) {
 		{"google.com", "", "google.com"},
 		{"google.com", "tcp", "TCP google.com"},
 		{"google.com", "http", "HTTP google.com"},
+		{"google.com", "https", "HTTPS google.com"},
 		{"http://www.google.com/generate_204", "http", "HTTP www.google.com/generate_204"},
 		{"photonicat.com:443", "tcp", "TCP photonicat.com:443"},
 	}
@@ -167,5 +174,44 @@ func TestPingHTTPGen204(t *testing.T) {
 	ms, err = pingHTTP(bare)
 	if err != nil || ms <= 0 {
 		t.Errorf("pingHTTP(bare host) = %d, %v; want >0, nil", ms, err)
+	}
+}
+
+func TestPingHTTPURL(t *testing.T) {
+	cases := []struct{ site, scheme, want string }{
+		{"google.com", "http", "http://google.com"},
+		{"google.com", "https", "https://google.com"},
+		{"http://x.test/generate_204", "https", "http://x.test/generate_204"},
+		{"https://x.test/generate_204", "http", "https://x.test/generate_204"},
+	}
+	for _, c := range cases {
+		if got := pingHTTPURL(c.site, c.scheme); got != c.want {
+			t.Errorf("pingHTTPURL(%q, %q) = %q, want %q", c.site, c.scheme, got, c.want)
+		}
+	}
+}
+
+// TestPingHTTPSProbe drives pingHTTPS against a local TLS server. The probe
+// client is swapped for the server's own (which trusts its self-signed cert),
+// which also proves pingHTTPS routes through the shared probe path.
+func TestPingHTTPSProbe(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	orig := pingHTTPPingClient
+	pingHTTPPingClient = srv.Client()
+	defer func() { pingHTTPPingClient = orig }()
+
+	ms, err := pingHTTPS(srv.URL)
+	if err != nil || ms <= 0 {
+		t.Errorf("pingHTTPS(TLS 204) = %d, %v; want >0, nil", ms, err)
+	}
+
+	bare := strings.TrimPrefix(srv.URL, "https://")
+	ms, err = pingHTTPS(bare)
+	if err != nil || ms <= 0 {
+		t.Errorf("pingHTTPS(bare host) = %d, %v; want >0, nil (https scheme filled in)", ms, err)
 	}
 }
