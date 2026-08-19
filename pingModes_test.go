@@ -65,6 +65,22 @@ func TestPingTCPAddr(t *testing.T) {
 	}
 }
 
+func TestPingSiteDisplay(t *testing.T) {
+	cases := []struct{ site, ptype, want string }{
+		{"google.com", "icmp", "google.com"},
+		{"google.com", "", "google.com"},
+		{"google.com", "tcp", "TCP google.com"},
+		{"google.com", "http", "HTTP google.com"},
+		{"http://www.google.com/generate_204", "http", "HTTP www.google.com/generate_204"},
+		{"photonicat.com:443", "tcp", "TCP photonicat.com:443"},
+	}
+	for _, c := range cases {
+		if got := pingSiteDisplay(c.site, c.ptype); got != c.want {
+			t.Errorf("pingSiteDisplay(%q, %q) = %q, want %q", c.site, c.ptype, got, c.want)
+		}
+	}
+}
+
 func TestPingSiteLabel(t *testing.T) {
 	if got := pingSiteLabel("https://www.google.com/generate_204"); got != "www.google.com/generate_204" {
 		t.Errorf("pingSiteLabel stripped to %q", got)

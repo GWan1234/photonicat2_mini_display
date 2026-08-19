@@ -54,6 +54,22 @@ func pingSiteLabel(site string) string {
 	return site
 }
 
+// pingSiteDisplay is the ping page's site text: the scheme-stripped site,
+// prefixed with the probe mode when it is not the ICMP default — "TCP
+// google.com" / "HTTP google.com" — so the row says what kind of "up" it is
+// measuring.
+func pingSiteDisplay(site, pingType string) string {
+	label := pingSiteLabel(site)
+	switch normalizePingType(pingType) {
+	case pingTypeTCP:
+		return "TCP " + label
+	case pingTypeHTTP:
+		return "HTTP " + label
+	default:
+		return label
+	}
+}
+
 // pingTCPDefaultPort is used when the site has no explicit port. 443 rather
 // than 80 because HTTPS is the one port effectively every site answers on.
 const pingTCPDefaultPort = "443"

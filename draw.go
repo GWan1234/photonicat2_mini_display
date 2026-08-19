@@ -2816,9 +2816,9 @@ func renderMiddle(frame *image.RGBA, cfg *Config, isSMS bool, pageIdx int) {
 				key := tok[1 : len(tok)-1] // strip brackets
 				switch key {
 				case "ping_site0":
-					return pingSiteLabel(cfg.PingSite0)
+					return pingSiteDisplay(cfg.PingSite0, cfg.PingType0)
 				case "ping_site1":
-					return pingSiteLabel(cfg.PingSite1)
+					return pingSiteDisplay(cfg.PingSite1, cfg.PingType1)
 				case "ping_type0":
 					return normalizePingType(cfg.PingType0)
 				case "ping_type1":
