@@ -676,6 +676,10 @@ func setPingSites(c *fiber.Ctx) error {
 	saveUserConfigToFile() // persist
 	configMutex.Unlock()
 
+	// Rebuild merged cfg so the rows pick the change up now, not at the next
+	// restart. (Takes configMutex itself, so it must run after the Unlock.)
+	mergeConfigs()
+
 	return c.JSON(fiber.Map{"status": "ok"})
 }
 
