@@ -967,7 +967,12 @@ type pingRow struct {
 	valueKey string
 	rateKey  string
 
-	mu          sync.Mutex
+	mu sync.Mutex
+	// site/pingType are the target the counters below describe; when the
+	// config hands collect a different pair the counters restart, so the %
+	// on screen never mixes the old target's history into the new one.
+	site        string
+	pingType    string
 	total       int
 	successful  int
 	lastSuccess int64
@@ -995,6 +1000,20 @@ func (r *pingRow) collect(site, pingType string) {
 	}
 
 	probe := probeForPingType(pingType)
+
+	// A row's success rate describes one target. On a site or mode change the
+	// old counters describe the wrong thing — start them over. This sits after
+	// the CAS on purpose: only the call that actually probes may reset, so a
+	// wedged old-target probe can never publish into the fresh counters (its
+	// result is only ever published by its own collect call, which has already
+	// returned).
+	r.mu.Lock()
+	if r.site != site || r.pingType != pingType {
+		r.site, r.pingType = site, pingType
+		r.total, r.successful = 0, 0
+		r.lastSuccess = -1
+	}
+	r.mu.Unlock()
 
 	// Buffered so an abandoned probe can deliver its result and exit instead of
 	// blocking forever on a receiver that has moved on.

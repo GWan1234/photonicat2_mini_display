@@ -127,6 +127,39 @@ func TestPingClampMs(t *testing.T) {
 	}
 }
 
+// TestPingRowResetOnTargetChange: the % on screen describes one target, so
+// changing a row's site — or just its mode — restarts its counters.
+func TestPingRowResetOnTargetChange(t *testing.T) {
+	origICMP, origTCP := pingProbe, pingProbeTCP
+	defer func() { pingProbe, pingProbeTCP = origICMP, origTCP }()
+	pingProbe = func(string) (int64, error) { return 10, nil }
+	pingProbeTCP = func(string) (int64, error) { return 20, nil }
+
+	row := &pingRow{valueKey: "TestResetPing", rateKey: "TestResetRate", lastSuccess: -1}
+
+	row.collect("a.example", "icmp")
+	row.collect("a.example", "icmp")
+	if row.total != 2 || row.successful != 2 {
+		t.Fatalf("after 2 probes: total=%d successful=%d, want 2/2", row.total, row.successful)
+	}
+
+	row.collect("b.example", "icmp")
+	if row.total != 1 {
+		t.Errorf("site change: total=%d, want 1 (counters reset)", row.total)
+	}
+	if v, _ := globalData.Load("TestResetRate"); v != "100" {
+		t.Errorf("rate after site change = %v, want \"100\"", v)
+	}
+
+	row.collect("b.example", "tcp")
+	if row.total != 1 {
+		t.Errorf("mode change: total=%d, want 1 (counters reset)", row.total)
+	}
+	if v, _ := globalData.Load("TestResetPing"); v != int64(20) {
+		t.Errorf("value after mode change = %v, want 20 (tcp probe)", v)
+	}
+}
+
 // TestPingTCPHandshake drives pingTCP against a real local listener: a
 // completed handshake is a success, a closed port is a failure (not a
 // timeout).
